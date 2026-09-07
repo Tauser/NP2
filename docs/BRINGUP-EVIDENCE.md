@@ -233,3 +233,15 @@ Retained campaign result: render max=3 ms; flush_cb max=1 ms; last ciclo=0; pico
 Interpretation: the `campanha:` result was retained across the pause, proving the correction. `ciclo=0` is the last refresh before pause and is not a load peak; pico carga=2 is below the <=4 flushes/update G2 limit. The measured render and flush callback maxima are within the provisional diagnostic budget.
 Gate status: render/touch measurement path passes. The remaining Fase 2 gate is controlled flash persistence during active rendering, followed by its physical fault and recovery checks.
 ```
+
+## 2026-09-07 — Fase 2, gravação NVS pequena durante carga validada
+
+```text
+Board and port: same P4 v1.3 unit on USB Serial/JTAG COM8. C6 was not flashed.
+P4 source: commit 796b89c, FlashCoordinator diagnostic image.
+Procedure: wait for NVS diagnostic readiness; activate moving render load; after two seconds request the single NVS probe; observe for ten seconds; pause the load.
+Observed retained campaign result: render max=4 ms; flush_cb max=1 ms; last ciclo=0; pico carga=2.
+Observed persistence result: NVS diagnostic #1 completed with ESP_OK in 1 ms.
+Visual/recovery result: user observed no tearing, white frame, artifact, stall, or reboot.
+Interpretation: the coordinator's queued, small and rate-limited NVS commit passes the first interactive flash gate on this unit. It does not approve NVS compaction/erase, LittleFS write/fsync/rename/GC, C6 staging, or OTA; those operations remain maintenance-mode tests.
+```

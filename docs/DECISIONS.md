@@ -5,7 +5,8 @@ Uma decisão de arquitetura não substitui o respectivo gate físico.
 
 ## ADR-007 — Flash/render: coordenador serial e teste NVS explícito
 
-**Estado:** aceito para diagnóstico da Fase 2; comportamento em bancada pendente.
+**Estado:** aceito para diagnóstico da Fase 2; a primeira gravação pequena
+durante carga passou em bancada. Erase/GC e manutenção continuam pendentes.
 
 **Contexto:** o flash GD `0xC84019` desta placa não permite auto-suspend neste
 caminho; habilitá-lo causou boot loop. Erase de flash, busca de glyph em flash

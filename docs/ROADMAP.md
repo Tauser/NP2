@@ -81,9 +81,9 @@ compõem o início obrigatório da Fase 2.
 
 **Estado:** In progress. O touch dos cinco alvos, a campanha de 20 toques por
 alvo, a carga móvel e a retenção de métricas foram validados fisicamente. A
-amostragem automática observou memória estável, e o `FlashCoordinator` mínimo
-foi compilado para o primeiro ensaio NVS; sua validação física, operações de
-erase/GC e a política de manutenção permanecem pendentes.
+amostragem automática observou memória estável, e a primeira escrita NVS
+pequena e rate-limited pelo `FlashCoordinator` passou fisicamente sem artefato.
+Operações de erase/GC e a política de manutenção permanecem pendentes.
 
 **Objetivo:** transformar o baseline estático em uma plataforma de UI
 mensurável, sem permitir que render ou escrita em flash produzam glitches,
