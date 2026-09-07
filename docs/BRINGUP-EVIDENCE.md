@@ -183,3 +183,12 @@ Observed result: pico carga began at 4 while touching targets and then reached 5
 Diagnosis: outside the target itself, the gesture was still invalidating coordinate and status labels in distant screen regions. Their work can overlap the moving-load refresh.
 Corrective source: do not update global coordinate/status labels while render load is active; update only the touched target and its local counter. Coordinates remain available with load paused. Build passed; physical retest is pending.
 ```
+
+## 2026-09-07 — Fase 2, touch sob carga com invalidação isolada
+
+```text
+Source: user observation on the P4 image from commit 1607527.
+Procedure: active moving render load followed by touches on diagnostic targets.
+Observed result: pico carga=4.
+Gate interpretation: the touch-plus-load path meets the G2 limit of at most four flushes per update. Prior evidence also recorded no stalls across the 20-press-per-target campaign; a visual tearing/white-frame conclusion and the 30-minute memory/stack soak remain open.
+```
