@@ -30,7 +30,7 @@ Regras de execução em todas as fases:
 |---:|---|---|---|
 | 0 | G0 — reprodução | Complete | Toolchain, lock, partições e defaults reproduzem a imagem P4. |
 | 1 | G1 — boot/display mínimo | Complete — scoped close | Boot P4, PSRAM, DSI, backlight e imagem estável confirmados. Exclusões estão em Fase 2. |
-| 2 | G2 — render e flash | Ready | Touch mensurável, render sem artefatos e política segura de escrita em flash. |
+| 2 | G2 — render e flash | In progress | Touch mensurável, render sem artefatos e política segura de escrita em flash. |
 | 3 | G3 — conectividade | Blocked by G2 | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único sem bloquear UI. |
 | 4 | G4 — dados offline | Blocked by G2/G3 | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
 | 5 | G5 — OTA recuperável | Blocked by G2/G3/G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
@@ -79,7 +79,8 @@ compõem o início obrigatório da Fase 2.
 
 ## Fase 2 — Render, touch e disciplina de flash
 
-**Estado:** Ready. Esta é a fase atual e o caminho crítico imediato.
+**Estado:** In progress. A tela de diagnóstico de touch foi compilada, gravada
+e iniciou na placa; a validação física das coordenadas é o próximo sub-gate.
 
 **Objetivo:** transformar o baseline estático em uma plataforma de UI
 mensurável, sem permitir que render ou escrita em flash produzam glitches,

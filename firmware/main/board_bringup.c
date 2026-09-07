@@ -18,6 +18,7 @@
 #include "lvgl.h"
 
 #include "board_bringup.h"
+#include "diagnostic_ui.h"
 
 static const char *const TAG = "np2_bringup";
 
@@ -25,23 +26,6 @@ static const char *const TAG = "np2_bringup";
 #define NP2_BOOT_BACKLIGHT_PERCENT 60
 #define NP2_LVGL_TASK_STACK_BYTES (12U * 1024U)
 #define NP2_LVGL_TASK_PRIORITY 8U
-
-static void create_initial_screen(void)
-{
-    lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x09111F), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
-
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "NP2");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, -24);
-
-    lv_obj_t *status = lv_label_create(screen);
-    lv_label_set_text(status, "P4 display, PSRAM and touch baseline");
-    lv_obj_set_style_text_color(status, lv_color_hex(0x8FA3BF), LV_PART_MAIN);
-    lv_obj_align(status, LV_ALIGN_CENTER, 0, 36);
-}
 
 static esp_err_t verify_psram(void)
 {
@@ -131,7 +115,8 @@ esp_err_t board_bringup_start(void)
 
     const esp_lv_adapter_touch_config_t touch_cfg =
         ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(display, touch);
-    if (esp_lv_adapter_register_touch(&touch_cfg) == NULL) {
+    lv_indev_t *const touch_indev = esp_lv_adapter_register_touch(&touch_cfg);
+    if (touch_indev == NULL) {
         ESP_LOGE(TAG, "LVGL touch registration failed");
         return ESP_FAIL;
     }
@@ -140,14 +125,17 @@ esp_err_t board_bringup_start(void)
 
     /* All direct LVGL calls remain serialized by the adapter lock. */
     ESP_RETURN_ON_ERROR(esp_lv_adapter_lock(-1), TAG, "LVGL lock failed");
-    create_initial_screen();
+    err = diagnostic_ui_create(display, touch_indev);
     esp_lv_adapter_unlock();
+    if (err != ESP_OK) {
+        return err;
+    }
 
     /* Render synchronously before allowing any backlight output. */
     ESP_RETURN_ON_ERROR(esp_lv_adapter_refresh_now(display), TAG, "Initial frame refresh failed");
     ESP_RETURN_ON_ERROR(bsp_display_brightness_set(NP2_BOOT_BACKLIGHT_PERCENT), TAG,
                         "Backlight enable failed");
 
-    ESP_LOGI(TAG, "Local display baseline active: RGB565, rotation=180, triple-partial, 3 FBs");
+    ESP_LOGI(TAG, "Phase 2 touch diagnostic active: RGB565, rotation=180, triple-partial, 3 FBs");
     return ESP_OK;
 }
