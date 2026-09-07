@@ -224,3 +224,12 @@ Correction: commit e03ca70 keeps independent maxima and last cycle for render, f
 Validation: ESP-IDF build passed; np2_p4.bin is 921,072 bytes with 89% free in the smallest OTA slot. The P4 image was flashed over COM8 and each written block was hash-verified by esptool. C6 was not flashed.
 Open physical check: activate the load for a short interval and pause it; verify that the retained `campanha:` line has non-reset metrics. A new 30-minute result is required only after this behavior is confirmed.
 ```
+
+## 2026-09-07 — Fase 2, retenção de métricas da campanha validada
+
+```text
+Source: user observation on the P4 image from commit e03ca70 after activating and pausing the moving render load.
+Retained campaign result: render max=3 ms; flush_cb max=1 ms; last ciclo=0; pico carga=2.
+Interpretation: the `campanha:` result was retained across the pause, proving the correction. `ciclo=0` is the last refresh before pause and is not a load peak; pico carga=2 is below the <=4 flushes/update G2 limit. The measured render and flush callback maxima are within the provisional diagnostic budget.
+Gate status: render/touch measurement path passes. The remaining Fase 2 gate is controlled flash persistence during active rendering, followed by its physical fault and recovery checks.
+```
