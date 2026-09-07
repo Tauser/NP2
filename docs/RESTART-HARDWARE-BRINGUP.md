@@ -181,7 +181,10 @@ resposta, mesmo com os pinos de dados corretos.
 4. Manter três framebuffers por `CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3`.
 5. Usar RGB565 e render parcial; o draw buffer de 50 linhas fica em SRAM.
 6. Registrar GT911 no mesmo adapter antes da task LVGL.
-7. Corrigir touch: `x = width - 1 - x` e `y = height - 1 - y`.
+7. Com `ESP_LV_ADAPTER_ROTATE_180`, deixar o GT911 em orientação nativa
+   (`swap_xy=0`, `mirror_x=0`, `mirror_y=0`): o adapter transforma
+   `x = width - 1 - x` e `y = height - 1 - y` uma única vez. Espelhar também
+   no GT911 aplica a rotação duas vezes e troca os quatro cantos na diagonal.
 8. Renderizar o primeiro frame antes de ligar o backlight.
 
 Cada framebuffer usa `1024 × 600 × 2 = 1.228.800 B`; três usam cerca de

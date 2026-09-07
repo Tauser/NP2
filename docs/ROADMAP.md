@@ -80,7 +80,8 @@ compõem o início obrigatório da Fase 2.
 ## Fase 2 — Render, touch e disciplina de flash
 
 **Estado:** In progress. A tela de diagnóstico de touch foi compilada, gravada
-e iniciou na placa; a validação física das coordenadas é o próximo sub-gate.
+e validada fisicamente nos cinco alvos; permanecem a campanha de repetição,
+carga de render, memória/pilhas e escrita controlada em flash.
 
 **Objetivo:** transformar o baseline estático em uma plataforma de UI
 mensurável, sem permitir que render ou escrita em flash produzam glitches,
@@ -101,6 +102,10 @@ reset ou degradação de memória.
      inversão de eixos, zona morta ou toque fantasma.
    - Registrar erro máximo de coordenada e latência observada. Gesto e teclado
      entram somente quando a tela de diagnóstico suportá-los.
+   - **Evidência parcial aprovada (2026-09-07):** os quatro cantos e o centro
+     correspondem aos alvos visuais após remover o espelhamento duplicado do
+     GT911. A campanha de 20 repetições, arrasto, zonas mortas e latência ainda
+     é obrigatória para fechar este item.
 
 3. **Carga de render**
    - Exercitar padrões móveis, troca de cores, números atualizados, scroll e
