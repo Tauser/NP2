@@ -71,3 +71,13 @@ Observed panel/touch/network behavior: serial gate passed. The monitor cannot ob
 Power source and measured conditions: USB Serial/JTAG; no thermal or current measurement in this attempt.
 Pass/fail and next action: serial portion passed. Perform the documented visual/touch, tearing, flash-write, long-duration and thermal gates before declaring phase 1 complete. The C6 was not flashed.
 ```
+
+## 2026-09-07 — Physical observation for attempt 3
+
+```text
+Source: user observation on the flashed P4 baseline.
+Image/backlight/orientation: passed. The expected centered baseline text is visible and the panel is usable in its intended orientation.
+Repeated boot: passed. The board repeatedly reaches the baseline screen without the previously observed panic or reset loop.
+Not yet testable with this firmware: touch coordinates and orientation feedback, tearing under active updates, memory trend under workload, flash writes during rendering, Wi-Fi service behavior, thermal and long-duration soak.
+Gate status: image and boot sub-gates pass; phase 1 remains in progress.
+```
