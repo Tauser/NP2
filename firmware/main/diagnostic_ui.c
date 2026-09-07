@@ -3,26 +3,114 @@
  *
  * Input events are emitted from the LVGL input pipeline. The callback therefore
  * runs in the LVGL task and may update only this diagnostic view; it performs
- * no network, filesystem, NVS, or flash operation.
+ * no network, filesystem, NVS, or flash operation. Display-event timings
+ * describe LVGL rendering and flush-callback execution; they are not a DSI
+ * scan-out-complete measurement.
  */
 #include <stdio.h>
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 
 #include "diagnostic_ui.h"
 
 #define DIAG_TARGET_SIZE 104
 #define DIAG_TARGET_MARGIN 28
+#define DIAG_METRIC_PERIOD_MS 1000
+#define DIAG_STRESS_PERIOD_MS 50
+#define DIAG_STRESS_BAR_WIDTH 260
 
 typedef struct {
     lv_obj_t *coordinate_label;
     lv_obj_t *state_label;
+    lv_obj_t *memory_label;
+    lv_obj_t *render_label;
+    lv_obj_t *stress_button;
+    lv_obj_t *stress_button_label;
+    lv_obj_t *stress_bar;
+    lv_obj_t *stress_bar_label;
     lv_obj_t *targets[5];
     uint32_t sample_count;
+    uint32_t render_started_at_ms;
+    uint32_t flush_started_at_ms;
+    uint32_t last_render_ms;
+    uint32_t last_flush_callback_ms;
+    uint32_t max_flush_callback_ms;
+    uint32_t flushes_in_render;
+    uint32_t max_flushes_per_render;
+    uint16_t stress_phase;
+    bool stress_active;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
+
+static void update_telemetry(void)
+{
+    const size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t internal_largest =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    const size_t lvgl_stack_free_bytes =
+        uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+
+    lv_label_set_text_fmt(s_state.memory_label,
+                          "SRAM livre=%uK maior=%uK | PSRAM livre=%uK maior=%uK | pilha LVGL=%uB",
+                          (unsigned int)(internal_free / 1024U),
+                          (unsigned int)(internal_largest / 1024U),
+                          (unsigned int)(psram_free / 1024U),
+                          (unsigned int)(psram_largest / 1024U),
+                          (unsigned int)lvgl_stack_free_bytes);
+    lv_label_set_text_fmt(s_state.render_label,
+                          "render=%lums | flush_cb=%lums (max=%lums) | flushes/ciclo max=%lu",
+                          (unsigned long)s_state.last_render_ms,
+                          (unsigned long)s_state.last_flush_callback_ms,
+                          (unsigned long)s_state.max_flush_callback_ms,
+                          (unsigned long)s_state.max_flushes_per_render);
+}
+
+static void telemetry_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    update_telemetry();
+}
+
+static void display_event_cb(lv_event_t *event)
+{
+    const uint32_t now_ms = lv_tick_get();
+
+    switch (lv_event_get_code(event)) {
+    case LV_EVENT_REFR_START:
+        s_state.flushes_in_render = 0;
+        break;
+    case LV_EVENT_REFR_READY:
+        if (s_state.flushes_in_render > s_state.max_flushes_per_render) {
+            s_state.max_flushes_per_render = s_state.flushes_in_render;
+        }
+        break;
+    case LV_EVENT_RENDER_START:
+        s_state.render_started_at_ms = now_ms;
+        break;
+    case LV_EVENT_RENDER_READY:
+        s_state.last_render_ms = lv_tick_elaps(s_state.render_started_at_ms);
+        break;
+    case LV_EVENT_FLUSH_START:
+        s_state.flush_started_at_ms = now_ms;
+        s_state.flushes_in_render++;
+        break;
+    case LV_EVENT_FLUSH_FINISH:
+        s_state.last_flush_callback_ms = lv_tick_elaps(s_state.flush_started_at_ms);
+        if (s_state.last_flush_callback_ms > s_state.max_flush_callback_ms) {
+            s_state.max_flush_callback_ms = s_state.last_flush_callback_ms;
+        }
+        break;
+    default:
+        break;
+    }
+}
 
 static void set_target_state(lv_obj_t *target, bool active)
 {
@@ -66,6 +154,39 @@ static void touch_event_cb(lv_event_t *event)
     }
 }
 
+static void stress_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    s_state.stress_active = !s_state.stress_active;
+    lv_label_set_text(s_state.stress_button_label,
+                      s_state.stress_active ? "CARGA DE RENDER: ATIVA" : "CARGA DE RENDER: PAUSADA");
+    lv_obj_set_style_bg_color(s_state.stress_button,
+                              s_state.stress_active ? lv_color_hex(0x7A3E10) : lv_color_hex(0x183554),
+                              LV_PART_MAIN);
+    lv_label_set_text(s_state.state_label,
+                      s_state.stress_active ? "CARGA ATIVA — observe tearing, glitches e fluidez"
+                                            : "CARGA PAUSADA — toque para retomar");
+}
+
+static void stress_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!s_state.stress_active) {
+        return;
+    }
+
+    s_state.stress_phase = (uint16_t)((s_state.stress_phase + 9U) % 401U);
+    const int32_t x = 382 + (int32_t)s_state.stress_phase - 200;
+    const uint32_t hue = (uint32_t)((s_state.stress_phase * 3U) & 0xffU);
+
+    lv_obj_set_x(s_state.stress_bar, x);
+    lv_obj_set_style_bg_color(s_state.stress_bar, lv_color_hsv_to_rgb(hue, 75, 85), LV_PART_MAIN);
+    lv_label_set_text_fmt(s_state.stress_bar_label, "CARGA %03u", (unsigned int)s_state.stress_phase);
+}
+
 static lv_obj_t *create_target(lv_obj_t *parent, const char *text, lv_align_t align,
                                int32_t x_offset, int32_t y_offset)
 {
@@ -95,19 +216,52 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
     lv_obj_t *const title = lv_label_create(screen);
-    lv_label_set_text(title, "NP2  |  DIAGNOSTICO DE TOUCH");
+    lv_label_set_text(title, "NP2  |  DIAGNOSTICO DE TOUCH E RENDER");
     lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
 
     lv_obj_t *const instruction = lv_label_create(screen);
-    lv_label_set_text(instruction, "Toque os quatro cantos, o centro e arraste entre eles");
+    lv_label_set_text(instruction, "Toque os alvos; ative carga somente depois de confirmar a orientacao");
     lv_obj_set_style_text_color(instruction, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
-    lv_obj_align(instruction, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_align(instruction, LV_ALIGN_TOP_MID, 0, 42);
 
     s_state.coordinate_label = lv_label_create(screen);
     lv_label_set_text(s_state.coordinate_label, "x=--  y=--  amostras=0");
     lv_obj_set_style_text_color(s_state.coordinate_label, lv_color_hex(0x68E0B8), LV_PART_MAIN);
-    lv_obj_align(s_state.coordinate_label, LV_ALIGN_TOP_MID, 0, 86);
+    lv_obj_align(s_state.coordinate_label, LV_ALIGN_TOP_MID, 0, 68);
+
+    s_state.memory_label = lv_label_create(screen);
+    lv_label_set_text(s_state.memory_label, "SRAM/PSRAM: aguardando primeira amostra");
+    lv_obj_set_style_text_color(s_state.memory_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
+    lv_obj_align(s_state.memory_label, LV_ALIGN_TOP_MID, 0, 92);
+
+    s_state.render_label = lv_label_create(screen);
+    lv_label_set_text(s_state.render_label, "render=-- | flush_cb=-- | flushes/render max=--");
+    lv_obj_set_style_text_color(s_state.render_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
+    lv_obj_align(s_state.render_label, LV_ALIGN_TOP_MID, 0, 114);
+
+    s_state.stress_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.stress_button, 240, 34);
+    lv_obj_align(s_state.stress_button, LV_ALIGN_TOP_MID, 0, 140);
+    lv_obj_set_style_radius(s_state.stress_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.stress_button, lv_color_hex(0x183554), LV_PART_MAIN);
+    s_state.stress_button_label = lv_label_create(s_state.stress_button);
+    lv_label_set_text(s_state.stress_button_label, "CARGA DE RENDER: PAUSADA");
+    lv_obj_set_style_text_color(s_state.stress_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.stress_button_label);
+    lv_obj_add_event_cb(s_state.stress_button, stress_button_event_cb, LV_EVENT_CLICKED, NULL);
+
+    s_state.stress_bar = lv_obj_create(screen);
+    lv_obj_set_size(s_state.stress_bar, DIAG_STRESS_BAR_WIDTH, 22);
+    lv_obj_set_pos(s_state.stress_bar, 182, 188);
+    lv_obj_set_style_radius(s_state.stress_bar, 6, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.stress_bar, lv_color_hex(0x126A50), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.stress_bar, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(s_state.stress_bar, LV_OBJ_FLAG_SCROLLABLE);
+    s_state.stress_bar_label = lv_label_create(s_state.stress_bar);
+    lv_label_set_text(s_state.stress_bar_label, "CARGA PAUSADA");
+    lv_obj_set_style_text_color(s_state.stress_bar_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.stress_bar_label);
 
     s_state.state_label = lv_label_create(screen);
     lv_label_set_text(s_state.state_label, "AGUARDANDO TOQUE");
@@ -127,6 +281,16 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSED, NULL);
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSING, NULL);
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_RELEASED, NULL);
+
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_REFR_START, NULL);
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_REFR_READY, NULL);
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_RENDER_START, NULL);
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_RENDER_READY, NULL);
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_FLUSH_START, NULL);
+    lv_display_add_event_cb(display, display_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
+    lv_timer_create(telemetry_timer_cb, DIAG_METRIC_PERIOD_MS, NULL);
+    lv_timer_create(stress_timer_cb, DIAG_STRESS_PERIOD_MS, NULL);
+    update_telemetry();
 
     return ESP_OK;
 }
