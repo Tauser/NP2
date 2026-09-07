@@ -81,3 +81,12 @@ Repeated boot: passed. The board repeatedly reaches the baseline screen without 
 Not yet testable with this firmware: touch coordinates and orientation feedback, tearing under active updates, memory trend under workload, flash writes during rendering, Wi-Fi service behavior, thermal and long-duration soak.
 Gate status: image and boot sub-gates pass; phase 1 remains in progress.
 ```
+
+## 2026-09-07 — Phase 1 scope closure
+
+```text
+Decision source: explicit product-owner instruction to finalize phase 1.
+Closure basis: reproducible P4 build, successful serial baseline and physical approval of the visible screen/orientation and repeated boot.
+Known exclusions transferred to phase 2: touch coordinate/gesture test, render/tearing stress, memory trend, flash contention, thermal and long-duration behavior.
+Interpretation: this closes the minimal local P4 boot/display baseline. It does not assert that the exclusions were tested or that the product is production-ready.
+```
