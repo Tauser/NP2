@@ -147,3 +147,21 @@ Correction: commit 72ad23e records both the most recent refresh count and a peak
 Commands: idf.py build; idf.py -p COM8 flash. Result: 920,000-byte P4 image, 89% free in the 8 MiB OTA slot, with every written block hash-verified by esptool.
 Open physical result: retest ciclo and pico carga while the moving bar is active; observe visual integrity and memory trend.
 ```
+
+## 2026-09-07 — Fase 2, carga móvel com métrica isolada
+
+```text
+Source: user observation on the P4 running the image from commit 72ad23e.
+Observed under active moving load: ciclo=0–1, pico carga=3, flush_cb=0 ms and render=1 ms.
+Gate interpretation: the measured peak is within the G2 limit of at most four flushes per update. Render and flush-callback durations are within the provisional limit. A zero cycle is expected during a refresh interval with no invalidated region.
+Limit: the user did not report a visual conclusion about tearing, white frames, stalls or resets in this observation; that criterion remains open.
+```
+
+## 2026-09-07 — Fase 2, regressão de flush ao tocar o diagnóstico
+
+```text
+Source: subsequent user observation while the moving load was active on the P4 image from commit 72ad23e.
+Observed result: touching the diagnostic screen raised pico carga to 9 and the value persisted. This fails the <=4 flushes/update criterion for the diagnostic interaction path.
+Root cause: the touch callback reapplied background and border styles to all five targets for every pressed/pressing event, invalidating several disjoint rectangles.
+Corrective source: the next P4 image limits style updates to a target entering or leaving highlight, keeps coordinate-only updates during pressing, and adds a 20-valid-press counter to every target. Build passed; physical retest is pending.
+```

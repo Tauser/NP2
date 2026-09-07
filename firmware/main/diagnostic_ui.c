@@ -22,6 +22,12 @@
 #define DIAG_METRIC_PERIOD_MS 1000
 #define DIAG_STRESS_PERIOD_MS 50
 #define DIAG_STRESS_BAR_WIDTH 260
+#define DIAG_TOUCH_TARGET_COUNT 5
+#define DIAG_TOUCH_REPETITIONS_REQUIRED 20
+
+static const char *const s_target_names[DIAG_TOUCH_TARGET_COUNT] = {
+    "SE", "SD", "IE", "ID", "CENTRO",
+};
 
 typedef struct {
     lv_obj_t *coordinate_label;
@@ -32,8 +38,11 @@ typedef struct {
     lv_obj_t *stress_button_label;
     lv_obj_t *stress_bar;
     lv_obj_t *stress_bar_label;
-    lv_obj_t *targets[5];
+    lv_obj_t *targets[DIAG_TOUCH_TARGET_COUNT];
+    lv_obj_t *target_labels[DIAG_TOUCH_TARGET_COUNT];
+    lv_obj_t *highlighted_target;
     uint32_t sample_count;
+    uint8_t target_counts[DIAG_TOUCH_TARGET_COUNT];
     uint32_t render_started_at_ms;
     uint32_t flush_started_at_ms;
     uint32_t last_render_ms;
@@ -48,6 +57,42 @@ typedef struct {
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
+
+static void update_target_label(size_t index)
+{
+    lv_label_set_text_fmt(s_state.target_labels[index], "%s\n%u/%u", s_target_names[index],
+                          (unsigned int)s_state.target_counts[index],
+                          DIAG_TOUCH_REPETITIONS_REQUIRED);
+    lv_obj_center(s_state.target_labels[index]);
+}
+
+static bool all_targets_complete(void)
+{
+    for (size_t i = 0; i < DIAG_TOUCH_TARGET_COUNT; ++i) {
+        if (s_state.target_counts[i] < DIAG_TOUCH_REPETITIONS_REQUIRED) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void record_target_press(lv_obj_t *active_target)
+{
+    for (size_t i = 0; i < DIAG_TOUCH_TARGET_COUNT; ++i) {
+        if (s_state.targets[i] != active_target) {
+            continue;
+        }
+
+        if (s_state.target_counts[i] < DIAG_TOUCH_REPETITIONS_REQUIRED) {
+            s_state.target_counts[i]++;
+            update_target_label(i);
+        }
+        lv_label_set_text_fmt(s_state.state_label, "%s: %u/%u toques validos", s_target_names[i],
+                              (unsigned int)s_state.target_counts[i],
+                              DIAG_TOUCH_REPETITIONS_REQUIRED);
+        return;
+    }
+}
 
 static void update_telemetry(void)
 {
@@ -129,11 +174,32 @@ static void set_target_state(lv_obj_t *target, bool active)
                                    LV_PART_MAIN);
 }
 
+static bool is_diagnostic_target(lv_obj_t *candidate)
+{
+    for (size_t i = 0; i < DIAG_TOUCH_TARGET_COUNT; ++i) {
+        if (s_state.targets[i] == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void reset_targets_except(lv_obj_t *active_target)
 {
-    for (size_t i = 0; i < sizeof(s_state.targets) / sizeof(s_state.targets[0]); ++i) {
-        set_target_state(s_state.targets[i], s_state.targets[i] == active_target);
+    if (!is_diagnostic_target(active_target)) {
+        active_target = NULL;
     }
+    if (s_state.highlighted_target == active_target) {
+        return;
+    }
+
+    if (s_state.highlighted_target != NULL) {
+        set_target_state(s_state.highlighted_target, false);
+    }
+    if (active_target != NULL) {
+        set_target_state(active_target, true);
+    }
+    s_state.highlighted_target = active_target;
 }
 
 static void touch_event_cb(lv_event_t *event)
@@ -149,12 +215,20 @@ static void touch_event_cb(lv_event_t *event)
                               (int)point.x, (int)point.y,
                               (unsigned long)s_state.sample_count);
 
-        lv_obj_t *const active_target = lv_event_get_param(event);
-        reset_targets_except(active_target);
-        lv_label_set_text(s_state.state_label, "TOQUE ATIVO — arraste para validar o percurso");
+        if (code == LV_EVENT_PRESSED) {
+            lv_obj_t *const active_target = lv_event_get_param(event);
+            reset_targets_except(active_target);
+            record_target_press(active_target);
+            if (all_targets_complete()) {
+                lv_label_set_text(s_state.state_label,
+                                  "CAMPANHA CONCLUIDA — 20 toques por alvo");
+            }
+        }
     } else if (code == LV_EVENT_RELEASED) {
-        lv_label_set_text_fmt(s_state.state_label, "LIBERADO EM x=%d  y=%d", (int)point.x,
-                              (int)point.y);
+        if (!all_targets_complete()) {
+            lv_label_set_text_fmt(s_state.state_label, "LIBERADO EM x=%d  y=%d", (int)point.x,
+                                  (int)point.y);
+        }
         reset_targets_except(NULL);
     }
 }
@@ -203,8 +277,8 @@ static void stress_timer_cb(lv_timer_t *timer)
     lv_label_set_text_fmt(s_state.stress_bar_label, "CARGA %03u", (unsigned int)s_state.stress_phase);
 }
 
-static lv_obj_t *create_target(lv_obj_t *parent, const char *text, lv_align_t align,
-                               int32_t x_offset, int32_t y_offset)
+static lv_obj_t *create_target(lv_obj_t *parent, size_t index, lv_align_t align, int32_t x_offset,
+                               int32_t y_offset)
 {
     lv_obj_t *const target = lv_button_create(parent);
     lv_obj_set_size(target, DIAG_TARGET_SIZE, DIAG_TARGET_SIZE);
@@ -214,8 +288,9 @@ static lv_obj_t *create_target(lv_obj_t *parent, const char *text, lv_align_t al
     set_target_state(target, false);
 
     lv_obj_t *const label = lv_label_create(target);
-    lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    s_state.target_labels[index] = label;
+    update_target_label(index);
     lv_obj_center(label);
     return target;
 }
@@ -284,15 +359,11 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_text_color(s_state.state_label, lv_color_hex(0xF4C95D), LV_PART_MAIN);
     lv_obj_align(s_state.state_label, LV_ALIGN_BOTTOM_MID, 0, -22);
 
-    s_state.targets[0] = create_target(screen, "SE", LV_ALIGN_TOP_LEFT, DIAG_TARGET_MARGIN,
-                                       130);
-    s_state.targets[1] = create_target(screen, "SD", LV_ALIGN_TOP_RIGHT, -DIAG_TARGET_MARGIN,
-                                       130);
-    s_state.targets[2] = create_target(screen, "IE", LV_ALIGN_BOTTOM_LEFT, DIAG_TARGET_MARGIN,
-                                       -78);
-    s_state.targets[3] = create_target(screen, "ID", LV_ALIGN_BOTTOM_RIGHT, -DIAG_TARGET_MARGIN,
-                                       -78);
-    s_state.targets[4] = create_target(screen, "CENTRO", LV_ALIGN_CENTER, 0, 0);
+    s_state.targets[0] = create_target(screen, 0, LV_ALIGN_TOP_LEFT, DIAG_TARGET_MARGIN, 130);
+    s_state.targets[1] = create_target(screen, 1, LV_ALIGN_TOP_RIGHT, -DIAG_TARGET_MARGIN, 130);
+    s_state.targets[2] = create_target(screen, 2, LV_ALIGN_BOTTOM_LEFT, DIAG_TARGET_MARGIN, -78);
+    s_state.targets[3] = create_target(screen, 3, LV_ALIGN_BOTTOM_RIGHT, -DIAG_TARGET_MARGIN, -78);
+    s_state.targets[4] = create_target(screen, 4, LV_ALIGN_CENTER, 0, 0);
 
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSED, NULL);
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSING, NULL);
