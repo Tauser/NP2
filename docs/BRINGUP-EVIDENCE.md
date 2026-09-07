@@ -245,3 +245,13 @@ Observed persistence result: NVS diagnostic #1 completed with ESP_OK in 1 ms.
 Visual/recovery result: user observed no tearing, white frame, artifact, stall, or reboot.
 Interpretation: the coordinator's queued, small and rate-limited NVS commit passes the first interactive flash gate on this unit. It does not approve NVS compaction/erase, LittleFS write/fsync/rename/GC, C6 staging, or OTA; those operations remain maintenance-mode tests.
 ```
+
+## 2026-09-07 — Fase 2, primeira tentativa de manutenção NVS (transição visual reprovada)
+
+```text
+P4 source: commit 4f06385. C6 was not flashed.
+Observed operation result: NVS maintenance #2 returned ESP_OK after 64 blob commits in 623 ms; free NVS entries were 988 before and after the batch.
+Observed visual result: while the user held the original long-press trigger, the panel blinked several times, then became partially dark, then returned to normal. No further artifact or reboot occurred.
+Gate interpretation: the NVS batch completed, but its visual transition fails the maintenance criterion. A blanked-backlight interval is permitted only when explicitly announced and controlled; repeated blinking is not approved.
+Corrective source: replace the long press with an arm-then-confirm two-touch flow; render the maintenance notice for 750 ms, turn off the backlight, wait 500 ms for PWM settling, then begin the NVS batch. Physical retest remains pending.
+```

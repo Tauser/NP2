@@ -74,6 +74,7 @@ typedef struct {
     bool soak_baseline_captured;
     bool completed_campaign_available;
     bool maintenance_arming;
+    bool maintenance_armed;
     bool maintenance_requested;
     bool maintenance_restore_armed;
 } diagnostic_ui_state_t;
@@ -243,6 +244,7 @@ static void maintenance_arm_timer_cb(lv_timer_t *timer)
                           "NVS manutencao: backlight sera desligado para GC");
     } else {
         s_state.maintenance_requested = false;
+        s_state.maintenance_armed = false;
         lv_obj_remove_state(s_state.stress_button, LV_STATE_DISABLED);
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "NVS manutencao recusada: %s", esp_err_to_name(request_err));
@@ -256,9 +258,10 @@ static void maintenance_restore_timer_cb(lv_timer_t *timer)
     if (restore_err == ESP_OK) {
         flash_coordinator_complete_maintenance_visual_recovery();
         s_state.maintenance_restore_armed = false;
+        s_state.maintenance_armed = false;
         s_state.maintenance_requested = false;
         lv_obj_remove_state(s_state.stress_button, LV_STATE_DISABLED);
-        lv_label_set_text(s_state.flash_probe_button_label, "NVS PROBE / SEGURE P/ MANUT.");
+        lv_label_set_text(s_state.flash_probe_button_label, "NVS EM CARGA / MANUT.");
         update_flash_status_label();
     } else {
         lv_label_set_text_fmt(s_state.flash_status_label,
@@ -270,28 +273,27 @@ static void maintenance_restore_timer_cb(lv_timer_t *timer)
 static void flash_probe_button_event_cb(lv_event_t *event)
 {
     const lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_LONG_PRESSED) {
-        if (s_state.stress_active) {
-            lv_label_set_text(s_state.flash_status_label,
-                              "NVS manutencao: pause a carga antes de segurar");
-        } else if (!s_state.maintenance_requested) {
-            s_state.maintenance_arming = true;
-            s_state.maintenance_requested = true;
-            lv_obj_add_state(s_state.stress_button, LV_STATE_DISABLED);
-            lv_label_set_text(s_state.flash_probe_button_label, "MANUTENCAO: PREPARANDO");
-            lv_label_set_text(s_state.flash_status_label,
-                              "NVS manutencao: preparando frame de recuperacao");
-            lv_timer_create(maintenance_arm_timer_cb, 150, NULL);
-        }
-        return;
-    }
     if (code != LV_EVENT_CLICKED || s_state.maintenance_arming || s_state.maintenance_requested) {
         return;
     }
 
-    if (!s_state.stress_active) {
+    if (!s_state.stress_active && !s_state.maintenance_armed) {
+        s_state.maintenance_armed = true;
+        lv_label_set_text(s_state.flash_probe_button_label, "MANUT. ARMADA — TOQUE DE NOVO");
         lv_label_set_text(s_state.flash_status_label,
-                          "NVS diagnostico: ative a carga antes da solicitacao");
+                          "NVS manutencao armada: proximo toque apaga a tela");
+        return;
+    }
+
+    if (!s_state.stress_active) {
+        s_state.maintenance_armed = false;
+        s_state.maintenance_arming = true;
+        s_state.maintenance_requested = true;
+        lv_obj_add_state(s_state.stress_button, LV_STATE_DISABLED);
+        lv_label_set_text(s_state.flash_probe_button_label, "MANUTENCAO: PREPARANDO");
+        lv_label_set_text(s_state.flash_status_label,
+                          "NVS manutencao: frame pronto; apagando antes do GC");
+        lv_timer_create(maintenance_arm_timer_cb, 750, NULL);
         return;
     }
 
@@ -573,11 +575,10 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_radius(s_state.flash_probe_button, 8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.flash_probe_button, lv_color_hex(0x5A3A12), LV_PART_MAIN);
     s_state.flash_probe_button_label = lv_label_create(s_state.flash_probe_button);
-    lv_label_set_text(s_state.flash_probe_button_label, "NVS PROBE / SEGURE P/ MANUT.");
+    lv_label_set_text(s_state.flash_probe_button_label, "NVS EM CARGA / MANUT.");
     lv_obj_set_style_text_color(s_state.flash_probe_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
     lv_obj_center(s_state.flash_probe_button_label);
     lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_LONG_PRESSED, NULL);
 
     s_state.flash_status_label = lv_label_create(screen);
     lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: inicializando");

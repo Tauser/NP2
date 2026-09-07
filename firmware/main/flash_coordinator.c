@@ -158,6 +158,8 @@ static void flash_worker_task(void *arg)
             recovery_required = true;
             result = board_bringup_set_backlight_percent(0);
             if (result == ESP_OK) {
+                /* Allow the PWM-controlled backlight to settle before SPI1 traffic. */
+                vTaskDelay(pdMS_TO_TICKS(500));
                 result = commit_nvs_compaction_probe(request.sequence, &batch_writes,
                                                       &free_entries_before, &free_entries_after);
             }
