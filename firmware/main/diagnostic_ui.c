@@ -52,6 +52,13 @@ typedef struct {
     uint32_t flushes_in_render;
     uint32_t last_flushes_per_refresh;
     uint32_t peak_flushes_under_stress;
+    uint32_t peak_render_ms_under_stress;
+    uint32_t peak_flush_callback_ms_under_stress;
+    uint32_t last_flushes_under_stress;
+    uint32_t completed_peak_render_ms;
+    uint32_t completed_peak_flush_callback_ms;
+    uint32_t completed_last_flushes;
+    uint32_t completed_peak_flushes;
     size_t soak_start_internal_free;
     size_t soak_start_psram_free;
     size_t soak_min_internal_free;
@@ -60,6 +67,7 @@ typedef struct {
     bool stress_active;
     bool stress_measurement_started;
     bool soak_baseline_captured;
+    bool completed_campaign_available;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
@@ -153,13 +161,22 @@ static void update_telemetry(bool update_view)
                               "soak: ative carga para capturar base | pilha LVGL=%uB",
                               (unsigned int)lvgl_stack_free_bytes);
     }
-    lv_label_set_text_fmt(s_state.render_label,
-                          "render=%lums | flush_cb=%lums (max=%lums) | ciclo=%lu | pico carga=%lu",
-                          (unsigned long)s_state.last_render_ms,
-                          (unsigned long)s_state.last_flush_callback_ms,
-                          (unsigned long)s_state.max_flush_callback_ms,
-                          (unsigned long)s_state.last_flushes_per_refresh,
-                          (unsigned long)s_state.peak_flushes_under_stress);
+    if (s_state.completed_campaign_available && !s_state.stress_active) {
+        lv_label_set_text_fmt(s_state.render_label,
+                              "campanha: render max=%lums | flush_cb max=%lums | ciclo=%lu | pico carga=%lu",
+                              (unsigned long)s_state.completed_peak_render_ms,
+                              (unsigned long)s_state.completed_peak_flush_callback_ms,
+                              (unsigned long)s_state.completed_last_flushes,
+                              (unsigned long)s_state.completed_peak_flushes);
+    } else {
+        lv_label_set_text_fmt(s_state.render_label,
+                              "render=%lums | flush_cb=%lums (max=%lums) | ciclo=%lu | pico carga=%lu",
+                              (unsigned long)s_state.last_render_ms,
+                              (unsigned long)s_state.last_flush_callback_ms,
+                              (unsigned long)s_state.max_flush_callback_ms,
+                              (unsigned long)s_state.last_flushes_per_refresh,
+                              (unsigned long)s_state.peak_flushes_under_stress);
+    }
 }
 
 static void telemetry_timer_cb(lv_timer_t *timer)
@@ -178,9 +195,11 @@ static void display_event_cb(lv_event_t *event)
         break;
     case LV_EVENT_REFR_READY:
         s_state.last_flushes_per_refresh = s_state.flushes_in_render;
-        if (s_state.stress_measurement_started &&
-            s_state.flushes_in_render > s_state.peak_flushes_under_stress) {
-            s_state.peak_flushes_under_stress = s_state.flushes_in_render;
+        if (s_state.stress_measurement_started) {
+            s_state.last_flushes_under_stress = s_state.flushes_in_render;
+            if (s_state.flushes_in_render > s_state.peak_flushes_under_stress) {
+                s_state.peak_flushes_under_stress = s_state.flushes_in_render;
+            }
         }
         break;
     case LV_EVENT_RENDER_START:
@@ -188,6 +207,10 @@ static void display_event_cb(lv_event_t *event)
         break;
     case LV_EVENT_RENDER_READY:
         s_state.last_render_ms = lv_tick_elaps(s_state.render_started_at_ms);
+        if (s_state.stress_measurement_started &&
+            s_state.last_render_ms > s_state.peak_render_ms_under_stress) {
+            s_state.peak_render_ms_under_stress = s_state.last_render_ms;
+        }
         break;
     case LV_EVENT_FLUSH_START:
         s_state.flush_started_at_ms = now_ms;
@@ -197,6 +220,10 @@ static void display_event_cb(lv_event_t *event)
         s_state.last_flush_callback_ms = lv_tick_elaps(s_state.flush_started_at_ms);
         if (s_state.last_flush_callback_ms > s_state.max_flush_callback_ms) {
             s_state.max_flush_callback_ms = s_state.last_flush_callback_ms;
+        }
+        if (s_state.stress_measurement_started &&
+            s_state.last_flush_callback_ms > s_state.peak_flush_callback_ms_under_stress) {
+            s_state.peak_flush_callback_ms_under_stress = s_state.last_flush_callback_ms;
         }
         break;
     default:
@@ -277,10 +304,22 @@ static void stress_button_event_cb(lv_event_t *event)
         return;
     }
 
-    s_state.stress_active = !s_state.stress_active;
-    s_state.stress_measurement_started = false;
-    s_state.peak_flushes_under_stress = 0;
     if (s_state.stress_active) {
+        s_state.completed_campaign_available = s_state.stress_measurement_started;
+        s_state.completed_peak_render_ms = s_state.peak_render_ms_under_stress;
+        s_state.completed_peak_flush_callback_ms = s_state.peak_flush_callback_ms_under_stress;
+        s_state.completed_last_flushes = s_state.last_flushes_under_stress;
+        s_state.completed_peak_flushes = s_state.peak_flushes_under_stress;
+        s_state.stress_active = false;
+        s_state.stress_measurement_started = false;
+    } else {
+        s_state.stress_active = true;
+        s_state.stress_measurement_started = false;
+        s_state.peak_flushes_under_stress = 0;
+        s_state.peak_render_ms_under_stress = 0;
+        s_state.peak_flush_callback_ms_under_stress = 0;
+        s_state.last_flushes_under_stress = 0;
+        s_state.completed_campaign_available = false;
         capture_soak_baseline();
     }
     lv_label_set_text(s_state.stress_button_label,
