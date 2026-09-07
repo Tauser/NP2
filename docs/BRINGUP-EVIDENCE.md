@@ -174,3 +174,12 @@ Physical result: no stalls occurred and every target completed its 20 valid pres
 Observed metric under active moving load: pico carga=6. This remains above the <=4 flushes/update criterion, so the render/touch combined path is not approved.
 Follow-up correction: retain the current target highlight after release, do not invalidate it on release, and update coordinate text only on the initial pressed event. Build passed; a new physical retest is pending.
 ```
+
+## 2026-09-07 — Fase 2, terceira medição de flush no caminho touch+carga
+
+```text
+Source: user observation on the P4 image from commit 02b5ea0.
+Observed result: pico carga began at 4 while touching targets and then reached 5. This still fails the <=4 criterion.
+Diagnosis: outside the target itself, the gesture was still invalidating coordinate and status labels in distant screen regions. Their work can overlap the moving-load refresh.
+Corrective source: do not update global coordinate/status labels while render load is active; update only the touched target and its local counter. Coordinates remain available with load paused. Build passed; physical retest is pending.
+```

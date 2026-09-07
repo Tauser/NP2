@@ -87,9 +87,6 @@ static void record_target_press(lv_obj_t *active_target)
             s_state.target_counts[i]++;
             update_target_label(i);
         }
-        lv_label_set_text_fmt(s_state.state_label, "%s: %u/%u toques validos", s_target_names[i],
-                              (unsigned int)s_state.target_counts[i],
-                              DIAG_TOUCH_REPETITIONS_REQUIRED);
         return;
     }
 }
@@ -213,13 +210,15 @@ static void touch_event_cb(lv_event_t *event)
         s_state.sample_count++;
 
         if (code == LV_EVENT_PRESSED) {
-            lv_label_set_text_fmt(s_state.coordinate_label, "x=%d  y=%d  amostras=%lu",
-                                  (int)point.x, (int)point.y,
-                                  (unsigned long)s_state.sample_count);
+            if (!s_state.stress_active) {
+                lv_label_set_text_fmt(s_state.coordinate_label, "x=%d  y=%d  amostras=%lu",
+                                      (int)point.x, (int)point.y,
+                                      (unsigned long)s_state.sample_count);
+            }
             lv_obj_t *const active_target = lv_event_get_param(event);
             reset_targets_except(active_target);
             record_target_press(active_target);
-            if (all_targets_complete()) {
+            if (all_targets_complete() && !s_state.stress_active) {
                 lv_label_set_text(s_state.state_label,
                                   "CAMPANHA CONCLUIDA — 20 toques por alvo");
             }
