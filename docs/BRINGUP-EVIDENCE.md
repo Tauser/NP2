@@ -137,3 +137,13 @@ Diagnostic scope: the screen exposes internal/PSRAM free and largest blocks, LVG
 Known measurement limit: flush_cb measures only LVGL's flush callback. It is not a DSI scan-out-complete measurement because the current adapter reports on_frame_buf_complete unavailable.
 Open physical result: metric visibility, moving-load fluency, tearing/glitch observation and time-based memory trend are pending.
 ```
+
+## 2026-09-07 — Fase 2, correção da métrica de flush por ciclo
+
+```text
+Physical observation on cd89030: render measured 1 ms and flush_cb 0–1 ms. The displayed lifetime maximum was 12 flushes/cycle.
+Interpretation: the 12 corresponds to the first full 1024x600 render split by the fixed 50-line partial draw buffer (600 / 50 = 12). It cannot represent the small moving-load cycle and must not be compared to the <=4 flushes/update load criterion.
+Correction: commit 72ad23e records both the most recent refresh count and a peak that is reset for each activated render-load campaign; the measurement begins after load activation. It does not alter display buffers, adapter mode, flash policy or the C6.
+Commands: idf.py build; idf.py -p COM8 flash. Result: 920,000-byte P4 image, 89% free in the 8 MiB OTA slot, with every written block hash-verified by esptool.
+Open physical result: retest ciclo and pico carga while the moving bar is active; observe visual integrity and memory trend.
+```
