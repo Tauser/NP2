@@ -215,3 +215,12 @@ Flash/boot result: esptool hash-verified the P4 image. Serial boot identified ap
 Instrumentation: activating the moving render load captures initial internal-SRAM and PSRAM free sizes, samples their low-water marks every second without redrawing telemetry during the load, and shows baseline deltas/minima only after the user pauses the load. The LVGL-task stack high-water mark is shown with the result.
 Measurement intent: the next 30-minute run will establish a comparable memory trend while preserving the <=4 flushes/update measurement. The prior visual soak remains valid; no claim about memory stability is added until its automatic result is recorded.
 ```
+
+## 2026-09-07 — Fase 2, correção de retenção do resultado da campanha
+
+```text
+Observation on the first automatic-soak run: the displayed SRAM and PSRAM deltas were +0 KiB and their minima equaled the baseline; LVGL stack high-water mark was 6,944 B. However, pausing reset pico carga before the result was rendered. The displayed render/flush/cycle values after pause therefore included the pause UI's own invalidation and cannot qualify the active render path.
+Correction: commit e03ca70 keeps independent maxima and last cycle for render, flush callback and flushes per refresh while the load is active. On pause it snapshots those values before issuing pause-related LVGL invalidations and renders a `campanha:` result line.
+Validation: ESP-IDF build passed; np2_p4.bin is 921,072 bytes with 89% free in the smallest OTA slot. The P4 image was flashed over COM8 and each written block was hash-verified by esptool. C6 was not flashed.
+Open physical check: activate the load for a short interval and pause it; verify that the retained `campanha:` line has non-reset metrics. A new 30-minute result is required only after this behavior is confirmed.
+```
