@@ -1,0 +1,16 @@
+{
+  "cmake.configureOnOpen": false,
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
+  "files.associations": {
+    "*.inc": "cpp",
+    "*.ipp": "cpp"
+  },
+  "search.exclude": {
+    "**/build": true,
+    "**/managed_components": true
+  },
+  "files.exclude": {
+    "**/build": true,
+    "**/managed_components": true
+  }
+}

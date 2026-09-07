@@ -1,0 +1,28 @@
+# ESP-IDF / CMake outputs
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.*.old
+managed_components/
+
+# VS Code machine-specific state
+.vscode/ipch/
+.vscode/.browse.VC.db*
+.vscode/*.log
+
+# Device and release material
+*.bin
+*.elf
+*.map
+*.core
+*.coredump
+logs/
+artifacts/
+keys/
+credentials/
+secrets/
+
+# Local environment overrides
+.env
+.env.*
+*.local

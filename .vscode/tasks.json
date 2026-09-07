@@ -1,0 +1,39 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "NP2: Build P4",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["build"],
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": "$gcc",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "NP2: Clean build P4",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["fullclean", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "NP2: Verify partition table",
+      "type": "shell",
+      "command": "idf.py",
+      "args": ["partition-table"],
+      "options": {
+        "cwd": "${workspaceFolder}/firmware"
+      },
+      "problemMatcher": "$gcc"
+    }
+  ]
+}

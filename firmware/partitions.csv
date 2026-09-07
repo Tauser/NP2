@@ -1,0 +1,11 @@
+# Name,     Type, SubType,   Offset,    Size,    Flags
+nvs,        data, nvs,       0x11000,   0x8000,
+nvs_keys,   data, nvs_keys, ,           0x1000,
+phy_init,   data, phy,      ,           0x1000,
+otadata,    data, ota,      ,           0x2000,
+# Keep OTA applications aligned to the 64 KiB MMU page size for Secure Boot V2.
+ota_0,      app,  ota_0,     0x20000,   8M,
+ota_1,      app,  ota_1,    ,           8M,
+storage,    data, spiffs,   ,           9M,
+coredump,   data, coredump, ,           1M,
+c6_ota,     data, 0x40,     ,           2M,
