@@ -124,3 +124,16 @@ Serial/flash result: P4 image with the corrected GT911 transform was built succe
 Physical result: user retested the five targets. Center and every visual corner activated its matching label (SE->SE, SD->SD, IE->IE, ID->ID).
 Gate interpretation: coordinate orientation for the five targets passes. Repeatability (20 touches per point), drag path, ghost-touch, latency and input controls remain open in G2.
 ```
+
+## 2026-09-07 — Fase 2, instrumentação de render e memória (boot confirmado)
+
+```text
+Board and port: same P4 v1.3 unit, USB Serial/JTAG COM8.
+P4 source: commit cd89030. C6 was not flashed and its existing image was preserved.
+Commands: idf.py build; idf.py -p COM8 flash; idf.py -p COM8 monitor.
+Build/flash result: np2_p4.bin is 919,904 bytes; 89% remains free in the smallest 8 MiB OTA partition; esptool hash-verified every written block.
+Serial result: P4 v1.3 booted the image, found 32 MiB PSRAM, initialized EK79007, GT911 at 0x5d and the LVGL task. The unchanged C6 transport initialized as SDIO 4-bit with reset GPIO54. No panic occurred during the boot capture.
+Diagnostic scope: the screen exposes internal/PSRAM free and largest blocks, LVGL task stack high-water mark, render duration, flush-callback duration and maximum flushes per refresh. The optional small moving render load is paused on boot and performs no flash, NVS, filesystem or network operation.
+Known measurement limit: flush_cb measures only LVGL's flush callback. It is not a DSI scan-out-complete measurement because the current adapter reports on_frame_buf_complete unavailable.
+Open physical result: metric visibility, moving-load fluency, tearing/glitch observation and time-based memory trend are pending.
+```
