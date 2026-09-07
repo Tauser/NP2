@@ -1,6 +1,9 @@
 #include "esp_app_desc.h"
 #include "esp_chip_info.h"
+#include "esp_err.h"
 #include "esp_log.h"
+
+#include "board_bringup.h"
 
 static const char *const TAG = "np2_boot";
 
@@ -15,5 +18,16 @@ void app_main(void)
     ESP_LOGI(TAG, "app=%s, version=%s", esp_app_get_description()->project_name,
              esp_app_get_description()->version);
 
-    /* Hardware initialization begins only after the reproducibility gate closes. */
+    const esp_err_t bringup_err = board_bringup_start();
+    if (bringup_err != ESP_OK) {
+        /*
+         * Do not retry panel initialization in a tight loop. The physical gate
+         * needs the first failure log, and recovery policy will be added only
+         * after this baseline is proven on the target board.
+         */
+        ESP_LOGE(TAG, "P4 local bring-up stopped: %s", esp_err_to_name(bringup_err));
+        return;
+    }
+
+    ESP_LOGI(TAG, "P4 local bring-up ready; network services are not configured yet");
 }
