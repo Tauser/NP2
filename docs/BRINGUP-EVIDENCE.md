@@ -165,3 +165,12 @@ Observed result: touching the diagnostic screen raised pico carga to 9 and the v
 Root cause: the touch callback reapplied background and border styles to all five targets for every pressed/pressing event, invalidating several disjoint rectangles.
 Corrective source: the next P4 image limits style updates to a target entering or leaving highlight, keeps coordinate-only updates during pressing, and adds a 20-valid-press counter to every target. Build passed; physical retest is pending.
 ```
+
+## 2026-09-07 — Fase 2, repetibilidade de touch e segunda regressão de flush
+
+```text
+Source: user observation on the P4 image from commit bfe389f.
+Physical result: no stalls occurred and every target completed its 20 valid presses. This supports repeatable target acquisition in the diagnostic layout.
+Observed metric under active moving load: pico carga=6. This remains above the <=4 flushes/update criterion, so the render/touch combined path is not approved.
+Follow-up correction: retain the current target highlight after release, do not invalidate it on release, and update coordinate text only on the initial pressed event. Build passed; a new physical retest is pending.
+```

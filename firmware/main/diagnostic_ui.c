@@ -211,11 +211,11 @@ static void touch_event_cb(lv_event_t *event)
 
     if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
         s_state.sample_count++;
-        lv_label_set_text_fmt(s_state.coordinate_label, "x=%d  y=%d  amostras=%lu",
-                              (int)point.x, (int)point.y,
-                              (unsigned long)s_state.sample_count);
 
         if (code == LV_EVENT_PRESSED) {
+            lv_label_set_text_fmt(s_state.coordinate_label, "x=%d  y=%d  amostras=%lu",
+                                  (int)point.x, (int)point.y,
+                                  (unsigned long)s_state.sample_count);
             lv_obj_t *const active_target = lv_event_get_param(event);
             reset_targets_except(active_target);
             record_target_press(active_target);
@@ -224,12 +224,6 @@ static void touch_event_cb(lv_event_t *event)
                                   "CAMPANHA CONCLUIDA — 20 toques por alvo");
             }
         }
-    } else if (code == LV_EVENT_RELEASED) {
-        if (!all_targets_complete()) {
-            lv_label_set_text_fmt(s_state.state_label, "LIBERADO EM x=%d  y=%d", (int)point.x,
-                                  (int)point.y);
-        }
-        reset_targets_except(NULL);
     }
 }
 
@@ -367,7 +361,6 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSED, NULL);
     lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_PRESSING, NULL);
-    lv_indev_add_event_cb(touch_indev, touch_event_cb, LV_EVENT_RELEASED, NULL);
 
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_REFR_START, NULL);
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_REFR_READY, NULL);
