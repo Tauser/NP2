@@ -40,9 +40,11 @@ typedef struct {
     uint32_t last_flush_callback_ms;
     uint32_t max_flush_callback_ms;
     uint32_t flushes_in_render;
-    uint32_t max_flushes_per_render;
+    uint32_t last_flushes_per_refresh;
+    uint32_t peak_flushes_under_stress;
     uint16_t stress_phase;
     bool stress_active;
+    bool stress_measurement_started;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
@@ -65,11 +67,12 @@ static void update_telemetry(void)
                           (unsigned int)(psram_largest / 1024U),
                           (unsigned int)lvgl_stack_free_bytes);
     lv_label_set_text_fmt(s_state.render_label,
-                          "render=%lums | flush_cb=%lums (max=%lums) | flushes/ciclo max=%lu",
+                          "render=%lums | flush_cb=%lums (max=%lums) | ciclo=%lu | pico carga=%lu",
                           (unsigned long)s_state.last_render_ms,
                           (unsigned long)s_state.last_flush_callback_ms,
                           (unsigned long)s_state.max_flush_callback_ms,
-                          (unsigned long)s_state.max_flushes_per_render);
+                          (unsigned long)s_state.last_flushes_per_refresh,
+                          (unsigned long)s_state.peak_flushes_under_stress);
 }
 
 static void telemetry_timer_cb(lv_timer_t *timer)
@@ -87,8 +90,10 @@ static void display_event_cb(lv_event_t *event)
         s_state.flushes_in_render = 0;
         break;
     case LV_EVENT_REFR_READY:
-        if (s_state.flushes_in_render > s_state.max_flushes_per_render) {
-            s_state.max_flushes_per_render = s_state.flushes_in_render;
+        s_state.last_flushes_per_refresh = s_state.flushes_in_render;
+        if (s_state.stress_measurement_started &&
+            s_state.flushes_in_render > s_state.peak_flushes_under_stress) {
+            s_state.peak_flushes_under_stress = s_state.flushes_in_render;
         }
         break;
     case LV_EVENT_RENDER_START:
@@ -161,6 +166,8 @@ static void stress_button_event_cb(lv_event_t *event)
     }
 
     s_state.stress_active = !s_state.stress_active;
+    s_state.stress_measurement_started = false;
+    s_state.peak_flushes_under_stress = 0;
     lv_label_set_text(s_state.stress_button_label,
                       s_state.stress_active ? "CARGA DE RENDER: ATIVA" : "CARGA DE RENDER: PAUSADA");
     lv_obj_set_style_bg_color(s_state.stress_button,
@@ -169,6 +176,9 @@ static void stress_button_event_cb(lv_event_t *event)
     lv_label_set_text(s_state.state_label,
                       s_state.stress_active ? "CARGA ATIVA — observe tearing, glitches e fluidez"
                                             : "CARGA PAUSADA — toque para retomar");
+    if (!s_state.stress_active) {
+        lv_label_set_text(s_state.stress_bar_label, "CARGA PAUSADA");
+    }
 }
 
 static void stress_timer_cb(lv_timer_t *timer)
@@ -176,6 +186,12 @@ static void stress_timer_cb(lv_timer_t *timer)
     (void)timer;
     if (!s_state.stress_active) {
         return;
+    }
+
+    /* Start after the button's own invalidation has completed. */
+    if (!s_state.stress_measurement_started) {
+        s_state.peak_flushes_under_stress = 0;
+        s_state.stress_measurement_started = true;
     }
 
     s_state.stress_phase = (uint16_t)((s_state.stress_phase + 9U) % 401U);
