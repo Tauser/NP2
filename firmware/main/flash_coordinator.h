@@ -13,14 +13,10 @@ typedef struct {
     bool ready;
     bool busy;
     bool pending;
-    bool maintenance_recovery_required;
     uint32_t completed_count;
     uint32_t rejected_count;
     uint32_t last_sequence;
     uint32_t last_duration_ms;
-    uint32_t last_batch_writes;
-    uint32_t last_free_entries_before;
-    uint32_t last_free_entries_after;
     esp_err_t init_result;
     esp_err_t last_result;
 } flash_coordinator_status_t;
@@ -33,11 +29,6 @@ esp_err_t flash_coordinator_start(void);
  */
 esp_err_t flash_coordinator_request_nvs_probe(void);
 
-/* Explicit maintenance-only batch intended to exercise NVS page rotation/GC. */
-esp_err_t flash_coordinator_request_nvs_compaction_probe(void);
-
-/* Called by the LVGL task after it has rendered the recovery screen. */
-void flash_coordinator_complete_maintenance_visual_recovery(void);
 
 /* Safe from the LVGL task; returns a short critical-section snapshot. */
 void flash_coordinator_get_status(flash_coordinator_status_t *out_status);

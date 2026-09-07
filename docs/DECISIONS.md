@@ -5,8 +5,8 @@ Uma decisão de arquitetura não substitui o respectivo gate físico.
 
 ## ADR-007 — Flash/render: coordenador serial e teste NVS explícito
 
-**Estado:** aceito para diagnóstico da Fase 2; a primeira gravação pequena
-durante carga passou em bancada. Erase/GC e manutenção continuam pendentes.
+**Estado:** a primeira gravação pequena durante carga passou em bancada.
+Compactação/erase NVS foi reprovada por piscadas repetidas e está bloqueada.
 
 **Contexto:** o flash GD `0xC84019` desta placa não permite auto-suspend neste
 caminho; habilitá-lo causou boot loop. Erase de flash, busca de glyph em flash
@@ -21,11 +21,10 @@ vez por minuto. O callback LVGL apenas enfileira a intenção; a task LVGL é a
 única que apresenta seu resultado. Falha de inicialização ou saturação recusa
 a solicitação e preserva o estado existente.
 
-**Consequências:** a escrita NVS durante carga móvel precisa de evidência física
-de ausência de artefato, reset e perda de responsividade antes de virar caminho
-interativo do produto. Erase, GC, LittleFS, staging C6 e OTA continuam fora do
-modo interativo. Eles exigirão modo de manutenção explícito, inclusive a
-política de backlight e recuperação após a região crítica.
+**Consequências:** a escrita NVS pequena durante carga móvel passou, mas erase,
+GC, LittleFS, staging C6 e OTA continuam bloqueados. Eles não voltam ao produto
+por tentativa de UI; exigem uma alternativa de plataforma medida, como XiP em
+PSRAM numa variante isolada, ou mudança de armazenamento/BOM.
 
 **Alternativas rejeitadas neste estágio:** auto-suspend (falha já observada),
 escrita direta por callback de toque (viola ownership e dificulta recuperação),

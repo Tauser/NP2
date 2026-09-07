@@ -255,3 +255,12 @@ Observed visual result: while the user held the original long-press trigger, the
 Gate interpretation: the NVS batch completed, but its visual transition fails the maintenance criterion. A blanked-backlight interval is permitted only when explicitly announced and controlled; repeated blinking is not approved.
 Corrective source: replace the long press with an arm-then-confirm two-touch flow; render the maintenance notice for 750 ms, turn off the backlight, wait 500 ms for PWM settling, then begin the NVS batch. Physical retest remains pending.
 ```
+
+## 2026-09-07 — Fase 2, reteste de manutenção NVS (reprovado)
+
+```text
+Observed operation result: NVS maintenance #2 returned ESP_OK after 64 writes in 1,141 ms; free NVS entries remained 988>988.
+Observed visual result: the panel again showed several flashes during the operation. No reset or subsequent artifact was reported.
+Gate interpretation: repeated flashing persists after the two-touch transition and the 500 ms backlight-settling interval. The cause is therefore not approved as a UI gesture artifact; NVS compaction/erase on this MSPI/display configuration is blocked.
+Containment: remove the maintenance/compaction action from the diagnostic UI and coordinator. Retain only the physically approved small, queued, rate-limited NVS commit during active render. Treat cache as RAM-only until a separately measured platform alternative passes.
+```

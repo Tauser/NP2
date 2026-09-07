@@ -8,8 +8,6 @@
  */
 #include "flash_coordinator.h"
 
-#include "board_bringup.h"
-
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -23,8 +21,6 @@
 #define FLASH_COORDINATOR_TASK_STACK_BYTES 6144
 #define FLASH_COORDINATOR_TASK_PRIORITY 2
 #define FLASH_COORDINATOR_NVS_MIN_INTERVAL_US (60LL * 1000LL * 1000LL)
-#define FLASH_COORDINATOR_NVS_COMPACTION_WRITES 64U
-#define FLASH_COORDINATOR_NVS_COMPACTION_BLOB_BYTES 512U
 
 static const char *const TAG = "flash_coord";
 static const char *const NVS_PARTITION = "nvs";
@@ -33,7 +29,6 @@ static const char *const NVS_KEY = "probe_seq";
 
 typedef enum {
     FLASH_REQUEST_NVS_PROBE,
-    FLASH_REQUEST_NVS_COMPACTION_PROBE,
 } flash_request_kind_t;
 
 typedef struct {
@@ -54,19 +49,13 @@ static void set_busy(bool busy, bool pending)
     portEXIT_CRITICAL(&s_status_lock);
 }
 
-static void complete_request(uint32_t sequence, esp_err_t result, uint32_t duration_ms,
-                             uint32_t batch_writes, uint32_t free_entries_before,
-                             uint32_t free_entries_after, bool recovery_required)
+static void complete_request(uint32_t sequence, esp_err_t result, uint32_t duration_ms)
 {
     portENTER_CRITICAL(&s_status_lock);
     s_status.busy = false;
     s_status.pending = false;
     s_status.last_sequence = sequence;
     s_status.last_duration_ms = duration_ms;
-    s_status.last_batch_writes = batch_writes;
-    s_status.last_free_entries_before = free_entries_before;
-    s_status.last_free_entries_after = free_entries_after;
-    s_status.maintenance_recovery_required = recovery_required;
     s_status.last_result = result;
     if (result == ESP_OK) {
         s_status.completed_count++;
@@ -74,42 +63,6 @@ static void complete_request(uint32_t sequence, esp_err_t result, uint32_t durat
         s_status.rejected_count++;
     }
     portEXIT_CRITICAL(&s_status_lock);
-}
-
-static esp_err_t commit_nvs_compaction_probe(uint32_t sequence, uint32_t *out_writes,
-                                              uint32_t *out_free_before,
-                                              uint32_t *out_free_after)
-{
-    nvs_stats_t stats = {0};
-    ESP_RETURN_ON_ERROR(nvs_get_stats(NVS_PARTITION, &stats), TAG, "NVS stats before failed");
-    *out_free_before = stats.free_entries;
-
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open_from_partition(NVS_PARTITION, NVS_NAMESPACE, NVS_READWRITE, &handle);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    static uint8_t payload[FLASH_COORDINATOR_NVS_COMPACTION_BLOB_BYTES];
-    for (uint32_t write_index = 0; write_index < FLASH_COORDINATOR_NVS_COMPACTION_WRITES; ++write_index) {
-        for (size_t byte_index = 0; byte_index < sizeof(payload); ++byte_index) {
-            payload[byte_index] = (uint8_t)(sequence + write_index + byte_index);
-        }
-        err = nvs_set_blob(handle, "gc_probe", payload, sizeof(payload));
-        if (err == ESP_OK) {
-            err = nvs_commit(handle);
-        }
-        if (err != ESP_OK) {
-            break;
-        }
-        (*out_writes)++;
-    }
-    nvs_close(handle);
-
-    if (nvs_get_stats(NVS_PARTITION, &stats) == ESP_OK) {
-        *out_free_after = stats.free_entries;
-    }
-    return err;
 }
 
 static esp_err_t commit_nvs_probe(uint32_t sequence)
@@ -149,23 +102,7 @@ static void flash_worker_task(void *arg)
     while (xQueueReceive(s_request_queue, &request, portMAX_DELAY) == pdTRUE) {
         set_busy(true, false);
         const int64_t started_us = esp_timer_get_time();
-        uint32_t batch_writes = 0;
-        uint32_t free_entries_before = 0;
-        uint32_t free_entries_after = 0;
-        bool recovery_required = false;
-        esp_err_t result;
-        if (request.kind == FLASH_REQUEST_NVS_COMPACTION_PROBE) {
-            recovery_required = true;
-            result = board_bringup_set_backlight_percent(0);
-            if (result == ESP_OK) {
-                /* Allow the PWM-controlled backlight to settle before SPI1 traffic. */
-                vTaskDelay(pdMS_TO_TICKS(500));
-                result = commit_nvs_compaction_probe(request.sequence, &batch_writes,
-                                                      &free_entries_before, &free_entries_after);
-            }
-        } else {
-            result = commit_nvs_probe(request.sequence);
-        }
+        const esp_err_t result = commit_nvs_probe(request.sequence);
         const uint32_t duration_ms = (uint32_t)((esp_timer_get_time() - started_us) / 1000LL);
         if (result == ESP_OK) {
             portENTER_CRITICAL(&s_status_lock);
@@ -176,8 +113,7 @@ static void flash_worker_task(void *arg)
         } else {
             ESP_LOGE(TAG, "diagnostic NVS commit failed: %s", esp_err_to_name(result));
         }
-        complete_request(request.sequence, result, duration_ms, batch_writes,
-                         free_entries_before, free_entries_after, recovery_required);
+        complete_request(request.sequence, result, duration_ms);
     }
 }
 
@@ -243,36 +179,6 @@ esp_err_t flash_coordinator_request_nvs_probe(void)
     }
     set_busy(false, true);
     return ESP_OK;
-}
-
-esp_err_t flash_coordinator_request_nvs_compaction_probe(void)
-{
-    if (s_request_queue == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    flash_coordinator_status_t status;
-    flash_coordinator_get_status(&status);
-    if (!status.ready || status.busy || status.pending || status.maintenance_recovery_required) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    const flash_request_t request = {
-        .kind = FLASH_REQUEST_NVS_COMPACTION_PROBE,
-        .sequence = status.last_sequence + 1U,
-    };
-    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
-        return ESP_ERR_TIMEOUT;
-    }
-    set_busy(false, true);
-    return ESP_OK;
-}
-
-void flash_coordinator_complete_maintenance_visual_recovery(void)
-{
-    portENTER_CRITICAL(&s_status_lock);
-    s_status.maintenance_recovery_required = false;
-    portEXIT_CRITICAL(&s_status_lock);
 }
 
 void flash_coordinator_get_status(flash_coordinator_status_t *out_status)

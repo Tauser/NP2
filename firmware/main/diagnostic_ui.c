@@ -16,7 +16,6 @@
 #include "lvgl.h"
 
 #include "diagnostic_ui.h"
-#include "board_bringup.h"
 #include "flash_coordinator.h"
 
 #define DIAG_TARGET_SIZE 104
@@ -73,16 +72,9 @@ typedef struct {
     bool stress_measurement_started;
     bool soak_baseline_captured;
     bool completed_campaign_available;
-    bool maintenance_arming;
-    bool maintenance_armed;
-    bool maintenance_requested;
-    bool maintenance_restore_armed;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
-
-static void maintenance_arm_timer_cb(lv_timer_t *timer);
-static void maintenance_restore_timer_cb(lv_timer_t *timer);
 
 static void update_target_label(size_t index)
 {
@@ -132,37 +124,17 @@ static void update_flash_status_label(void)
     flash_coordinator_status_t status = {0};
     flash_coordinator_get_status(&status);
 
-    if (status.maintenance_recovery_required) {
-        lv_label_set_text_fmt(s_state.flash_status_label,
-                              "NVS manutencao #%lu: %s; recuperando tela",
-                              (unsigned long)status.last_sequence,
-                              esp_err_to_name(status.last_result));
-        if (!s_state.maintenance_restore_armed) {
-            s_state.maintenance_restore_armed = true;
-            lv_timer_create(maintenance_restore_timer_cb, 300, NULL);
-        }
-    } else if (!status.ready) {
+    if (!status.ready) {
         lv_label_set_text_fmt(s_state.flash_status_label, "NVS diagnostico: indisponivel (%s)",
                               esp_err_to_name(status.init_result));
     } else if (status.busy || status.pending) {
         lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: solicitacao em andamento");
     } else if (status.completed_count > 0U) {
-        if (status.last_batch_writes > 0U) {
-            lv_label_set_text_fmt(s_state.flash_status_label,
-                                  "NVS manutencao #%lu: %s %lu writes %lums livre %lu>%lu",
-                                  (unsigned long)status.last_sequence,
-                                  esp_err_to_name(status.last_result),
-                                  (unsigned long)status.last_batch_writes,
-                                  (unsigned long)status.last_duration_ms,
-                                  (unsigned long)status.last_free_entries_before,
-                                  (unsigned long)status.last_free_entries_after);
-        } else {
-            lv_label_set_text_fmt(s_state.flash_status_label,
-                                  "NVS diagnostico #%lu: %s em %lums",
-                                  (unsigned long)status.last_sequence,
-                                  esp_err_to_name(status.last_result),
-                                  (unsigned long)status.last_duration_ms);
-        }
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "NVS diagnostico #%lu: %s em %lums",
+                              (unsigned long)status.last_sequence,
+                              esp_err_to_name(status.last_result),
+                              (unsigned long)status.last_duration_ms);
     } else {
         lv_label_set_text(s_state.flash_status_label,
                           "NVS diagnostico pronto: uma solicitacao por minuto");
@@ -234,66 +206,16 @@ static void update_telemetry(bool update_view)
     }
 }
 
-static void maintenance_arm_timer_cb(lv_timer_t *timer)
-{
-    lv_timer_delete(timer);
-    s_state.maintenance_arming = false;
-    const esp_err_t request_err = flash_coordinator_request_nvs_compaction_probe();
-    if (request_err == ESP_OK) {
-        lv_label_set_text(s_state.flash_status_label,
-                          "NVS manutencao: backlight sera desligado para GC");
-    } else {
-        s_state.maintenance_requested = false;
-        s_state.maintenance_armed = false;
-        lv_obj_remove_state(s_state.stress_button, LV_STATE_DISABLED);
-        lv_label_set_text_fmt(s_state.flash_status_label,
-                              "NVS manutencao recusada: %s", esp_err_to_name(request_err));
-    }
-}
-
-static void maintenance_restore_timer_cb(lv_timer_t *timer)
-{
-    lv_timer_delete(timer);
-    const esp_err_t restore_err = board_bringup_set_backlight_percent(60);
-    if (restore_err == ESP_OK) {
-        flash_coordinator_complete_maintenance_visual_recovery();
-        s_state.maintenance_restore_armed = false;
-        s_state.maintenance_armed = false;
-        s_state.maintenance_requested = false;
-        lv_obj_remove_state(s_state.stress_button, LV_STATE_DISABLED);
-        lv_label_set_text(s_state.flash_probe_button_label, "NVS EM CARGA / MANUT.");
-        update_flash_status_label();
-    } else {
-        lv_label_set_text_fmt(s_state.flash_status_label,
-                              "NVS manutencao: falha ao restaurar luz: %s",
-                              esp_err_to_name(restore_err));
-    }
-}
-
 static void flash_probe_button_event_cb(lv_event_t *event)
 {
     const lv_event_code_t code = lv_event_get_code(event);
-    if (code != LV_EVENT_CLICKED || s_state.maintenance_arming || s_state.maintenance_requested) {
-        return;
-    }
-
-    if (!s_state.stress_active && !s_state.maintenance_armed) {
-        s_state.maintenance_armed = true;
-        lv_label_set_text(s_state.flash_probe_button_label, "MANUT. ARMADA — TOQUE DE NOVO");
-        lv_label_set_text(s_state.flash_status_label,
-                          "NVS manutencao armada: proximo toque apaga a tela");
+    if (code != LV_EVENT_CLICKED) {
         return;
     }
 
     if (!s_state.stress_active) {
-        s_state.maintenance_armed = false;
-        s_state.maintenance_arming = true;
-        s_state.maintenance_requested = true;
-        lv_obj_add_state(s_state.stress_button, LV_STATE_DISABLED);
-        lv_label_set_text(s_state.flash_probe_button_label, "MANUTENCAO: PREPARANDO");
         lv_label_set_text(s_state.flash_status_label,
-                          "NVS manutencao: frame pronto; apagando antes do GC");
-        lv_timer_create(maintenance_arm_timer_cb, 750, NULL);
+                          "Manutencao NVS bloqueada: erase/GC causa piscadas");
         return;
     }
 
@@ -575,7 +497,7 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_radius(s_state.flash_probe_button, 8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.flash_probe_button, lv_color_hex(0x5A3A12), LV_PART_MAIN);
     s_state.flash_probe_button_label = lv_label_create(s_state.flash_probe_button);
-    lv_label_set_text(s_state.flash_probe_button_label, "NVS EM CARGA / MANUT.");
+    lv_label_set_text(s_state.flash_probe_button_label, "NVS PROBE DURANTE CARGA");
     lv_obj_set_style_text_color(s_state.flash_probe_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
     lv_obj_center(s_state.flash_probe_button_label);
     lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_CLICKED, NULL);
