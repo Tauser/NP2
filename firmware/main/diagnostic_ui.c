@@ -33,6 +33,7 @@ typedef struct {
     lv_obj_t *coordinate_label;
     lv_obj_t *state_label;
     lv_obj_t *memory_label;
+    lv_obj_t *memory_campaign_label;
     lv_obj_t *render_label;
     lv_obj_t *stress_button;
     lv_obj_t *stress_button_label;
@@ -51,9 +52,14 @@ typedef struct {
     uint32_t flushes_in_render;
     uint32_t last_flushes_per_refresh;
     uint32_t peak_flushes_under_stress;
+    size_t soak_start_internal_free;
+    size_t soak_start_psram_free;
+    size_t soak_min_internal_free;
+    size_t soak_min_psram_free;
     uint16_t stress_phase;
     bool stress_active;
     bool stress_measurement_started;
+    bool soak_baseline_captured;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
@@ -91,7 +97,17 @@ static void record_target_press(lv_obj_t *active_target)
     }
 }
 
-static void update_telemetry(void)
+static void capture_soak_baseline(void)
+{
+    s_state.soak_start_internal_free =
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    s_state.soak_start_psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    s_state.soak_min_internal_free = s_state.soak_start_internal_free;
+    s_state.soak_min_psram_free = s_state.soak_start_psram_free;
+    s_state.soak_baseline_captured = true;
+}
+
+static void update_telemetry(bool update_view)
 {
     const size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     const size_t internal_largest =
@@ -101,13 +117,42 @@ static void update_telemetry(void)
     const size_t lvgl_stack_free_bytes =
         uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
 
+    if (s_state.soak_baseline_captured) {
+        if (internal_free < s_state.soak_min_internal_free) {
+            s_state.soak_min_internal_free = internal_free;
+        }
+        if (psram_free < s_state.soak_min_psram_free) {
+            s_state.soak_min_psram_free = psram_free;
+        }
+    }
+
+    if (!update_view) {
+        return;
+    }
+
     lv_label_set_text_fmt(s_state.memory_label,
-                          "SRAM livre=%uK maior=%uK | PSRAM livre=%uK maior=%uK | pilha LVGL=%uB",
+                          "SRAM livre=%uK maior=%uK | PSRAM livre=%uK maior=%uK",
                           (unsigned int)(internal_free / 1024U),
                           (unsigned int)(internal_largest / 1024U),
                           (unsigned int)(psram_free / 1024U),
-                          (unsigned int)(psram_largest / 1024U),
-                          (unsigned int)lvgl_stack_free_bytes);
+                          (unsigned int)(psram_largest / 1024U));
+    if (s_state.soak_baseline_captured) {
+        const long internal_delta_kib =
+            ((long)internal_free - (long)s_state.soak_start_internal_free) / 1024L;
+        const long psram_delta_kib =
+            ((long)psram_free - (long)s_state.soak_start_psram_free) / 1024L;
+        lv_label_set_text_fmt(s_state.memory_campaign_label,
+                              "soak: SRAM %+ldK min=%uK | PSRAM %+ldK min=%uK | pilha LVGL=%uB",
+                              internal_delta_kib,
+                              (unsigned int)(s_state.soak_min_internal_free / 1024U),
+                              psram_delta_kib,
+                              (unsigned int)(s_state.soak_min_psram_free / 1024U),
+                              (unsigned int)lvgl_stack_free_bytes);
+    } else {
+        lv_label_set_text_fmt(s_state.memory_campaign_label,
+                              "soak: ative carga para capturar base | pilha LVGL=%uB",
+                              (unsigned int)lvgl_stack_free_bytes);
+    }
     lv_label_set_text_fmt(s_state.render_label,
                           "render=%lums | flush_cb=%lums (max=%lums) | ciclo=%lu | pico carga=%lu",
                           (unsigned long)s_state.last_render_ms,
@@ -120,7 +165,7 @@ static void update_telemetry(void)
 static void telemetry_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    update_telemetry();
+    update_telemetry(!s_state.stress_active);
 }
 
 static void display_event_cb(lv_event_t *event)
@@ -235,6 +280,9 @@ static void stress_button_event_cb(lv_event_t *event)
     s_state.stress_active = !s_state.stress_active;
     s_state.stress_measurement_started = false;
     s_state.peak_flushes_under_stress = 0;
+    if (s_state.stress_active) {
+        capture_soak_baseline();
+    }
     lv_label_set_text(s_state.stress_button_label,
                       s_state.stress_active ? "CARGA DE RENDER: ATIVA" : "CARGA DE RENDER: PAUSADA");
     lv_obj_set_style_bg_color(s_state.stress_button,
@@ -245,6 +293,7 @@ static void stress_button_event_cb(lv_event_t *event)
                                             : "CARGA PAUSADA — toque para retomar");
     if (!s_state.stress_active) {
         lv_label_set_text(s_state.stress_bar_label, "CARGA PAUSADA");
+        update_telemetry(true);
     }
 }
 
@@ -319,14 +368,19 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_text_color(s_state.memory_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
     lv_obj_align(s_state.memory_label, LV_ALIGN_TOP_MID, 0, 92);
 
+    s_state.memory_campaign_label = lv_label_create(screen);
+    lv_label_set_text(s_state.memory_campaign_label, "soak: aguardando primeira amostra");
+    lv_obj_set_style_text_color(s_state.memory_campaign_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
+    lv_obj_align(s_state.memory_campaign_label, LV_ALIGN_TOP_MID, 0, 114);
+
     s_state.render_label = lv_label_create(screen);
     lv_label_set_text(s_state.render_label, "render=-- | flush_cb=-- | flushes/render max=--");
     lv_obj_set_style_text_color(s_state.render_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
-    lv_obj_align(s_state.render_label, LV_ALIGN_TOP_MID, 0, 114);
+    lv_obj_align(s_state.render_label, LV_ALIGN_TOP_MID, 0, 136);
 
     s_state.stress_button = lv_button_create(screen);
     lv_obj_set_size(s_state.stress_button, 240, 34);
-    lv_obj_align(s_state.stress_button, LV_ALIGN_TOP_MID, 0, 140);
+    lv_obj_align(s_state.stress_button, LV_ALIGN_TOP_MID, 0, 160);
     lv_obj_set_style_radius(s_state.stress_button, 8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.stress_button, lv_color_hex(0x183554), LV_PART_MAIN);
     s_state.stress_button_label = lv_label_create(s_state.stress_button);
@@ -337,7 +391,7 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     s_state.stress_bar = lv_obj_create(screen);
     lv_obj_set_size(s_state.stress_bar, DIAG_STRESS_BAR_WIDTH, 22);
-    lv_obj_set_pos(s_state.stress_bar, 182, 188);
+    lv_obj_set_pos(s_state.stress_bar, 182, 208);
     lv_obj_set_style_radius(s_state.stress_bar, 6, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.stress_bar, lv_color_hex(0x126A50), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_state.stress_bar, 0, LV_PART_MAIN);
@@ -369,7 +423,6 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
     lv_timer_create(telemetry_timer_cb, DIAG_METRIC_PERIOD_MS, NULL);
     lv_timer_create(stress_timer_cb, DIAG_STRESS_PERIOD_MS, NULL);
-    update_telemetry();
 
     return ESP_OK;
 }
