@@ -144,3 +144,8 @@ esp_err_t board_bringup_start(void)
     ESP_LOGI(TAG, "Phase 2 touch diagnostic active: RGB565, rotation=180, triple-partial, 3 FBs");
     return ESP_OK;
 }
+
+esp_err_t board_bringup_set_backlight_percent(int percent)
+{
+    return bsp_display_brightness_set(percent);
+}

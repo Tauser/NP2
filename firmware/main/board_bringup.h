@@ -12,6 +12,9 @@ extern "C" {
 
 esp_err_t board_bringup_start(void);
 
+/* The FlashCoordinator may blank the panel during an explicitly requested erase/GC test. */
+esp_err_t board_bringup_set_backlight_percent(int percent);
+
 #ifdef __cplusplus
 }
 #endif
