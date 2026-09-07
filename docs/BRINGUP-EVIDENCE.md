@@ -193,12 +193,13 @@ Observed result: pico carga=4.
 Gate interpretation: the touch-plus-load path meets the G2 limit of at most four flushes per update. Prior evidence also recorded no stalls across the 20-press-per-target campaign; a visual tearing/white-frame conclusion and the 30-minute memory/stack soak remain open.
 ```
 
-## 2026-09-07 — Fase 2, linha de base para soak de memória
+## 2026-09-07 — Fase 2, resultado do soak de render de 30 minutos
 
 ```text
-Source: user observation on the active diagnostic screen before the final 30-minute comparison.
+Source: user observation on the active diagnostic screen after 30 minutes with moving render load.
 SRAM free=320 KiB; largest internal block=248 KiB.
 PSRAM free=29,158 KiB; largest PSRAM block=28,672 KiB.
 LVGL task high-water mark=6,944 B.
-Interpretation: this is a baseline observation only. The G2 soak gate remains open until it is compared to a post-load observation and visual/reboot status.
+Visual and recovery result: no tearing, white frame, other artifact or reboot was observed.
+Interpretation: the render soak is visually stable for 30 minutes. A comparable pre-soak memory sample was not captured, so memory-leak trend remains an open G2 item and requires a repeat with baseline and post-soak values.
 ```
