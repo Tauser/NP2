@@ -4,6 +4,7 @@
 #include "esp_log.h"
 
 #include "board_bringup.h"
+#include "flash_coordinator.h"
 
 static const char *const TAG = "np2_boot";
 
@@ -27,6 +28,11 @@ void app_main(void)
          */
         ESP_LOGE(TAG, "P4 local bring-up stopped: %s", esp_err_to_name(bringup_err));
         return;
+    }
+
+    const esp_err_t flash_coordinator_err = flash_coordinator_start();
+    if (flash_coordinator_err != ESP_OK) {
+        ESP_LOGE(TAG, "Flash coordinator unavailable: %s", esp_err_to_name(flash_coordinator_err));
     }
 
     ESP_LOGI(TAG, "P4 local bring-up ready; network services are not configured yet");

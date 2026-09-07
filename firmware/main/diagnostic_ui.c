@@ -16,6 +16,7 @@
 #include "lvgl.h"
 
 #include "diagnostic_ui.h"
+#include "flash_coordinator.h"
 
 #define DIAG_TARGET_SIZE 104
 #define DIAG_TARGET_MARGIN 28
@@ -39,6 +40,9 @@ typedef struct {
     lv_obj_t *stress_button_label;
     lv_obj_t *stress_bar;
     lv_obj_t *stress_bar_label;
+    lv_obj_t *flash_probe_button;
+    lv_obj_t *flash_probe_button_label;
+    lv_obj_t *flash_status_label;
     lv_obj_t *targets[DIAG_TOUCH_TARGET_COUNT];
     lv_obj_t *target_labels[DIAG_TOUCH_TARGET_COUNT];
     lv_obj_t *highlighted_target;
@@ -115,6 +119,28 @@ static void capture_soak_baseline(void)
     s_state.soak_baseline_captured = true;
 }
 
+static void update_flash_status_label(void)
+{
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+
+    if (!status.ready) {
+        lv_label_set_text_fmt(s_state.flash_status_label, "NVS diagnostico: indisponivel (%s)",
+                              esp_err_to_name(status.init_result));
+    } else if (status.busy || status.pending) {
+        lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: solicitacao em andamento");
+    } else if (status.completed_count > 0U) {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "NVS diagnostico #%lu: %s em %lums",
+                              (unsigned long)status.last_sequence,
+                              esp_err_to_name(status.last_result),
+                              (unsigned long)status.last_duration_ms);
+    } else {
+        lv_label_set_text(s_state.flash_status_label,
+                          "NVS diagnostico pronto: uma solicitacao por minuto");
+    }
+}
+
 static void update_telemetry(bool update_view)
 {
     const size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -161,6 +187,7 @@ static void update_telemetry(bool update_view)
                               "soak: ative carga para capturar base | pilha LVGL=%uB",
                               (unsigned int)lvgl_stack_free_bytes);
     }
+    update_flash_status_label();
     if (s_state.completed_campaign_available && !s_state.stress_active) {
         lv_label_set_text_fmt(s_state.render_label,
                               "campanha: render max=%lums | flush_cb max=%lums | ciclo=%lu | pico carga=%lu",
@@ -176,6 +203,29 @@ static void update_telemetry(bool update_view)
                               (unsigned long)s_state.max_flush_callback_ms,
                               (unsigned long)s_state.last_flushes_per_refresh,
                               (unsigned long)s_state.peak_flushes_under_stress);
+    }
+}
+
+static void flash_probe_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    if (!s_state.stress_active) {
+        lv_label_set_text(s_state.flash_status_label,
+                          "NVS diagnostico: ative a carga antes da solicitacao");
+        return;
+    }
+
+    const esp_err_t request_err = flash_coordinator_request_nvs_probe();
+    if (request_err == ESP_OK) {
+        lv_label_set_text(s_state.flash_probe_button_label, "NVS: SOLICITADO");
+        lv_label_set_text(s_state.flash_status_label,
+                          "NVS diagnostico: aguardando worker de flash");
+    } else {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "NVS diagnostico recusado: %s", esp_err_to_name(request_err));
     }
 }
 
@@ -439,6 +489,22 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_label_set_text(s_state.stress_bar_label, "CARGA PAUSADA");
     lv_obj_set_style_text_color(s_state.stress_bar_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
     lv_obj_center(s_state.stress_bar_label);
+
+    s_state.flash_probe_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.flash_probe_button, 248, 30);
+    lv_obj_align(s_state.flash_probe_button, LV_ALIGN_TOP_MID, 0, 376);
+    lv_obj_set_style_radius(s_state.flash_probe_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.flash_probe_button, lv_color_hex(0x5A3A12), LV_PART_MAIN);
+    s_state.flash_probe_button_label = lv_label_create(s_state.flash_probe_button);
+    lv_label_set_text(s_state.flash_probe_button_label, "NVS PROBE DURANTE CARGA");
+    lv_obj_set_style_text_color(s_state.flash_probe_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.flash_probe_button_label);
+    lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_CLICKED, NULL);
+
+    s_state.flash_status_label = lv_label_create(screen);
+    lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: inicializando");
+    lv_obj_set_style_text_color(s_state.flash_status_label, lv_color_hex(0xF4C95D), LV_PART_MAIN);
+    lv_obj_align(s_state.flash_status_label, LV_ALIGN_TOP_MID, 0, 412);
 
     s_state.state_label = lv_label_create(screen);
     lv_label_set_text(s_state.state_label, "AGUARDANDO TOQUE");
