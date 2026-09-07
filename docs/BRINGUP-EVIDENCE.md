@@ -203,3 +203,15 @@ LVGL task high-water mark=6,944 B.
 Visual and recovery result: no tearing, white frame, other artifact or reboot was observed.
 Interpretation: the render soak is visually stable for 30 minutes. A comparable pre-soak memory sample was not captured, so memory-leak trend remains an open G2 item and requires a repeat with baseline and post-soak values.
 ```
+
+## 2026-09-07 — Fase 2, instrumentação automática para o segundo soak
+
+```text
+P4 source and flashed image: commit 011d8aa; np2_p4.bin SHA-256
+8170F3873DDED4EAF4B5B91714BD1E63D97E88C7D2349B36920EC61A24982A24.
+Effective sdkconfig SHA-256: 9E3F69952675A24BC6C8A6847075292B1D4A9F6168B143D7CF35224B13318225.
+Commands: idf.py build; idf.py reconfigure; idf.py -p COM8 flash; idf.py -p COM8 monitor.
+Flash/boot result: esptool hash-verified the P4 image. Serial boot identified app version 011d8aa, P4 revision v1.3, 32 MiB flash, 32 MiB PSRAM at 200 MHz, EK79007, GT911 0x5d, LVGL, and the existing C6 Hosted SDIO link. C6 was not flashed.
+Instrumentation: activating the moving render load captures initial internal-SRAM and PSRAM free sizes, samples their low-water marks every second without redrawing telemetry during the load, and shows baseline deltas/minima only after the user pauses the load. The LVGL-task stack high-water mark is shown with the result.
+Measurement intent: the next 30-minute run will establish a comparable memory trend while preserving the <=4 flushes/update measurement. The prior visual soak remains valid; no claim about memory stability is added until its automatic result is recorded.
+```
