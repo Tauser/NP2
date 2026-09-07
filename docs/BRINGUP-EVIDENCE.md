@@ -103,3 +103,11 @@ Serial result: build passed; flash blocks verified by esptool; EK79007, GT911 0x
 Diagnostic function: five on-screen targets and LVGL input-device events report x/y coordinates and sample count without storage, network or flash I/O.
 Open physical result: touch points and rendered target geometry still require direct observation on the panel; do not mark touch orientation or G2 complete from this serial result.
 ```
+## 2026-09-07 — Fase 2, correção de orientação do touch pendente de reteste
+
+- **Placa:** Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 revision v1.3, flash 32 MiB, PSRAM 32 MiB.
+- **Firmware observado:** `8339a83` (`Fase 2: adicionar diagnostico de touch`).
+- **Procedimento:** foram tocados os cinco alvos do diagnóstico com a tela em rotação de 180°.
+- **Resultado observado:** o centro coincidiu; os quatro cantos foram invertidos nos dois eixos: SE acionou ID, IE acionou SD, SD acionou IE e ID acionou SE.
+- **Diagnóstico:** o `esp_lvgl_adapter` já mapeia o ponteiro para o display em rotação de 180°. Os espelhos `mirror_x` e `mirror_y` adicionais no GT911 aplicavam uma segunda rotação.
+- **Correção proposta:** manter `swap_xy=0`, `mirror_x=0` e `mirror_y=0` no GT911; a próxima gravação e reteste em bancada são necessários antes de aprovar o gate de touch.

@@ -102,12 +102,17 @@ esp_err_t board_bringup_start(void)
         return ESP_FAIL;
     }
 
-    /* The BSP default is exactly x=width-1-x and y=height-1-y for rotation 180. */
+    /*
+     * The adapter maps pointer coordinates for its rotated display. Applying
+     * the GT911 180-degree mirror here as well rotates input twice: a physical
+     * top-left touch then reaches the bottom-right widget. Keep the controller
+     * in its native orientation and let the display adapter own this mapping.
+     */
     const bsp_touch_config_t touch_transform = {
         .flags = {
             .swap_xy = 0,
-            .mirror_x = 1,
-            .mirror_y = 1,
+            .mirror_x = 0,
+            .mirror_y = 0,
         },
     };
     esp_lcd_touch_handle_t touch = NULL;
