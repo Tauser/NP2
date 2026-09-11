@@ -3,9 +3,16 @@
 ## Ambiente suportado
 
 Use VS Code com a extensão **Espressif IDF**, ESP-IDF **5.5.4** e a toolchain
-instalada pela própria extensão/instalador Espressif. Abra `D:\Projetos\NP2`
-como a pasta raiz do workspace. As recomendações de extensões e tarefas
-compartilháveis estão em `.vscode/`.
+instalada pela própria extensão/instalador Espressif. Para comandos, monitor e
+depuração da extensão, abra `D:\Projetos\NP2\firmware` como a pasta do
+workspace: é onde está o `CMakeLists.txt` do projeto ESP-IDF. A raiz
+`D:\Projetos\NP2` pode continuar aberta em outra janela para documentação e
+tarefas compartilháveis, mas não é um projeto ESP-IDF diretamente.
+
+Para manter as duas visões na mesma janela, prefira abrir
+`D:\Projetos\NP2\NP2.code-workspace`. Ele inclui a raiz do repositório e
+`firmware/` como pastas separadas, com `firmware/` primeiro; a extensão
+Espressif e CMake Tools devem usar a primeira para descobrir o projeto P4.
 
 No VS Code, selecione a instalação ESP-IDF 5.5.4 e abra um terminal ESP-IDF.
 Não versionar caminhos como `C:\esp\...`: cada desenvolvedor configura o seu

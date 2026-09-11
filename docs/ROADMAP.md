@@ -30,10 +30,10 @@ Regras de execução em todas as fases:
 |---:|---|---|---|
 | 0 | G0 — reprodução | Complete | Toolchain, lock, partições e defaults reproduzem a imagem P4. |
 | 1 | G1 — boot/display mínimo | Complete — scoped close | Boot P4, PSRAM, DSI, backlight e imagem estável confirmados. Exclusões estão em Fase 2. |
-| 2 | G2 — render e flash | In progress | Touch mensurável, render sem artefatos e política segura de escrita em flash. |
-| 3 | G3 — conectividade | Blocked by G2 | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único sem bloquear UI. |
-| 4 | G4 — dados offline | Blocked by G2/G3 | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
-| 5 | G5 — OTA recuperável | Blocked by G2/G3/G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
+| 2 | G2 — render e flash | Complete — scoped close | Touch, render, NVS e LittleFS sob carga passaram na placa com XiP em PSRAM. |
+| 3 | G3 — conectividade | Complete — scoped close | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único operaram sem interromper UI no escopo desta unidade. |
+| 4 | G4 — dados offline | Ready | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
+| 5 | G5 — OTA recuperável | Blocked by G3/G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
 | 6 | G6 — qualificação | Blocked by G0–G5 | Soak, térmica, energia, falhas e desempenho em unidades de amostra. |
 | 7 | G7 — produção | Blocked by G6 | Segurança de produção, fábrica, assistência e rollout operacional. |
 
@@ -79,11 +79,20 @@ compõem o início obrigatório da Fase 2.
 
 ## Fase 2 — Render, touch e disciplina de flash
 
-**Estado:** In progress. O touch dos cinco alvos, a campanha de 20 toques por
-alvo, a carga móvel e a retenção de métricas foram validados fisicamente. A
-amostragem automática observou memória estável, e a primeira escrita NVS
-pequena e rate-limited pelo `FlashCoordinator` passou fisicamente sem artefato.
-Operações de erase/GC e a política de manutenção permanecem pendentes.
+**Estado:** Complete — scoped close em 2026-09-08. O touch dos cinco alvos, a
+campanha de 20 toques por alvo, a carga móvel e a retenção de métricas foram
+validados fisicamente. A variante de qualificação XiP em PSRAM, com
+`CONFIG_SPI_FLASH_AUTO_SUSPEND=n`, passou três lotes NVS de 64 commits de blob
+de 512 B, cada um seguido de reboot, e uma operação LittleFS de 64 ciclos de
+4 KiB `write` → `fsync` → `rename` → leitura/verificação, além de formatar
+explicitamente a partição `storage`. A operação LittleFS durou 3.814 ms,
+verificou 256 KiB, foi seguida de reboot normal e de 30 minutos de render
+ativo sem artefato visual relatado. A evidência e os limites estão em
+`BRINGUP-EVIDENCE.md`.
+
+Este fechamento autoriza G3. Não promove XiP ao baseline de produto: OTA,
+rollback e recuperação continuam no G5; a política de cache de produto,
+quota, CRC, duas gerações e endurance continuam no G4/G6.
 
 **Objetivo:** transformar o baseline estático em uma plataforma de UI
 mensurável, sem permitir que render ou escrita em flash produzam glitches,
@@ -129,6 +138,12 @@ reset ou degradação de memória.
    - Testar escrita, `fsync`/rename, GC e erase em cenas estáticas e dinâmicas.
    - `CONFIG_SPI_FLASH_AUTO_SUSPEND` permanece desabilitado. Se houver artefato,
      interromper escrita oportunista e definir modo de manutenção explícito.
+   - Comparar o baseline com a variante `CONFIG_SPIRAM_XIP_FROM_PSRAM=y`, sem
+     alterar PSRAM HEX 200 MHz, três FB, rotação, adapter ou C6. Para G2, NVS,
+     format/erase explícito do LittleFS, `fsync`/rename, reboot e soak devem
+     passar na placa. OTA aplicar/reverter é critério próprio do G5 antes de
+     qualquer promoção de XiP; se falhar, retornar aos defaults sem XiP e
+     manter cache em RAM.
 
 ### Gate G2 e Definition of Done
 
@@ -144,6 +159,14 @@ reset ou degradação de memória.
   carga inicial; pilhas com pelo menos 25% e 1 KiB livres.
 - Política interativa/manutenção para flash escrita, implementada e testada.
 
+**Fechamento físico (2026-09-08):** os critérios foram atendidos no escopo da
+placa de qualificação: três ciclos NVS de 64×512 B com reboot, format/erase
+explícito e 64×4 KiB LittleFS com `fsync`/rename/verificação (256 KiB em
+3.814 ms), reboot, e 30 minutos de render ativo sem artefato observado. Ao fim
+do soak, a UI reportou mínimo de SRAM de 291 KiB, mínimo de PSRAM de 2.829 KiB
+e 28.169 B livres na pilha LVGL. A imagem P4 limpa final é identificada na
+evidência; C6 não foi regravado.
+
 **Contingência:** se o gate falhar, congelar expansão da UI e providers;
 manter cache em RAM e investigar driver, fontes, invalidação, banda PSRAM ou
 política de flash. XIP em PSRAM é experimento separado, nunca correção implícita.
@@ -152,21 +175,56 @@ política de flash. XIP em PSRAM é experimento separado, nunca correção impl�
 
 **Entrada:** G2 fechado e orçamento de SRAM atualizado.
 
+**Estado:** Complete — scoped close em 2026-09-11. O primeiro incremento criou o diagnóstico
+assíncrono `connectivity_diagnostic`: depois de display e flash, uma task de
+8 KiB sobe Hosted/SDIO, cria a STA antes de `esp_hosted_init()`, usa somente
+`WIFI_STORAGE_RAM` e executa um scan sem SSID, senha, DHCP, DNS, NTP ou HTTPS.
+O build P4 e o boot/scan na placa passaram em 2026-09-08: o C6 negociou Hosted
+3.0.6, RPC v2 e SW_AGGR. A FSM de associação, o mailbox privado de uma vaga,
+a limpeza de credenciais RAM-only e o backoff 2/4/8/16/30 s com jitter estão
+implementados. Três ciclos consecutivos de associação DHCP e FORGET em AP
+aberto foram concluídos na imagem corrigida, alternando boot frio e estado
+quente; a evidência não mede continuidade visual nem recuperação de falhas.
+NTP e o executor HTTPS de manutenção foram implementados e passaram uma rodada
+física com AP aberto: DNS, NTP e HTTPS verificados concluíram em 5.112 s. O
+resultado não fecha as falhas DNS/TLS, o supervisor/recovery do C6, a
+provisão WPA ou o protocolo completo de continuidade.
+O requisito adicional é continuidade local: perda de AP, DHCP, DNS, Internet
+ou C6 não pode interromper UI, touch nem estado local. A especificação e o
+protocolo obrigatório de bancada estão em
+[`ADR-010`](DECISIONS.md#adr-010--continuidade-local-e-recuperação-limitada-de-conectividade)
+e [`G3-CONTINUITY-VALIDATION.md`](G3-CONTINUITY-VALIDATION.md).
+
 **Trabalho**
 
-- Encapsular Hosted/SDIO em `HostedLink` assíncrono com geração, timeout,
-  backoff com jitter e sem reinicializar o display.
+- Encapsular Hosted/SDIO em `HostedLink` assíncrono com geração, deadline do
+  supervisor, backoff com jitter, cooldown de reset C6 e sem reinicializar o
+  display.
 - Implementar FSM Wi-Fi: link, associação, DHCP, DNS, qualidade de tempo,
   online, backoff e offline degradado.
 - Provisionamento por touch e canal USB de serviço restrito; senha por mailbox
   privada e sem logs.
+- Usar, primeiro, a bridge USB física sem senha (`OPEN <ssid>`/`FORGET`) para
+  associação, DHCP e AP-off/AP-on; o caminho WPA e qualquer retenção continuam
+  bloqueados até desenho de segredo e persistência aprovados.
 - NTP antes de TLS; executor global com no máximo um handshake/HTTPS em voo.
 - Diagnóstico de AP ausente, senha inválida, DHCP/DNS travados, C6 resetado e
   servidor lento.
 
 **Gate G3:** C6 3.0.6/RPC v2/SW_AGGR confirmado em boot frio e recuperação;
-UI segue responsiva em todas as falhas de rede; credenciais não vazam; retorno
-do AP recupera sem loop ou segunda conexão TLS concorrente.
+o protocolo `G3-CONTINUITY-VALIDATION.md` passa com evidência bruta; UI e
+estado local seguem responsivos em todas as falhas de rede; credenciais não
+vazam; retorno do AP recupera sem loop ou segunda conexão TLS concorrente.
+
+**Fechamento físico no escopo desta unidade:** as campanhas de associação,
+FORGET, DNS/NTP/HTTPS, timeout/reassociação, recuperação limitada do C6 e
+WPA2 RAM-only foram executadas na placa. O operador também realizou soak de
+24 h com a placa associada à rede e informou ausência de falhas, com touch
+funcional durante todo o período. O caso de C6 fisicamente ausente/travado é
+excluído: a unidade não possui ponto seguro de isolamento e o operador decidiu
+não alterar hardware. Esta é uma promoção para G4, não qualificação de release:
+a campanha de G6 continua exigindo instrumentação contínua, múltiplas unidades,
+térmica, energia e falhas físicas adicionais.
 
 ## Fase 4 — Dados, cache e UX offline
 
