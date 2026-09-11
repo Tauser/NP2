@@ -9,6 +9,20 @@ managed_components/
 .vscode/ipch/
 .vscode/.browse.VC.db*
 .vscode/*.log
+firmware/.vscode/
+*.code-workspace
+
+# Local C/C++ language-server cache
+**/.cache/
+
+# Generated compilation metadata outside the normal build directory
+compile_commands.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+build.ninja
+.ninja_deps
+.ninja_log
 
 # Device and release material
 *.bin
@@ -16,11 +30,19 @@ managed_components/
 *.map
 *.core
 *.coredump
+*.pcap
+*.pcapng
 logs/
 artifacts/
 keys/
 credentials/
 secrets/
+nvs_keys/
+flash_encryption_key.bin
+secure_boot_signing_key.pem
+*.p12
+*.pfx
+*.key
 
 # Local environment overrides
 .env
