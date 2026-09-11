@@ -16,7 +16,11 @@
 #include "lvgl.h"
 
 #include "diagnostic_ui.h"
+#include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
+#include "network_validation_service.h"
+#include "provisioning_service.h"
+#include "wifi_setup_view.h"
 
 #define DIAG_TARGET_SIZE 104
 #define DIAG_TARGET_MARGIN 28
@@ -36,6 +40,12 @@ typedef struct {
     lv_obj_t *memory_label;
     lv_obj_t *memory_campaign_label;
     lv_obj_t *render_label;
+    lv_obj_t *connectivity_label;
+    lv_obj_t *network_arm_button;
+    lv_obj_t *network_arm_button_label;
+    lv_obj_t *wifi_setup_button;
+    lv_obj_t *wifi_setup_button_label;
+    lv_obj_t *provisioning_label;
     lv_obj_t *stress_button;
     lv_obj_t *stress_button_label;
     lv_obj_t *stress_bar;
@@ -72,6 +82,7 @@ typedef struct {
     bool stress_measurement_started;
     bool soak_baseline_captured;
     bool completed_campaign_available;
+    bool compaction_requested;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
@@ -127,17 +138,158 @@ static void update_flash_status_label(void)
     if (!status.ready) {
         lv_label_set_text_fmt(s_state.flash_status_label, "NVS diagnostico: indisponivel (%s)",
                               esp_err_to_name(status.init_result));
-    } else if (status.busy || status.pending) {
-        lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: solicitacao em andamento");
-    } else if (status.completed_count > 0U) {
+    } else if (!status.littlefs_ready && !status.busy && !status.pending) {
         lv_label_set_text_fmt(s_state.flash_status_label,
-                              "NVS diagnostico #%lu: %s em %lums",
-                              (unsigned long)status.last_sequence,
+                              "LittleFS: segure o botao para formatar storage (%s)",
+                              esp_err_to_name(status.littlefs_init_result));
+    } else if (status.busy || status.pending) {
+        lv_label_set_text(s_state.flash_status_label, "Persistencia diagnostica: solicitacao em andamento");
+    } else if (status.last_littlefs_format) {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "LittleFS formatado: %s em %lums",
                               esp_err_to_name(status.last_result),
                               (unsigned long)status.last_duration_ms);
-    } else {
+        s_state.compaction_requested = false;
+        lv_label_set_text(s_state.flash_probe_button_label,
+                          "TOQUE: LFS 64x4K | SEGURE: FORMATAR LFS");
+    } else if (status.last_littlefs_writes > 0U) {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "Cache g%lu CRC=%s | LFS #%lu: %s %lu x 4K=%luK em %lums",
+                              (unsigned long)status.cache_generation,
+                              esp_err_to_name(status.cache_result),
+                              (unsigned long)status.last_sequence,
+                              esp_err_to_name(status.last_result),
+                              (unsigned long)status.last_littlefs_writes,
+                              (unsigned long)(status.last_littlefs_verified_bytes / 1024U),
+                              (unsigned long)status.last_duration_ms);
+        s_state.compaction_requested = false;
+        lv_label_set_text(s_state.flash_probe_button_label,
+                          "TOQUE: LFS 64x4K | SEGURE: FORMATAR LFS");
+    } else if (status.completed_count > 0U) {
+        if (status.last_batch_writes > 0U) {
+            lv_label_set_text_fmt(s_state.flash_status_label,
+                                  "NVS lote #%lu: %s %lu x 512B em %lums livre %lu>%lu",
+                                  (unsigned long)status.last_sequence,
+                                  esp_err_to_name(status.last_result),
+                                  (unsigned long)status.last_batch_writes,
+                                  (unsigned long)status.last_duration_ms,
+                                  (unsigned long)status.last_free_entries_before,
+                                  (unsigned long)status.last_free_entries_after);
+            s_state.compaction_requested = false;
+            lv_label_set_text(s_state.flash_probe_button_label,
+                              "TOQUE: NVS | SEGURE: LOTE 64x512B");
+        } else {
+            lv_label_set_text_fmt(s_state.flash_status_label,
+                                  "NVS diagnostico #%lu: %s em %lums",
+                                  (unsigned long)status.last_sequence,
+                                  esp_err_to_name(status.last_result),
+                                  (unsigned long)status.last_duration_ms);
+        }
+    } else if (status.cache_valid) {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "Cache g%lu CRC=%s | Config g%lu CRC=%s",
+                              (unsigned long)status.cache_generation,
+                              esp_err_to_name(status.cache_result),
+                              (unsigned long)status.config_generation,
+                              esp_err_to_name(status.config_result));
+    } else if (status.cache_result == ESP_ERR_NOT_FOUND) {
         lv_label_set_text(s_state.flash_status_label,
-                          "NVS diagnostico pronto: uma solicitacao por minuto");
+                          "Cache offline vazio: nenhuma geracao valida ainda");
+    } else {
+        lv_label_set_text_fmt(s_state.flash_status_label,
+                              "Cache offline invalido (%s); storage nao foi formatado",
+                              esp_err_to_name(status.cache_result));
+    }
+}
+
+static const char *connectivity_state_name(connectivity_diagnostic_state_t state)
+{
+    switch (state) {
+    case CONNECTIVITY_DIAGNOSTIC_STATE_IDLE:
+        return "ociosa";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_STARTING:
+        return "iniciando Hosted";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_LINK_UP:
+        return "enlace SDIO pronto";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_WIFI_READY:
+        return "Wi-Fi pronto";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING:
+        return "varrendo APs";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE:
+        return "sem credencial";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_ASSOCIATING:
+        return "associando";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_WAITING_FOR_IP:
+        return "aguardando DHCP";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_ONLINE:
+        return "IP adquirido";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF:
+        return "recuperando";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_LINK_DOWN:
+        return "C6/SDIO offline";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_RECOVERING_LINK:
+        return "recuperando C6";
+    case CONNECTIVITY_DIAGNOSTIC_STATE_FAILED:
+        return "erro";
+    default:
+        return "desconhecido";
+    }
+}
+
+static void update_connectivity_label(void)
+{
+    connectivity_diagnostic_status_t status = {0};
+    connectivity_diagnostic_get_status(&status);
+
+    lv_label_set_text_fmt(s_state.connectivity_label,
+                          "Rede: %s | APs=%u | tentativas=%lu | C6falhas=%lu | IP=%s | ultimo=%s",
+                          connectivity_state_name(status.state),
+                          (unsigned int)status.access_points_found,
+                          (unsigned long)status.reconnect_attempts,
+                          (unsigned long)status.transport_failures,
+                          status.online ? "sim" : "nao",
+                          esp_err_to_name(status.last_result));
+    lv_obj_set_style_text_color(s_state.connectivity_label,
+                                status.state == CONNECTIVITY_DIAGNOSTIC_STATE_FAILED
+                                    ? lv_color_hex(0xF4C95D)
+                                    : lv_color_hex(0x9DB4D1),
+                                LV_PART_MAIN);
+}
+
+static void update_provisioning_label(void)
+{
+    provisioning_service_status_t status = {0};
+    provisioning_service_get_status(&status);
+
+    if (status.armed) {
+        network_validation_status_t validation = {0};
+        network_validation_service_get_status(&validation);
+        lv_label_set_text_fmt(s_state.network_arm_button_label,
+                              "USB REDE ARMADO: %lus", (unsigned long)status.remaining_seconds);
+        if (validation.busy) {
+            lv_label_set_text(s_state.provisioning_label,
+                              "USB: CHECK DNS/NTP/HTTPS em andamento; uma conexao TLS");
+        } else {
+            lv_label_set_text(s_state.provisioning_label,
+                              "USB: OPEN, CHECK, RECOVER_C6 ou CACHE_CORRUPT; sem senha");
+        }
+        lv_obj_set_style_bg_color(s_state.network_arm_button, lv_color_hex(0x7A3E10), LV_PART_MAIN);
+    } else {
+        network_validation_status_t validation = {0};
+        network_validation_service_get_status(&validation);
+        lv_label_set_text(s_state.network_arm_button_label, "ARMAR REDE USB (60s)");
+        if (validation.completed_checks > 0U) {
+            lv_label_set_text_fmt(s_state.provisioning_label,
+                                  "DNS=%s NTP=%s HTTPS=%s em %lums",
+                                  esp_err_to_name(validation.dns_result),
+                                  esp_err_to_name(validation.ntp_result),
+                                  esp_err_to_name(validation.https_result),
+                                  (unsigned long)validation.last_duration_ms);
+        } else {
+            lv_label_set_text_fmt(s_state.provisioning_label,
+                                  "USB: fechado | ultimo=%s", esp_err_to_name(status.last_result));
+        }
+        lv_obj_set_style_bg_color(s_state.network_arm_button, lv_color_hex(0x183554), LV_PART_MAIN);
     }
 }
 
@@ -160,6 +312,8 @@ static void update_telemetry(bool update_view)
         }
     }
 
+    update_connectivity_label();
+    update_provisioning_label();
     if (!update_view) {
         return;
     }
@@ -209,24 +363,47 @@ static void update_telemetry(bool update_view)
 static void flash_probe_button_event_cb(lv_event_t *event)
 {
     const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_LONG_PRESSED) {
+        if (!s_state.stress_active) {
+            lv_label_set_text(s_state.flash_status_label,
+                              "Formatacao LFS bloqueada: ative a carga de render antes");
+        } else if (!s_state.compaction_requested) {
+            const esp_err_t request_err = flash_coordinator_request_littlefs_format();
+            if (request_err == ESP_OK) {
+                s_state.compaction_requested = true;
+                lv_label_set_text(s_state.flash_probe_button_label, "LFS: FORMATANDO");
+                lv_label_set_text(s_state.flash_status_label,
+                                  "LittleFS: formatacao explicita de storage durante carga");
+            } else {
+                lv_label_set_text_fmt(s_state.flash_status_label,
+                                      "Formatacao LFS recusada: %s", esp_err_to_name(request_err));
+            }
+        }
+        return;
+    }
     if (code != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    if (s_state.compaction_requested) {
         return;
     }
 
     if (!s_state.stress_active) {
         lv_label_set_text(s_state.flash_status_label,
-                          "Manutencao NVS bloqueada: erase/GC causa piscadas");
+                          "LittleFS bloqueado: ative a carga de render antes");
         return;
     }
 
-    const esp_err_t request_err = flash_coordinator_request_nvs_probe();
+    const esp_err_t request_err = flash_coordinator_request_littlefs_probe();
     if (request_err == ESP_OK) {
-        lv_label_set_text(s_state.flash_probe_button_label, "NVS: SOLICITADO");
+        s_state.compaction_requested = true;
+        lv_label_set_text(s_state.flash_probe_button_label, "LFS: SOLICITADO");
         lv_label_set_text(s_state.flash_status_label,
-                          "NVS diagnostico: aguardando worker de flash");
+                          "LittleFS: 64 ciclos de write/fsync/rename/verificacao");
     } else {
         lv_label_set_text_fmt(s_state.flash_status_label,
-                              "NVS diagnostico recusado: %s", esp_err_to_name(request_err));
+                              "LittleFS recusado: %s", esp_err_to_name(request_err));
     }
 }
 
@@ -384,7 +561,39 @@ static void stress_button_event_cb(lv_event_t *event)
     if (!s_state.stress_active) {
         lv_label_set_text(s_state.stress_bar_label, "CARGA PAUSADA");
         update_telemetry(true);
+    } else {
+        /* Capture and display the baseline once without refreshing labels in the hot loop. */
+        update_telemetry(true);
     }
+}
+
+static void network_arm_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    const esp_err_t result = provisioning_service_arm_open_network();
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(s_state.provisioning_label,
+                              "USB de rede indisponivel: %s", esp_err_to_name(result));
+        return;
+    }
+    update_provisioning_label();
+}
+
+static void wifi_setup_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+    const esp_err_t result = wifi_setup_view_open(lv_screen_active());
+    if (result != ESP_OK) {
+        lv_label_set_text_fmt(s_state.provisioning_label,
+                              "Configuracao Wi-Fi indisponivel: %s", esp_err_to_name(result));
+        return;
+    }
+    lv_label_set_text(s_state.state_label, "CONFIGURACAO WPA2 ABERTA — senha somente em RAM");
 }
 
 static void stress_timer_cb(lv_timer_t *timer)
@@ -444,7 +653,8 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
 
     lv_obj_t *const instruction = lv_label_create(screen);
-    lv_label_set_text(instruction, "Toque os alvos; ative carga somente depois de confirmar a orientacao");
+    lv_label_set_text(instruction,
+                      "Toque os alvos; com carga ativa, teste LittleFS ou segure para formatar storage");
     lv_obj_set_style_text_color(instruction, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
     lv_obj_align(instruction, LV_ALIGN_TOP_MID, 0, 42);
 
@@ -468,9 +678,14 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_text_color(s_state.render_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
     lv_obj_align(s_state.render_label, LV_ALIGN_TOP_MID, 0, 136);
 
+    s_state.connectivity_label = lv_label_create(screen);
+    lv_label_set_text(s_state.connectivity_label, "Rede: aguardando worker");
+    lv_obj_set_style_text_color(s_state.connectivity_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
+    lv_obj_align(s_state.connectivity_label, LV_ALIGN_TOP_MID, 0, 158);
+
     s_state.stress_button = lv_button_create(screen);
     lv_obj_set_size(s_state.stress_button, 240, 34);
-    lv_obj_align(s_state.stress_button, LV_ALIGN_TOP_MID, 0, 160);
+    lv_obj_align(s_state.stress_button, LV_ALIGN_TOP_MID, 0, 184);
     lv_obj_set_style_radius(s_state.stress_button, 8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.stress_button, lv_color_hex(0x183554), LV_PART_MAIN);
     s_state.stress_button_label = lv_label_create(s_state.stress_button);
@@ -481,7 +696,7 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     s_state.stress_bar = lv_obj_create(screen);
     lv_obj_set_size(s_state.stress_bar, DIAG_STRESS_BAR_WIDTH, 22);
-    lv_obj_set_pos(s_state.stress_bar, 182, 208);
+    lv_obj_set_pos(s_state.stress_bar, 182, 232);
     lv_obj_set_style_radius(s_state.stress_bar, 6, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.stress_bar, lv_color_hex(0x126A50), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_state.stress_bar, 0, LV_PART_MAIN);
@@ -497,15 +712,45 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_set_style_radius(s_state.flash_probe_button, 8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_state.flash_probe_button, lv_color_hex(0x5A3A12), LV_PART_MAIN);
     s_state.flash_probe_button_label = lv_label_create(s_state.flash_probe_button);
-    lv_label_set_text(s_state.flash_probe_button_label, "NVS PROBE DURANTE CARGA");
+    lv_label_set_text(s_state.flash_probe_button_label,
+                      "TOQUE: LFS 64x4K | SEGURE: FORMATAR LFS");
     lv_obj_set_style_text_color(s_state.flash_probe_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
     lv_obj_center(s_state.flash_probe_button_label);
     lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_state.flash_probe_button, flash_probe_button_event_cb, LV_EVENT_LONG_PRESSED,
+                        NULL);
 
     s_state.flash_status_label = lv_label_create(screen);
     lv_label_set_text(s_state.flash_status_label, "NVS diagnostico: inicializando");
     lv_obj_set_style_text_color(s_state.flash_status_label, lv_color_hex(0xF4C95D), LV_PART_MAIN);
     lv_obj_align(s_state.flash_status_label, LV_ALIGN_TOP_MID, 0, 412);
+
+    s_state.network_arm_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.network_arm_button, 240, 30);
+    lv_obj_align(s_state.network_arm_button, LV_ALIGN_TOP_MID, 0, 448);
+    lv_obj_set_style_radius(s_state.network_arm_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.network_arm_button, lv_color_hex(0x183554), LV_PART_MAIN);
+    s_state.network_arm_button_label = lv_label_create(s_state.network_arm_button);
+    lv_label_set_text(s_state.network_arm_button_label, "ARMAR REDE USB (60s)");
+    lv_obj_set_style_text_color(s_state.network_arm_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.network_arm_button_label);
+    lv_obj_add_event_cb(s_state.network_arm_button, network_arm_button_event_cb, LV_EVENT_CLICKED, NULL);
+
+    s_state.wifi_setup_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.wifi_setup_button, 240, 30);
+    lv_obj_align(s_state.wifi_setup_button, LV_ALIGN_TOP_MID, 0, 482);
+    lv_obj_set_style_radius(s_state.wifi_setup_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.wifi_setup_button, lv_color_hex(0x126A50), LV_PART_MAIN);
+    s_state.wifi_setup_button_label = lv_label_create(s_state.wifi_setup_button);
+    lv_label_set_text(s_state.wifi_setup_button_label, "CONFIGURAR WI-FI WPA2");
+    lv_obj_set_style_text_color(s_state.wifi_setup_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.wifi_setup_button_label);
+    lv_obj_add_event_cb(s_state.wifi_setup_button, wifi_setup_button_event_cb, LV_EVENT_CLICKED, NULL);
+
+    s_state.provisioning_label = lv_label_create(screen);
+    lv_label_set_text(s_state.provisioning_label, "USB: fechado");
+    lv_obj_set_style_text_color(s_state.provisioning_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
+    lv_obj_align(s_state.provisioning_label, LV_ALIGN_TOP_MID, 0, 518);
 
     s_state.state_label = lv_label_create(screen);
     lv_label_set_text(s_state.state_label, "AGUARDANDO TOQUE");

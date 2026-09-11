@@ -4,7 +4,10 @@
 #include "esp_log.h"
 
 #include "board_bringup.h"
+#include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
+#include "network_validation_service.h"
+#include "provisioning_service.h"
 
 static const char *const TAG = "np2_boot";
 
@@ -35,5 +38,23 @@ void app_main(void)
         ESP_LOGE(TAG, "Flash coordinator unavailable: %s", esp_err_to_name(flash_coordinator_err));
     }
 
-    ESP_LOGI(TAG, "P4 local bring-up ready; network services are not configured yet");
+    const esp_err_t connectivity_err = connectivity_diagnostic_start();
+    if (connectivity_err != ESP_OK) {
+        ESP_LOGE(TAG, "Phase 3 connectivity probe unavailable: %s",
+                 esp_err_to_name(connectivity_err));
+    }
+
+    const esp_err_t provisioning_err = provisioning_service_start();
+    if (provisioning_err != ESP_OK) {
+        ESP_LOGE(TAG, "Open-network maintenance service unavailable: %s",
+                 esp_err_to_name(provisioning_err));
+    }
+
+    const esp_err_t validation_err = network_validation_service_start();
+    if (validation_err != ESP_OK) {
+        ESP_LOGE(TAG, "Network validation service unavailable: %s",
+                 esp_err_to_name(validation_err));
+    }
+
+    ESP_LOGI(TAG, "P4 local bring-up ready; Phase 3 Hosted/Wi-Fi probe runs asynchronously");
 }
