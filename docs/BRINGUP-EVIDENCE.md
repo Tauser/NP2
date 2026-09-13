@@ -1764,3 +1764,17 @@ cortes de energia; esses gates continuam pendentes.
 - Este registro comprova a gravação do candidato. Ainda falta o ensaio
   funcional: após rede e NTP `ESP_OK`, disparar refresh Brasília e confirmar
   `hora confiavel` no rodapé e `ha 0 min` nos dois cards.
+
+## 2026-09-12 — G4, fechamento físico reportado pelo operador
+
+- O operador confirmou que executou os ensaios restantes na unidade P4 v1.3 e
+  que todos funcionaram corretamente: corrupção/reboot, filesystem cheio com
+  limpeza, corte antes do `rename`, corte após o `rename`, refresh Brasília e
+  reboot sem rede.
+- O painel permaneceu funcional; após NTP e refresh os dois cards mostraram
+  dados locais com hora confiável e idade inicial correta. Após reboot sem
+  rede, os dados locais permaneceram disponíveis em estado seguro.
+- Esta é uma confirmação operacional do operador, sem novo log serial bruto
+  anexado nesta interação. Ela fecha G4 com escopo limitado a esta unidade;
+  qualificação multiunidade, fault injection e campanhas longas continuam em
+  G6.

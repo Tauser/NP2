@@ -33,8 +33,8 @@ Regras de execução em todas as fases:
 | 1 | G1 — boot/display mínimo | Complete — scoped close | Boot P4, PSRAM, DSI, backlight e imagem estável confirmados. Exclusões estão em Fase 2. |
 | 2 | G2 — render e flash | Complete — scoped close | Touch, render, NVS e LittleFS sob carga passaram na placa com XiP em PSRAM. |
 | 3 | G3 — conectividade | Complete — scoped close | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único operaram sem interromper UI no escopo desta unidade. |
-| 4 | G4 — dados offline | In progress | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
-| 5 | G5 — OTA recuperável | Blocked by G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
+| 4 | G4 — dados offline | Complete — scoped close | Cache, cortes, corrupção, quota e dados locais após reboot foram validados nesta unidade. |
+| 5 | G5 — OTA recuperável | Ready | Atualização P4/C6 assinada, rollback e recovery comprovados. |
 | 6 | G6 — qualificação | Blocked by G0–G5 | Soak, térmica, energia, falhas e desempenho em unidades de amostra. |
 | 7 | G7 — produção | Blocked by G6 | Segurança de produção, fábrica, assistência e rollout operacional. |
 
@@ -238,7 +238,9 @@ térmica, energia e falhas físicas adicionais.
 
 **Entrada:** G2 e G3 fechados.
 
-**Estado:** In progress em 2026-09-11. O primeiro incremento introduz o
+**Estado:** Complete — scoped close em 2026-09-12.
+
+**Histórico de implementação antes do fechamento:** o primeiro incremento introduz o
 `app_loop` como escritor único de uma projeção de UI sem segredos e um
 `EventBus` de 32 eventos pequenos. A tela de diagnóstico consome essa projeção
 para conectividade e persistência; ela não consulta esses serviços diretamente.
@@ -247,14 +249,14 @@ schema, limite de payload e seleção da geração válida mais recente), com te
 host; o `FlashCoordinator` conserva a propriedade de LittleFS. O terceiro
 incremento adiciona ensaios físicos explícitos de filesystem cheio e de corte
 nas fronteiras `fsync`/`rename`, documentados em `G4-VALIDATION.md`. O build P4
-passou; o cenário de corrupção/reboot foi repetido, mas os novos ensaios e os
-dados de domínio permanecem pendentes e G4 continua aberto. O quarto
+passou; o cenário de corrupção/reboot foi repetido, mas naquela etapa os novos
+ensaios e os dados de domínio permaneciam pendentes. O quarto
 incremento conecta o snapshot offline binário de 25 bytes ao
 `FlashCoordinator`, à projeção do `app_loop` e aos cards de clima/mercado;
 inclui codecs e parsers portáteis, limitados a 768 B, para Open-Meteo e
 CoinGecko. O build P4 e os testes host passaram. Os adapters HTTPS, a escolha
 explícita de localidade, os novos ensaios físicos e a prova de dados do domínio
-após reboot continuam pendentes.
+após reboot ainda não tinham sido executados nessa etapa.
 O inventário verificável de entregas e lacunas está em
 [`G4-CLOSURE-AUDIT.md`](G4-CLOSURE-AUDIT.md).
 
@@ -266,9 +268,10 @@ Testes host e build P4 passaram; HTTPS e storage ainda exigem repetição HIL.
 
 Após a correção de checkpoints do preenchimento (ADR-020), o operador
 relatou `aprovado ESP_OK` em 154.535 ms no ensaio de filesystem cheio.
-É um primeiro passe operacional parcial: confirmação da geração após reboot,
-segunda execução, continuidade visual e logs ainda não foram fornecidos.
-Os ensaios de corte de energia e dados offline continuam pendentes; G4 aberto.
+Era um primeiro passe operacional parcial: confirmação da geração após reboot,
+segunda execução, continuidade visual e logs ainda não tinham sido fornecidos.
+Os ensaios de corte de energia e dados offline ainda estavam pendentes naquele
+registro.
 
 **Trabalho**
 
@@ -285,6 +288,16 @@ Os ensaios de corte de energia e dados offline continuam pendentes; G4 aberto.
 **Gate G4:** dado íntegro ou fallback seguro após todos os cortes/corrupções;
 cache identifica idade/schema/CRC; nenhuma credencial aparece em log, estado ou
 dump; quotas e cadência de escrita obedecem ao gate G2.
+
+**Fechamento físico nesta unidade:** o operador confirmou a repetição dos
+ensaios de corrupção da geração mais nova, filesystem cheio, corte antes do
+`rename`, corte após o `rename` e reboot com dados Brasília sem rede. Em todos
+os casos o painel permaneceu utilizável e selecionou cache íntegro; os cards
+mostraram dados locais, hora confiável após NTP e idade inicial de zero minuto
+após refresh. A evidência detalhada, incluindo resultados reportados pelo
+operador, está em `BRINGUP-EVIDENCE.md`. Este fechamento libera G5, mas não é
+qualificação de release: repetição multiunidade, logs brutos completos, testes
+de servidor lento/excesso e fault injection pertencem à campanha G6.
 
 ## Fase 5 — Atualização recuperável
 
