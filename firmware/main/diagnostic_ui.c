@@ -19,6 +19,7 @@
 #include "diagnostic_ui.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
+#include "offline_dashboard.h"
 #include "provisioning_service.h"
 #include "wifi_setup_view.h"
 
@@ -41,6 +42,10 @@ typedef enum {
 } cache_test_action_t;
 
 typedef struct {
+    lv_display_t *display;
+    lv_indev_t *touch_indev;
+    lv_timer_t *telemetry_timer;
+    lv_timer_t *stress_timer;
     lv_obj_t *coordinate_label;
     lv_obj_t *state_label;
     lv_obj_t *memory_label;
@@ -107,6 +112,39 @@ static diagnostic_ui_state_t s_state;
 static const cache_test_action_t s_cache_full_action = CACHE_TEST_FULL_FILESYSTEM;
 static const cache_test_action_t s_cache_cut_before_action = CACHE_TEST_CUT_BEFORE_RENAME;
 static const cache_test_action_t s_cache_cut_after_action = CACHE_TEST_CUT_AFTER_RENAME;
+
+static void display_event_cb(lv_event_t *event);
+static void touch_event_cb(lv_event_t *event);
+
+static void diagnostic_ui_destroy(void)
+{
+    if (s_state.telemetry_timer != NULL) {
+        lv_timer_delete(s_state.telemetry_timer);
+    }
+    if (s_state.stress_timer != NULL) {
+        lv_timer_delete(s_state.stress_timer);
+    }
+    if (s_state.touch_indev != NULL) {
+        (void)lv_indev_remove_event_cb_with_user_data(s_state.touch_indev, touch_event_cb, NULL);
+    }
+    if (s_state.display != NULL) {
+        (void)lv_display_remove_event_cb_with_user_data(s_state.display, display_event_cb, NULL);
+    }
+    s_state = (diagnostic_ui_state_t){0};
+}
+
+static void back_to_dashboard_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    lv_display_t *const display = s_state.display;
+    lv_indev_t *const touch_indev = s_state.touch_indev;
+    diagnostic_ui_destroy();
+    lv_obj_clean(lv_screen_active());
+    (void)offline_dashboard_create(display, touch_indev);
+}
 
 static const char *cache_test_action_name(cache_test_action_t action)
 {
@@ -780,7 +818,10 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     ESP_RETURN_ON_FALSE(display != NULL && touch_indev != NULL, ESP_ERR_INVALID_ARG,
                         "diag_ui", "Display or touch handle missing");
 
-    s_state = (diagnostic_ui_state_t){0};
+    s_state = (diagnostic_ui_state_t){
+        .display = display,
+        .touch_indev = touch_indev,
+    };
 
     lv_obj_t *const screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x09111F), LV_PART_MAIN);
@@ -790,6 +831,17 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_label_set_text(title, "NP2  |  DIAGNOSTICO DE TOUCH E RENDER");
     lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
+
+    lv_obj_t *const back_button = lv_button_create(screen);
+    lv_obj_set_size(back_button, 210, 34);
+    lv_obj_align(back_button, LV_ALIGN_TOP_RIGHT, -32, 14);
+    lv_obj_set_style_radius(back_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(back_button, lv_color_hex(0x183554), LV_PART_MAIN);
+    lv_obj_t *const back_label = lv_label_create(back_button);
+    lv_label_set_text(back_label, "VOLTAR AO PAINEL");
+    lv_obj_set_style_text_color(back_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(back_button, back_to_dashboard_button_event_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *const instruction = lv_label_create(screen);
     lv_label_set_text(instruction,
@@ -966,8 +1018,8 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_RENDER_READY, NULL);
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_FLUSH_START, NULL);
     lv_display_add_event_cb(display, display_event_cb, LV_EVENT_FLUSH_FINISH, NULL);
-    lv_timer_create(telemetry_timer_cb, DIAG_METRIC_PERIOD_MS, NULL);
-    lv_timer_create(stress_timer_cb, DIAG_STRESS_PERIOD_MS, NULL);
+    s_state.telemetry_timer = lv_timer_create(telemetry_timer_cb, DIAG_METRIC_PERIOD_MS, NULL);
+    s_state.stress_timer = lv_timer_create(stress_timer_cb, DIAG_STRESS_PERIOD_MS, NULL);
 
-    return ESP_OK;
+    return s_state.telemetry_timer != NULL && s_state.stress_timer != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
