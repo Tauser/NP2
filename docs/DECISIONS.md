@@ -257,3 +257,208 @@ aberto de bancada, mas a credencial é perdida no reboot. A futura
 NVS Encryption/eFuse, atualização P4/C6 e rollback estarem validados. A
 referência oficial para a exigência de NVS Encryption é a
 [documentação ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32p4/api-reference/storage/nvs_encryption.html).
+
+## ADR-015 — StateStore com escritor único e projeções sem segredo
+
+**Estado:** implementado como primeiro incremento da Fase 4; validação física
+de G4 pendente.
+
+**Contexto:** os diagnósticos das fases anteriores expunham snapshots de cada
+serviço diretamente à UI. Isso é adequado para bancada, mas não estabelece o
+fluxo de produto em que a UI consome dados pequenos e sanitizados, sem chamar
+rede, NVS ou filesystem. Também não havia uma fila de eventos comum com limite
+e métrica de saturação para evoluir resultados de providers e persistência.
+
+**Decisão:** `app_loop` (8 KiB, prioridade 3) torna-se o único escritor da
+projeção publicada. Ele consome um `EventBus` de 32 eventos de tamanho fixo e
+coleta snapshots curtos dos adaptadores existentes. A projeção inclui somente
+estado de rede, disponibilidade/resultado de persistência e gerações de cache
+e configuração; não contém SSID, senha, corpo HTTP, objeto JSON ou view-model
+LVGL. Para esses dois domínios, a task LVGL apenas copia essa projeção sob
+seção crítica curta. A fila recusa quando cheia e contabiliza a perda, em vez
+de crescer ou bloquear a UI.
+
+**Consequências:** o primeiro corte remove da tela de diagnóstico a leitura
+direta de conectividade e `FlashCoordinator`, preservando seus comandos
+assíncronos. Providers, modelos de clima/mercado, idade do dado, quotas,
+limpeza e a UX offline final ainda precisam publicar eventos tipados e obter
+testes host/bancada próprios. O build P4 verde desta alteração não é evidência
+de corte de energia, corrupção, filesystem cheio ou qualidade visual; esses
+ensaios continuam requisitos de G4.
+
+## ADR-016 — Contrato portável de integridade para cache de duas gerações
+
+**Estado:** implementado como incremento de base da Fase 4; ensaio físico de
+corte/corrupção continua pendente para G4.
+
+**Contexto:** o `FlashCoordinator` já conserva duas gerações do cache em
+LittleFS e valida CRC, versão e tamanho, mas a gramática do registro estava
+embutida na task que possui NVS e LittleFS. Isso impedia testar no host os
+casos que definem recuperação offline e aproximava uma regra de domínio do
+acesso físico à flash.
+
+**Decisão:** o header binário, o CRC-32, a validação limitada de header e a
+seleção da maior geração válida passam a residir em `cache_record`, módulo C
+sem dependência de ESP-IDF, LVGL ou filesystem. O `FlashCoordinator` continua
+dono exclusivo de abrir, escrever, sincronizar, renomear e ler LittleFS; ele
+somente mapeia erros de I/O para `esp_err_t`. Magic, schema v1, tamanho do
+header e alternância de slots não mudam neste incremento.
+
+**Consequências:** há teste host para CRC, header inválido, limite de payload
+e fallback à geração anterior. A verificação ainda não é evidência de flash
+real: quota, limpeza, cortes em cada fronteira e corrupção na placa continuam
+obrigatórios no G4. Nenhum provider, request HTTPS, dado de produto ou escrita
+automática foi introduzido.
+
+## ADR-017 — Snapshot offline v1 com inteiros e origem explícita
+
+**Estado:** codec, persistência através do coordenador, projeção e cards de UI
+implementados; adapters HTTPS e validação física do snapshot ainda pendentes.
+
+**Contexto:** G4 precisa exibir clima e mercado mesmo sem rede, mas não pode
+deixar JSON, ponto flutuante de provider, URLs ou erros de transporte cruzarem
+para a UI. Open-Meteo fornece temperatura e umidade, enquanto o endpoint
+`simple/price` do CoinGecko fornece preço, variação e timestamp; ambos têm
+formatos externos que não são contrato de produto.
+
+**Decisão:** `offline_snapshot.v1` usa temperatura em décimos de grau Celsius,
+preço Bitcoin/USD em centavos e variação de 24 h em pontos-base. Cada domínio
+declara `available`, `stale` e `observedAtUnixS`; a origem é somente `cache` ou
+`live`. O modelo C equivalente não depende de ESP-IDF, LVGL, HTTP ou storage.
+O contrato compartilhado, seu exemplo e os eventos sanitizados são a fonte de
+verdade para adapters e services futuros.
+
+**Consequências:** o formato armazenado é uma sequência explícita de 25 bytes,
+sem padding de ABI, dentro do registro de cache já protegido por CRC. Ao montar
+o filesystem, o coordenador valida também esse payload; dados técnicos antigos
+ou inválidos continuam diagnosticáveis, mas não são exibidos como dados de
+produto. O `app_loop` transforma a origem em `cache` e marca clima após 2 h e
+mercado após 30 min como stale quando há hora plausível. Os parsers portáteis
+recusam corpo acima de 768 B, campos ausentes e números fora dos limites antes
+de criar o snapshot. Uma escrita de snapshot aceita no máximo uma vez a cada
+30 min; a fila de um item recusa sobreposição. Este ADR não autoriza chave,
+polling automático, novo handshake paralelo ou escrita de flash por callback
+de UI.
+
+**Configuração de produto (2026-09-12):** a localidade escolhida pelo operador
+é Brasília-DF (`-15.793889`, `-47.882778`). O refresh continua explicitamente
+acionado pela manutenção: clima e BTC/USD passam pelo mesmo worker HTTPS
+serial, preservam o último valor válido como stale quando um provider falha e
+não usam token, URL configurável ou polling automático. A operação precisa de
+HIL antes de ser considerada aprovada.
+
+## ADR-018 — Controles G4 no diagnóstico quando o RX da COM não está disponível
+
+**Estado:** implementado para bancada; não é funcionalidade de produto.
+
+**Contexto:** na unidade P4 v1.3, a COM8 entrega logs ao monitor oficial sem
+reset, mas não encaminha bytes recebidos ao serviço `usb_serial_jtag` mesmo
+com a janela física de 60 s confirmada na tela. Isso impediria executar os
+ensaios G4 de filesystem cheio e corte de energia, embora os ensaios dependam
+de uma ação física explícita e não de um protocolo de produto.
+
+**Decisão:** expor no diagnóstico quatro botões: filesystem cheio, corte antes
+do `rename`, corte após o `rename` e refresh explícito dos dados de Brasília.
+Cada callback LVGL somente enfileira uma
+intenção já existente no `FlashCoordinator` e mostra a aceitação e o resultado
+final do worker. O worker de flash permanece único dono de
+LittleFS; a janela de 10 s e o corte de alimentação continuam físicos e o
+resultado canônico continua no log `flash_coord`.
+
+**Consequências:** a bancada não depende do RX serial para disparar os ensaios,
+mas o monitor em modo somente-leitura ainda deve capturar os marcos. Os botões
+não formatam `storage`, não liberam escrita automática, não alteram C6 e não
+fecham G4 sem reboot, inspeção visual e evidência registrada.
+
+**Recuperação adicional:** um reset durante o preenchimento pode deixar os
+arquivos `full-probe.*` ocupando a partição. No próximo mount, o coordenador
+remove exclusivamente esses temporários. As gerações `cache.0` e `cache.1`
+continuam intocadas; falha nessa limpeza recusa o mount em vez de formatar
+`storage`.
+
+**Ajuste de bancada:** os botões G4 não exigem a carga sintética contínua.
+Na unidade P4 v1.3, ela pode manter a task LVGL pronta a ponto de atrasar o
+worker de flash, embora a UI normal permaneça renderizando e responsiva. Antes
+de preencher o filesystem, o coordenador também remove `cache.tmp`, que é uma
+proposta nunca promovida; isso impede blocos previamente alocados de fazer a
+proposta do teste aparentar caber em uma partição cheia.
+
+O preenchimento usa blocos de 16 KiB para o corpo do ensaio e, no primeiro
+`ENOSPC` ou numa escrita parcial, reduz ao tamanho exato do snapshot real
+(header mais payload de 25 B). Propostas adicionais continuam limitadas ao
+máximo de 64 arquivos do gate. O ensaio só aprova erro efetivamente causado por
+`ENOSPC`, exige limpeza confirmada, recuperação do espaço inicial e nunca faz
+`rename` sobre `cache.0/1`.
+
+## ADR-019 — Parsing estrutural, validação semântica e HTTP abortável
+
+**Estado:** implementado em software em 2026-09-12; repetição HIL pendente.
+
+**Contexto:** a auditoria A1–A6 reproduziu seleção de chaves JSON fora do
+objeto correto, aceitação de documento truncado e umidade decimal, snapshots
+fora de faixa, perda do sinal de valores entre -1 e 0, leitura HTTPS que só
+avaliava limite após `perform()` e falso passe possível no ensaio cheio.
+
+**Decisão:** os adapters usam um leitor JSON recursivo limitado a oito níveis,
+validam o documento inteiro, objetos `current`/`bitcoin`, duplicatas e números.
+Inteiros recusam ponto decimal; valores fixos arredondam na primeira casa
+descartada. Encode/decode compartilham validação semântica, e a UI formata o
+sinal pela magnitude. HTTPS usa `open`/`fetch_headers`/`read`, recalcula o
+orçamento monotônico antes de cada operação e fecha o cliente assim que excede
+bytes ou prazo. O ensaio cheio preserva a causa `ENOSPC`, usa o snapshot real e
+exige limpeza e recuperação de espaço.
+
+**Consequências:** quatro testes host cobrem codec, providers, cache e
+formatação. O build P4 confirma integração, mas limites HTTPS sob chunks lentos
+e o novo ensaio LittleFS continuam dependendo de bancada; G4 permanece aberto.
+
+## ADR-020 — Preenchimento durável no ensaio de filesystem cheio
+
+**Estado:** correção de software em 2026-09-12; gate físico permanece aberto.
+
+**Contexto:** o operador relatou `ESP_ERR_INVALID_STATE` após 234.461 ms.
+O teste host com LittleFS do componente fixado reproduziu a aceitação de
+todas as 60 propostas pelo código anterior. O núcleo marca o arquivo como
+`LFS_F_ERRED` quando a alocação falha e pode retornar zero de `file_sync`
+sem salvar seus dados. Preencher até ENOSPC e só então sincronizar não
+garantia que o volume continuava cheio após fechar o arquivo.
+
+**Decisão:** sincronizar cada append bem-sucedido de até 16 KiB. Após ENOSPC,
+fechar/reabrir a última versão persistida e reduzir o append até 49 B;
+depois exercitar propostas reais de snapshot em arquivos descartáveis.
+Não sincronizar para confirmar uma escrita que já falhou. Preservar a causa
+ENOSPC, limpar todos os temporários em cada saída (tentando os restantes
+mesmo se uma remoção falhar), verificar espaço e cabeçalho/CRC selecionado.
+O orçamento de 180 s é cooperativo entre operações, com limpeza obrigatória.
+Não altera defaults, modo de display, partições, dependências ou gerações
+ativas; o worker existente continua único dono das operações de flash.
+
+**Validação:** o mesmo código passou em flash NOR simulada com LittleFS
+real de 9 MiB, cache técnico de 4 KiB, snapshot de 25 B, repetição/remount,
+falha de I/O, falha de limpeza e timeout. Na configuração simulada, a
+rejeição ocorreu após 49/50 propostas aceitas, com o espaço inicial
+recuperado. Tempos e continuidade visual exigem nova bancada; nenhum
+resultado host encerra G4. Rollback: reverter somente este incremento,
+mantendo o ensaio cheio bloqueado até outra correção comprovada.
+
+## ADR-021 — Serviço de hora confiável para o estado offline
+
+**Estado:** implementado em software; validação física pendente.
+
+**Contexto:** o refresh manual obteve DNS, NTP e HTTPS com `ESP_OK`, mas os
+cards offline continuaram mostrando `hora nao confiavel`. A sincronização NTP
+era apenas uma etapa do worker de manutenção e não publicava um estado
+durável que a projeção da interface pudesse usar.
+
+**Decisão:** o `TimeService` passa a ser o único dono de SNTP e publica,
+de forma limitada, confiança, instante da última sincronização, duração e
+resultado. O worker de rede o aciona depois de DNS e antes dos providers, sem
+paralelizar conexões HTTPS. Após a primeira inicialização o serviço mantém
+SNTP disponível; a projeção calcula a idade somente quando o serviço afirma
+que a hora é confiável e o relógio está dentro da época válida.
+
+**Consequências:** uma falha de NTP preserva os dados locais, mas sua idade
+fica explicitamente não confiável. A UI não faz I/O nem inicia sincronização;
+não há polling de providers ou segunda conexão TLS. O gate físico ainda deve
+confirmar: NTP OK seguido de refresh mostra `ha 0 min`; após reboot sem hora
+válida a indicação volta corretamente para `hora nao confiavel`.

@@ -45,8 +45,9 @@ primeira resolução. Revise-o e o adicione ao Git: ele é parte do baseline.
 `sdkconfig` efetivo preserva os valores de `sdkconfig.defaults` antes de
 prosseguir para a placa.
 
-O scaffold atual não deve ser gravado nem testado na placa como se fosse
-bring-up. Primeiro feche a verificação de partições, dependências e tamanho.
+O firmware atual já ultrapassou o scaffold e possui gates físicos G0–G3 com
+escopo documentado. Antes de qualquer nova gravação, confira a fase afetada,
+o hash da imagem e as evidências pendentes; build verde não substitui bancada.
 
 ## C6
 

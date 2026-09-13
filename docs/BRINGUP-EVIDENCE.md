@@ -908,6 +908,11 @@ Operator-reported diagnostic values after the render run: SRAM delta 0 KiB,
 minimum 291 KiB; PSRAM delta 0 KiB, minimum 2,829 KiB; LVGL stack free
 28,169 bytes. The UI reports the stack figure in bytes, not KiB.
 
+Audit note (2026-09-12): the 28,169-byte stack value cannot be reconciled with
+the 12,288-byte LVGL stack configured in the cited source. It is retained as
+historical operator output but is not accepted as stack-margin evidence until
+a new capture identifies the exact image, task handle and configured size.
+
 Gate status: reboot recovery and the reported memory floor pass. The exact
 duration and the visual observation have now been confirmed by the operator:
 the active-render run lasted 30 minutes and had no screen artifact, flicker,
@@ -1563,3 +1568,179 @@ Gate decision: G3 is closed for promotion to G4 in this scoped hardware
 configuration. This is not a production qualification: G6 retains the 72/168 h
 instrumented soak, thermal/power campaign and broader multi-unit evidence.
 ```
+
+## 2026-09-11 — Fase 4, corrupção mais nova e reboot com fallback confirmado
+
+```text
+Board: ESP32-P4 revision v1.3 over USB Serial/JTAG COM8. The current P4 image
+was built with ESP-IDF 5.5.4; np2_p4.bin was 0x1710C0 bytes, with 0x68EF40
+bytes (82%) free in the smallest OTA partition. `idf.py -p COM8 flash` wrote
+and hash-verified bootloader, P4 application, partition table and otadata only.
+It did not write NVS, storage or C6 firmware.
+
+Procedure: with render active, the operator ran the LittleFS diagnostic batch.
+The coordinator reported `LittleFS batch 2 completed in 5287ms`. The physically
+armed USB maintenance bridge then accepted `CACHE_CORRUPT_NEWEST` and returned
+OK. The asynchronous worker reported `cache newest-generation corruption 3
+completed in 99ms`. The P4 was rebooted.
+
+Observed result: the post-reboot dashboard reported `Geracao 126 integra |
+ativo` in CACHE LOCAL. The supplied boot shows normal P4 boot, 32 MiB PSRAM,
+display/touch start, and C6 Hosted 3.0.6/RPC v2/SDIO SW_AGGR initialization;
+there is no supplied panic, WDT or storage format. The coordinator only reports
+the corruption request as complete after selecting a valid prior generation,
+so generation 126 is the recovered fallback.
+
+Gate interpretation: the controlled corrupt-newest and reboot recovery path
+passes again on this unit after the portable cache-record contract refactor.
+This does not close G4: power interruption at every write boundary, full/quota
+filesystem behavior, configuration partial writes, cache age/schema migration,
+and real offline product data remain pending.
+```
+
+## 2026-09-12 — Fase 4, recuperação de tela preta e boot observado
+
+```text
+Board: ESP32-P4 revision v1.3, USB Serial/JTAG COM8. The candidate P4 image
+was `np2_p4` version 1d3ca02-dirty, ELF SHA prefix 07025ae3d. No C6, NVS or
+storage write was made during this diagnosis.
+
+Incident: after maintenance-console attempts, the panel was reported black.
+The first monitor capture failed because a residual IDF monitor process held
+COM8 (`PermissionError: access denied`). That process tree was terminated.
+
+Observed boot after a physical RESET with an IDF monitor attached using
+`--no-reset`: 32 MiB PSRAM test passed; MIPI DSI and EK79007 initialized;
+GT911 was found at 0x5d; LVGL task started; initial refresh completed;
+backlight was set to 60%; and the application logged `Phase 4 offline
+dashboard active`. Hosted then negotiated C6 3.0.6, RPC v2 and SDIO SW_AGGR,
+and completed a credential-free scan of 33 APs. No panic, WDT, mount error or
+display-initialization failure appears in the captured boot. The operator
+confirmed that the panel rendered again after this reset.
+
+Interpretation: this is recovery evidence for the incident, not a G4 cache
+pass. The full-filesystem and power-cut scenarios remain unexecuted.
+```
+# 2026-09-12 — G4 filesystem cheio: tentativa inválida/falha de implementação
+
+- Placa P4 v1.3; imagem P4 de bancada `0x172d60`; C6, NVS e gerações de cache
+  não foram gravados pelo flash da aplicação.
+- O botão `G4: FS CHEIO` foi aceito na fila. Com a carga sintética contínua
+  ativa, o pedido permaneceu pendente; ao pausá-la, o worker executou e a UI
+  reportou `G4 FS cheio concluido: ESP_FAIL em 114619ms`.
+- Resultado: **não conta como passe G4**. A investigação encontrou que
+  `cache.tmp` era limpo somente após a tentativa de proposta, podendo manter
+  blocos alocados e invalidar a condição de filesystem cheio. O ensaio foi
+  interrompido por flash P4 de recuperação; o próximo boot limpa somente
+  `full-probe.tmp` e uma repetição corrigida continua obrigatória.
+- A repetição posterior concluiu `ESP_FAIL` em 113574 ms, e uma terceira
+  repetição concluiu `ESP_FAIL` em 115055 ms. A causa adicional foi
+  identificada: o preenchimento em 16 KiB aceitava `ENOSPC` diretamente,
+  sem executar a cauda menor. A próxima imagem deve retentar, após esse
+  `ENOSPC`, no tamanho exato da proposta de cache (cabeçalho + payload);
+  essas tentativas não contam como passe.
+- A imagem seguinte alcançou `ESP_ERR_INVALID_STATE` em 113513 ms: a proposta
+  temporária foi aceita e chegou ao `rename`, portanto a geração foi alterada.
+  Isso também não conta como passe. O ensaio passa a usar um segundo arquivo
+  descartável para consumir o espaço residual e exerce somente o caminho
+  `cache.tmp + write + fsync`, sem promover nem sobrescrever `cache.0/1`.
+- A versão sem `rename` também alcançou `ESP_ERR_INVALID_STATE` em 227923 ms.
+  Isso confirmou que LittleFS mantém reserva alocável após os dois arquivos de
+  preenchimento receberem `ENOSPC`; as gerações ativas foram preservadas. A
+  próxima versão consome essa reserva por propostas descartáveis limitadas,
+  cada uma com o formato e `fsync` do cache, até observar a rejeição.
+
+## 2026-09-12 — Remediação A1–A6, build limpo e flash do candidato P4
+
+```text
+Placa: ESP32-P4 revisão v1.3, USB Serial/JTAG COM8. C6 não foi atualizado ou
+reiniciado separadamente.
+
+Build: ESP-IDF 5.5.4-dirty, target esp32p4, diretório novo
+build/audit-fix-final-20260912. A aplicação mede 0x173160 bytes; o menor slot
+OTA tem 0x68cea0 bytes (82%) livres. SHA-256 de np2_p4.bin:
+8D5164425F3F70B40A3EFFB0B04D3421DD3DB80F5B13D778A16F9C9803CA5EA6.
+SHA-256 do sdkconfig:
+078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A.
+
+Validação de software: quatro testes host (cache record, codec/semântica,
+parser JSON estrutural e formatação de sinal) passaram com C11,
+-Wall -Wextra -Werror. O build limpo terminou sem erro.
+
+Flash: esptool.py 4.12.0 gravou bootloader em 0x2000, tabela de partições em
+0x10000, otadata em 0x1b000 e a aplicação em 0x20000. O hash de cada bloco foi
+verificado e houve hard reset por RTS. NVS, storage, imagem C6 e eFuses não
+foram escritos.
+
+Interpretação: esta entrada prova build e gravação da imagem corrigida. Não é
+um passe funcional dos ensaios HTTPS lento/excedido, filesystem cheio ou
+cortes de energia; esses gates continuam pendentes.
+```
+
+## 2026-09-12 — G4, novo relato de filesystem cheio e correção candidata
+
+- O operador relatou `concluido: ESP_ERR_INVALID_STATE em 234461ms`.
+  Não forneceu captura serial completa ou hash dessa imagem nesta interação;
+  não se atribui o resultado a um artefato exato. A tentativa continua reprovada.
+- A investigação host reproduziu a aceitação de todas as propostas com o
+  núcleo LittleFS fixado: após ENOSPC, o arquivo não sincronizado podia ser
+  fechado sem persistir o preenchimento. A causa de software está no ADR-020.
+- Foi corrigido o preenchimento com checkpoints, reabertura após ENOSPC,
+  preservação da causa de erro e limpeza verificada em cada saída. A UI
+  diferencia aprovação de falha. O teste host usa as rotinas reais extraídas
+  do coordenador e LittleFS sobre NOR simulada de 9 MiB.
+- A correção passou os cenários host de cache técnico e snapshot real,
+  repetição/remontagem, I/O, limpeza e prazo. Não houve flash, acesso serial,
+  corte de energia nem operação C6 nesta atividade. Falta repetir na placa
+  com a imagem candidata identificada, log e observação de UI/reboot; G4 aberto.
+- Build limpo candidato: ESP-IDF 5.5.4, target `esp32p4`, base
+  `1d3ca02-dirty` com alterações locais preservadas;
+  `idf.py -B build/full-probe-fix-20260912 -D SDKCONFIG=build/full-probe-fix-20260912/sdkconfig -D IDF_TARGET=esp32p4 build`.
+  App `0x173290`, 82% livre no slot OTA. Dois warnings de geração de
+  `esp_rom gdbinit`; compilação/link concluíram com código zero.
+  SHA256 P4: `BC812CF7E19A6B9464FF5333D243EC3A430A1D175A824AC7C937ADE96B0BDFC6`.
+  SHA256 sdkconfig: `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+  Artefatos e log em `firmware/build/full-probe-fix-20260912*`, ignorados pelo
+  Git. Esta imagem não foi gravada. Teste reproduzível:
+  `./tools/run_cache_full_probe_host_test.ps1`.
+
+## 2026-09-12 — G4, primeira aprovação relatada do ensaio cheio corrigido
+
+- Resultado informado pelo operador após as instruções de flash/reteste:
+  `aprovado esp_ok em 154535ms` — 154,535 s (2 min 34,535 s).
+- A UI reportou aprovação da operação; no código candidato esse resultado
+  exige rejeição por ENOSPC, limpeza confirmada, recuperação do espaço e
+  preservação do registro selecionado. É o primeiro resultado positivo
+  relatado após a correção de checkpoints do ADR-020.
+- A imagem indicada no procedimento foi `build/full-probe-fix-20260912`,
+  SHA256 `BC812CF7E19A6B9464FF5333D243EC3A430A1D175A824AC7C937ADE96B0BDFC6`.
+  Não houve nesta resposta captura do flash, identificação do binário em
+  execução, log serial ou números de geração; a associação ao artefato é
+  contexto do procedimento, não uma verificação independente.
+- Após RESET, o operador confirmou no painel: `geracao 137 integra | cache v1
+  dados v0`. Isso confirma a seleção de uma geração de cache válida após a
+  limpeza/reboot, sem dados de domínio inventados (`dados v0`).
+- Pendentes: segunda execução, observação explícita de continuidade visual/touch
+  e logs do ensaio. Este passe operacional parcial não fecha G4 nem os testes
+  de corte de energia/dados offline.
+
+## 2026-09-12 — G4, imagem de aviso visível para corte físico
+
+- O primeiro acionamento de `G4: CORTE PRE-RENAME` expirou em
+  `ESP_ERR_TIMEOUT` após 10.114 ms sem que o operador visse um aviso na tela.
+  Isso não é um teste físico de recuperação e não é contado como falha do
+  journal: o marco `POWER_CUT_NOW` existia somente no serial.
+- A interface agora lê a janela de corte publicada pelo `FlashCoordinator` e
+  mostra `G4: DESLIGUE AGORA! antes rename (10s)` ou
+  `G4: DESLIGUE AGORA! apos rename (10s)`. Se ninguém desligar a alimentação,
+  ela mostra `G4 corte: NAO VALIDADO (sem corte em 10s)`.
+- Build limpo e flash em 2026-09-12: ESP-IDF 5.5.4, target `esp32p4`,
+  `build/power-cut-ui-fix-20260912`; app `0x173480`, com `0x68CB80` livres
+  no slot OTA de 8 MiB. SHA256 P4:
+  `13F61D7023E7F38DC1046524D637F377F00DA7F35EED9E9B48D6A0A13AD592FF`;
+  SHA256 do sdkconfig:
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+- Esptool gravou bootloader, tabela de partições, OTA-data e app em COM8 e
+  verificou o hash de cada bloco. A placa identificada foi ESP32-P4 v1.3.
+  O C6 não foi gravado nem acessado. Este registro prova a imagem de teste;
+  os dois cortes continuam pendentes de execução física.

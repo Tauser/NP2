@@ -14,6 +14,7 @@ estado com evidência reproduzível registrada em
 | Complete | Gate fechado com as evidências indicadas. |
 | Complete — scoped close | Encerramento autorizado com exclusões declaradas e transferidas para fase posterior. |
 | Ready | Dependências fechadas; o trabalho pode iniciar. |
+| In progress | Implementação iniciada; o gate continua aberto até a evidência requerida. |
 | Blocked | Há gate técnico anterior pendente. Não iniciar integração dependente. |
 
 Regras de execução em todas as fases:
@@ -28,18 +29,18 @@ Regras de execução em todas as fases:
 
 | Fase | Gate | Estado | Resultado que autoriza a próxima |
 |---:|---|---|---|
-| 0 | G0 — reprodução | Complete | Toolchain, lock, partições e defaults reproduzem a imagem P4. |
+| 0 | G0 — reprodução | Complete — scoped close | Toolchain, lock, partições e defaults reproduzem a imagem P4; pacote C6 ainda deve ser fechado antes de G5. |
 | 1 | G1 — boot/display mínimo | Complete — scoped close | Boot P4, PSRAM, DSI, backlight e imagem estável confirmados. Exclusões estão em Fase 2. |
 | 2 | G2 — render e flash | Complete — scoped close | Touch, render, NVS e LittleFS sob carga passaram na placa com XiP em PSRAM. |
 | 3 | G3 — conectividade | Complete — scoped close | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único operaram sem interromper UI no escopo desta unidade. |
-| 4 | G4 — dados offline | Ready | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
-| 5 | G5 — OTA recuperável | Blocked by G3/G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
+| 4 | G4 — dados offline | In progress | Cache e configuração íntegros após corte, corrupção e ausência de rede. |
+| 5 | G5 — OTA recuperável | Blocked by G4 | Atualização P4/C6 assinada, rollback e recovery comprovados. |
 | 6 | G6 — qualificação | Blocked by G0–G5 | Soak, térmica, energia, falhas e desempenho em unidades de amostra. |
 | 7 | G7 — produção | Blocked by G6 | Segurança de produção, fábrica, assistência e rollout operacional. |
 
 ## Fase 0 — Reprodução da base
 
-**Estado:** Complete.
+**Estado:** Complete — scoped close para o P4.
 
 **Objetivo:** tornar o ambiente e o layout reprodutíveis antes de depender de
 qualquer periférico.
@@ -53,6 +54,11 @@ qualquer periférico.
 
 **Gate G0:** uma build limpa reproduz target, revisão, partições e artefatos
 com a resolução de dependências congelada.
+
+**Exclusão registrada:** o perfil C6 está versionado em `coprocessor/` e o
+ESP-Hosted 3.0.6 está fixado por versão/hash no lock P4, mas o repositório ainda
+não contém um artefato C6 reproduzido com diff/hash do patch oficial. Essa
+entrega é obrigatória antes de iniciar a transação conjunta de G5.
 
 ## Fase 1 — Baseline local P4
 
@@ -163,9 +169,11 @@ reset ou degradação de memória.
 placa de qualificação: três ciclos NVS de 64×512 B com reboot, format/erase
 explícito e 64×4 KiB LittleFS com `fsync`/rename/verificação (256 KiB em
 3.814 ms), reboot, e 30 minutos de render ativo sem artefato observado. Ao fim
-do soak, a UI reportou mínimo de SRAM de 291 KiB, mínimo de PSRAM de 2.829 KiB
-e 28.169 B livres na pilha LVGL. A imagem P4 limpa final é identificada na
-evidência; C6 não foi regravado.
+do soak, a UI reportou mínimo de SRAM de 291 KiB e mínimo de PSRAM de 2.829 KiB.
+O valor histórico de 28.169 B para a pilha LVGL não é usado como prova de
+margem porque não é compatível com os 12.288 B configurados no fonte indicado;
+a pilha precisa ser recapturada com imagem/hash exatos. A imagem P4 limpa final
+é identificada na evidência; C6 não foi regravado.
 
 **Contingência:** se o gate falhar, congelar expansão da UI e providers;
 manter cache em RAM e investigar driver, fontes, invalidação, banda PSRAM ou
@@ -229,6 +237,38 @@ térmica, energia e falhas físicas adicionais.
 ## Fase 4 — Dados, cache e UX offline
 
 **Entrada:** G2 e G3 fechados.
+
+**Estado:** In progress em 2026-09-11. O primeiro incremento introduz o
+`app_loop` como escritor único de uma projeção de UI sem segredos e um
+`EventBus` de 32 eventos pequenos. A tela de diagnóstico consome essa projeção
+para conectividade e persistência; ela não consulta esses serviços diretamente.
+O segundo incremento extraiu o contrato portável do registro de cache (CRC,
+schema, limite de payload e seleção da geração válida mais recente), com teste
+host; o `FlashCoordinator` conserva a propriedade de LittleFS. O terceiro
+incremento adiciona ensaios físicos explícitos de filesystem cheio e de corte
+nas fronteiras `fsync`/`rename`, documentados em `G4-VALIDATION.md`. O build P4
+passou; o cenário de corrupção/reboot foi repetido, mas os novos ensaios e os
+dados de domínio permanecem pendentes e G4 continua aberto. O quarto
+incremento conecta o snapshot offline binário de 25 bytes ao
+`FlashCoordinator`, à projeção do `app_loop` e aos cards de clima/mercado;
+inclui codecs e parsers portáteis, limitados a 768 B, para Open-Meteo e
+CoinGecko. O build P4 e os testes host passaram. Os adapters HTTPS, a escolha
+explícita de localidade, os novos ensaios físicos e a prova de dados do domínio
+após reboot continuam pendentes.
+O inventário verificável de entregas e lacunas está em
+[`G4-CLOSURE-AUDIT.md`](G4-CLOSURE-AUDIT.md).
+
+Em 2026-09-12, a revisão A1–A6 substituiu a busca textual por parsing JSON
+estrutural limitado, centralizou faixas semânticas do snapshot, corrigiu sinais
+fracionários na UI, passou o HTTPS para leitura abortável por bytes/deadline e
+endureceu `ENOSPC`/limpeza no ensaio cheio usando o registro real de 25 B.
+Testes host e build P4 passaram; HTTPS e storage ainda exigem repetição HIL.
+
+Após a correção de checkpoints do preenchimento (ADR-020), o operador
+relatou `aprovado ESP_OK` em 154.535 ms no ensaio de filesystem cheio.
+É um primeiro passe operacional parcial: confirmação da geração após reboot,
+segunda execução, continuidade visual e logs ainda não foram fornecidos.
+Os ensaios de corte de energia e dados offline continuam pendentes; G4 aberto.
 
 **Trabalho**
 
