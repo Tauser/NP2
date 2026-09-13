@@ -1744,3 +1744,23 @@ cortes de energia; esses gates continuam pendentes.
   verificou o hash de cada bloco. A placa identificada foi ESP32-P4 v1.3.
   O C6 não foi gravado nem acessado. Este registro prova a imagem de teste;
   os dois cortes continuam pendentes de execução física.
+
+## 2026-09-12 — G4, TimeService: build e flash P4
+
+- Commit P4: `2445f05` (`Tools: habilitar refresh manual de dados offline`).
+  A imagem contém o `TimeService`, que mantém SNTP disponível após a
+  inicialização e publica a confiança de hora consumida pelos cards offline.
+- Build: ESP-IDF 5.5.4, target `esp32p4`, diretório
+  `build/time-service-20260912`. Aplicação `0x174e70`, com `0x68b190` bytes
+  (82%) livres no menor slot OTA. SHA256 P4:
+  `5B62C7F3C4D26CC0E03512D543AADC6F5AFE5C911621FE7CC0AD518863D8E459`.
+  SHA256 do sdkconfig:
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+- Flash: `idf.py -B build/time-service-20260912 -p COM8 flash` detectou
+  ESP32-P4 revisão v1.3. Esptool 4.12.0 gravou e verificou por hash
+  bootloader (`0x2000`), aplicação (`0x20000`), tabela de partições
+  (`0x10000`) e OTA-data (`0x1b000`), seguido de hard reset via RTS.
+  NVS, `storage`, C6 e eFuses não foram gravados.
+- Este registro comprova a gravação do candidato. Ainda falta o ensaio
+  funcional: após rede e NTP `ESP_OK`, disparar refresh Brasília e confirmar
+  `hora confiavel` no rodapé e `ha 0 min` nos dois cards.
