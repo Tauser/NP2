@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "origin": "live",
+  "weather": {
+    "available": true,
+    "stale": false,
+    "temperatureDeciC": -5,
+    "relativeHumidityPercent": 87,
+    "weatherCode": 71,
+    "observedAtUnixS": 1789176000
+  },
+  "market": {
+    "available": false,
+    "stale": false
+  }
+}

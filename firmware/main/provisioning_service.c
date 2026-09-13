@@ -188,12 +188,28 @@ static void process_line(uint8_t *line, size_t length)
         result = flash_coordinator_request_cache_corrupt_newest();
         ESP_LOGI(TAG, "maintenance command=CACHE_CORRUPT_NEWEST result=%s",
                  esp_err_to_name(result));
+    } else if (command_length == 16U && memcmp(command, "CACHE_FULL_PROBE", 16U) == 0) {
+        result = flash_coordinator_request_cache_full_probe();
+        ESP_LOGI(TAG, "maintenance command=CACHE_FULL_PROBE result=%s",
+                 esp_err_to_name(result));
+    } else if (command_length == 23U && memcmp(command, "CACHE_CUT_BEFORE_RENAME", 23U) == 0) {
+        result = flash_coordinator_request_cache_cut_before_rename();
+        ESP_LOGI(TAG, "maintenance command=CACHE_CUT_BEFORE_RENAME result=%s",
+                 esp_err_to_name(result));
+    } else if (command_length == 22U && memcmp(command, "CACHE_CUT_AFTER_RENAME", 22U) == 0) {
+        result = flash_coordinator_request_cache_cut_after_rename();
+        ESP_LOGI(TAG, "maintenance command=CACHE_CUT_AFTER_RENAME result=%s",
+                 esp_err_to_name(result));
     } else if (command_length == 12U && memcmp(command, "CONFIG_WRITE", 12U) == 0) {
         result = flash_coordinator_request_config_journal_write();
         ESP_LOGI(TAG, "maintenance command=CONFIG_WRITE result=%s", esp_err_to_name(result));
     } else if (command_length == 21U && memcmp(command, "CONFIG_CORRUPT_NEWEST", 21U) == 0) {
         result = flash_coordinator_request_config_corrupt_newest();
         ESP_LOGI(TAG, "maintenance command=CONFIG_CORRUPT_NEWEST result=%s",
+                 esp_err_to_name(result));
+    } else if (command_length == 20U && memcmp(command, "REFRESH_OFFLINE_DATA", 20U) == 0) {
+        result = network_validation_service_request_offline_data_refresh();
+        ESP_LOGI(TAG, "maintenance command=REFRESH_OFFLINE_DATA result=%s",
                  esp_err_to_name(result));
     } else if (command_length == 5U && memcmp(command, "CHECK", 5U) == 0) {
         result = network_validation_service_request_check(NETWORK_VALIDATION_MODE_NORMAL);

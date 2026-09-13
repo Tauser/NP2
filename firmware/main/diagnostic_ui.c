@@ -15,8 +15,8 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 
+#include "app_state.h"
 #include "diagnostic_ui.h"
-#include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
 #include "provisioning_service.h"
@@ -34,6 +34,12 @@ static const char *const s_target_names[DIAG_TOUCH_TARGET_COUNT] = {
     "SE", "SD", "IE", "ID", "CENTRO",
 };
 
+typedef enum {
+    CACHE_TEST_FULL_FILESYSTEM,
+    CACHE_TEST_CUT_BEFORE_RENAME,
+    CACHE_TEST_CUT_AFTER_RENAME,
+} cache_test_action_t;
+
 typedef struct {
     lv_obj_t *coordinate_label;
     lv_obj_t *state_label;
@@ -46,6 +52,15 @@ typedef struct {
     lv_obj_t *wifi_setup_button;
     lv_obj_t *wifi_setup_button_label;
     lv_obj_t *provisioning_label;
+    lv_obj_t *cache_full_button;
+    lv_obj_t *cache_full_button_label;
+    lv_obj_t *cache_cut_before_button;
+    lv_obj_t *cache_cut_before_button_label;
+    lv_obj_t *cache_cut_after_button;
+    lv_obj_t *cache_cut_after_button_label;
+    lv_obj_t *offline_refresh_button;
+    lv_obj_t *offline_refresh_button_label;
+    lv_obj_t *cache_test_status_label;
     lv_obj_t *stress_button;
     lv_obj_t *stress_button_label;
     lv_obj_t *stress_bar;
@@ -83,9 +98,29 @@ typedef struct {
     bool soak_baseline_captured;
     bool completed_campaign_available;
     bool compaction_requested;
+    uint32_t cache_test_sequence;
+    cache_test_action_t cache_test_action;
 } diagnostic_ui_state_t;
 
 static diagnostic_ui_state_t s_state;
+
+static const cache_test_action_t s_cache_full_action = CACHE_TEST_FULL_FILESYSTEM;
+static const cache_test_action_t s_cache_cut_before_action = CACHE_TEST_CUT_BEFORE_RENAME;
+static const cache_test_action_t s_cache_cut_after_action = CACHE_TEST_CUT_AFTER_RENAME;
+
+static const char *cache_test_action_name(cache_test_action_t action)
+{
+    switch (action) {
+    case CACHE_TEST_FULL_FILESYSTEM:
+        return "G4 filesystem cheio";
+    case CACHE_TEST_CUT_BEFORE_RENAME:
+        return "G4 corte antes do rename";
+    case CACHE_TEST_CUT_AFTER_RENAME:
+        return "G4 corte apos o rename";
+    default:
+        return "G4 ensaio";
+    }
+}
 
 static void update_target_label(size_t index)
 {
@@ -132,104 +167,154 @@ static void capture_soak_baseline(void)
 
 static void update_flash_status_label(void)
 {
-    flash_coordinator_status_t status = {0};
-    flash_coordinator_get_status(&status);
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    const app_storage_projection_t *const status = &projection.storage;
 
-    if (!status.ready) {
+    if (!projection.ready || !status->ready) {
         lv_label_set_text_fmt(s_state.flash_status_label, "NVS diagnostico: indisponivel (%s)",
-                              esp_err_to_name(status.init_result));
-    } else if (!status.littlefs_ready && !status.busy && !status.pending) {
+                              esp_err_to_name(status->init_result));
+    } else if (!status->littlefs_ready && !status->busy && !status->pending) {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "LittleFS: segure o botao para formatar storage (%s)",
-                              esp_err_to_name(status.littlefs_init_result));
-    } else if (status.busy || status.pending) {
+                              esp_err_to_name(status->littlefs_init_result));
+    } else if (status->busy || status->pending) {
         lv_label_set_text(s_state.flash_status_label, "Persistencia diagnostica: solicitacao em andamento");
-    } else if (status.last_littlefs_format) {
+    } else if (status->last_littlefs_format) {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "LittleFS formatado: %s em %lums",
-                              esp_err_to_name(status.last_result),
-                              (unsigned long)status.last_duration_ms);
+                              esp_err_to_name(status->last_result),
+                              (unsigned long)status->last_duration_ms);
         s_state.compaction_requested = false;
         lv_label_set_text(s_state.flash_probe_button_label,
                           "TOQUE: LFS 64x4K | SEGURE: FORMATAR LFS");
-    } else if (status.last_littlefs_writes > 0U) {
+    } else if (status->last_littlefs_writes > 0U) {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "Cache g%lu CRC=%s | LFS #%lu: %s %lu x 4K=%luK em %lums",
-                              (unsigned long)status.cache_generation,
-                              esp_err_to_name(status.cache_result),
-                              (unsigned long)status.last_sequence,
-                              esp_err_to_name(status.last_result),
-                              (unsigned long)status.last_littlefs_writes,
-                              (unsigned long)(status.last_littlefs_verified_bytes / 1024U),
-                              (unsigned long)status.last_duration_ms);
+                              (unsigned long)status->cache_generation,
+                              esp_err_to_name(status->cache_result),
+                              (unsigned long)status->last_sequence,
+                              esp_err_to_name(status->last_result),
+                              (unsigned long)status->last_littlefs_writes,
+                              (unsigned long)(status->last_littlefs_verified_bytes / 1024U),
+                              (unsigned long)status->last_duration_ms);
         s_state.compaction_requested = false;
         lv_label_set_text(s_state.flash_probe_button_label,
                           "TOQUE: LFS 64x4K | SEGURE: FORMATAR LFS");
-    } else if (status.completed_count > 0U) {
-        if (status.last_batch_writes > 0U) {
+    } else if (status->completed_count > 0U) {
+        if (status->last_batch_writes > 0U) {
             lv_label_set_text_fmt(s_state.flash_status_label,
                                   "NVS lote #%lu: %s %lu x 512B em %lums livre %lu>%lu",
-                                  (unsigned long)status.last_sequence,
-                                  esp_err_to_name(status.last_result),
-                                  (unsigned long)status.last_batch_writes,
-                                  (unsigned long)status.last_duration_ms,
-                                  (unsigned long)status.last_free_entries_before,
-                                  (unsigned long)status.last_free_entries_after);
+                                  (unsigned long)status->last_sequence,
+                                  esp_err_to_name(status->last_result),
+                                  (unsigned long)status->last_batch_writes,
+                                  (unsigned long)status->last_duration_ms,
+                                  (unsigned long)status->last_free_entries_before,
+                                  (unsigned long)status->last_free_entries_after);
             s_state.compaction_requested = false;
             lv_label_set_text(s_state.flash_probe_button_label,
                               "TOQUE: NVS | SEGURE: LOTE 64x512B");
         } else {
             lv_label_set_text_fmt(s_state.flash_status_label,
                                   "NVS diagnostico #%lu: %s em %lums",
-                                  (unsigned long)status.last_sequence,
-                                  esp_err_to_name(status.last_result),
-                                  (unsigned long)status.last_duration_ms);
+                                  (unsigned long)status->last_sequence,
+                                  esp_err_to_name(status->last_result),
+                                  (unsigned long)status->last_duration_ms);
         }
-    } else if (status.cache_valid) {
+    } else if (status->cache_valid) {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "Cache g%lu CRC=%s | Config g%lu CRC=%s",
-                              (unsigned long)status.cache_generation,
-                              esp_err_to_name(status.cache_result),
-                              (unsigned long)status.config_generation,
-                              esp_err_to_name(status.config_result));
-    } else if (status.cache_result == ESP_ERR_NOT_FOUND) {
+                              (unsigned long)status->cache_generation,
+                              esp_err_to_name(status->cache_result),
+                              (unsigned long)status->config_generation,
+                              esp_err_to_name(status->config_result));
+    } else if (status->cache_result == ESP_ERR_NOT_FOUND) {
         lv_label_set_text(s_state.flash_status_label,
                           "Cache offline vazio: nenhuma geracao valida ainda");
     } else {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "Cache offline invalido (%s); storage nao foi formatado",
-                              esp_err_to_name(status.cache_result));
+                              esp_err_to_name(status->cache_result));
     }
 }
 
-static const char *connectivity_state_name(connectivity_diagnostic_state_t state)
+static void update_cache_test_status_label(void)
+{
+    if (s_state.cache_test_sequence == 0U) {
+        return;
+    }
+
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if ((s_state.cache_test_action == CACHE_TEST_CUT_BEFORE_RENAME ||
+         s_state.cache_test_action == CACHE_TEST_CUT_AFTER_RENAME) &&
+        status.power_cut_window_active) {
+        const uint32_t seconds_left = (status.power_cut_remaining_ms + 999U) / 1000U;
+        lv_label_set_text_fmt(s_state.state_label, "G4: DESLIGUE AGORA! %s (%lus)",
+                              status.power_cut_after_rename ? "apos rename" : "antes rename",
+                              (unsigned long)seconds_left);
+        return;
+    }
+    if (s_state.cache_test_action == CACHE_TEST_FULL_FILESYSTEM && status.full_probe_active) {
+        if (status.full_probe_target_bytes == 0U) {
+            lv_label_set_text(s_state.state_label, "G4: preparando storage");
+        } else if (status.full_probe_syncing) {
+            lv_label_set_text(s_state.state_label,
+                              "G4: testando rejeicao e limpando; aguarde");
+        } else {
+            lv_label_set_text_fmt(s_state.state_label, "G4: preenchendo %lu/%lu KiB",
+                                  (unsigned long)(status.full_probe_written_bytes / 1024U),
+                                  (unsigned long)(status.full_probe_target_bytes / 1024U));
+        }
+        return;
+    }
+    if (status.busy || status.pending || status.last_sequence != s_state.cache_test_sequence) {
+        return;
+    }
+
+    if ((s_state.cache_test_action == CACHE_TEST_CUT_BEFORE_RENAME ||
+         s_state.cache_test_action == CACHE_TEST_CUT_AFTER_RENAME) &&
+        status.last_result == ESP_ERR_TIMEOUT) {
+        lv_label_set_text(s_state.state_label,
+                          "G4 corte: NAO VALIDADO (sem corte em 10s)");
+    } else {
+        lv_label_set_text_fmt(s_state.state_label, "%s %s: %s em %lums",
+                              cache_test_action_name(s_state.cache_test_action),
+                              status.last_result == ESP_OK ? "aprovado" : "FALHOU",
+                              esp_err_to_name(status.last_result),
+                              (unsigned long)status.last_duration_ms);
+    }
+    s_state.cache_test_sequence = 0U;
+}
+
+static const char *connectivity_state_name(app_network_state_t state)
 {
     switch (state) {
-    case CONNECTIVITY_DIAGNOSTIC_STATE_IDLE:
+    case APP_NETWORK_STATE_IDLE:
         return "ociosa";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_STARTING:
+    case APP_NETWORK_STATE_STARTING:
         return "iniciando Hosted";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_LINK_UP:
+    case APP_NETWORK_STATE_LINK_UP:
         return "enlace SDIO pronto";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_WIFI_READY:
+    case APP_NETWORK_STATE_WIFI_READY:
         return "Wi-Fi pronto";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING:
+    case APP_NETWORK_STATE_SCANNING:
         return "varrendo APs";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE:
+    case APP_NETWORK_STATE_SCAN_COMPLETE:
         return "sem credencial";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_ASSOCIATING:
+    case APP_NETWORK_STATE_ASSOCIATING:
         return "associando";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_WAITING_FOR_IP:
+    case APP_NETWORK_STATE_WAITING_FOR_IP:
         return "aguardando DHCP";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_ONLINE:
+    case APP_NETWORK_STATE_ONLINE:
         return "IP adquirido";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF:
+    case APP_NETWORK_STATE_BACKOFF:
         return "recuperando";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_LINK_DOWN:
+    case APP_NETWORK_STATE_LINK_DOWN:
         return "C6/SDIO offline";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_RECOVERING_LINK:
+    case APP_NETWORK_STATE_RECOVERING_LINK:
         return "recuperando C6";
-    case CONNECTIVITY_DIAGNOSTIC_STATE_FAILED:
+    case APP_NETWORK_STATE_FAILED:
         return "erro";
     default:
         return "desconhecido";
@@ -238,19 +323,20 @@ static const char *connectivity_state_name(connectivity_diagnostic_state_t state
 
 static void update_connectivity_label(void)
 {
-    connectivity_diagnostic_status_t status = {0};
-    connectivity_diagnostic_get_status(&status);
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    const app_network_projection_t *const status = &projection.network;
 
     lv_label_set_text_fmt(s_state.connectivity_label,
                           "Rede: %s | APs=%u | tentativas=%lu | C6falhas=%lu | IP=%s | ultimo=%s",
-                          connectivity_state_name(status.state),
-                          (unsigned int)status.access_points_found,
-                          (unsigned long)status.reconnect_attempts,
-                          (unsigned long)status.transport_failures,
-                          status.online ? "sim" : "nao",
-                          esp_err_to_name(status.last_result));
+                          connectivity_state_name(status->state),
+                          (unsigned int)status->access_points_found,
+                          (unsigned long)status->reconnect_attempts,
+                          (unsigned long)status->transport_failures,
+                          status->online ? "sim" : "nao",
+                          esp_err_to_name(status->last_result));
     lv_obj_set_style_text_color(s_state.connectivity_label,
-                                status.state == CONNECTIVITY_DIAGNOSTIC_STATE_FAILED
+                                status->state == APP_NETWORK_STATE_FAILED
                                     ? lv_color_hex(0xF4C95D)
                                     : lv_color_hex(0x9DB4D1),
                                 LV_PART_MAIN);
@@ -342,6 +428,7 @@ static void update_telemetry(bool update_view)
                               (unsigned int)lvgl_stack_free_bytes);
     }
     update_flash_status_label();
+    update_cache_test_status_label();
     if (s_state.completed_campaign_available && !s_state.stress_active) {
         lv_label_set_text_fmt(s_state.render_label,
                               "campanha: render max=%lums | flush_cb max=%lums | ciclo=%lu | pico carga=%lu",
@@ -404,6 +491,58 @@ static void flash_probe_button_event_cb(lv_event_t *event)
     } else {
         lv_label_set_text_fmt(s_state.flash_status_label,
                               "LittleFS recusado: %s", esp_err_to_name(request_err));
+    }
+}
+
+static void cache_test_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    const cache_test_action_t action = *(const cache_test_action_t *)lv_event_get_user_data(event);
+    const char *const name = cache_test_action_name(action);
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    esp_err_t request_err = ESP_ERR_INVALID_ARG;
+    switch (action) {
+    case CACHE_TEST_FULL_FILESYSTEM:
+        request_err = flash_coordinator_request_cache_full_probe();
+        break;
+    case CACHE_TEST_CUT_BEFORE_RENAME:
+        request_err = flash_coordinator_request_cache_cut_before_rename();
+        break;
+    case CACHE_TEST_CUT_AFTER_RENAME:
+        request_err = flash_coordinator_request_cache_cut_after_rename();
+        break;
+    default:
+        break;
+    }
+
+    if (request_err == ESP_OK) {
+        s_state.cache_test_sequence = status.last_sequence + 1U;
+        s_state.cache_test_action = action;
+        lv_label_set_text_fmt(s_state.state_label, "%s: NA FILA%s", name,
+                              s_state.stress_active ? "; pause CARGA para iniciar" : "");
+    } else {
+        lv_label_set_text_fmt(s_state.state_label, "%s recusado: %s", name,
+                              esp_err_to_name(request_err));
+    }
+}
+
+static void offline_refresh_button_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
+
+    const esp_err_t result = network_validation_service_request_offline_data_refresh();
+    if (result == ESP_OK) {
+        lv_label_set_text(s_state.state_label,
+                          "G4 dados Brasilia: NA FILA; acompanhe REDE LOCAL");
+    } else {
+        lv_label_set_text_fmt(s_state.state_label,
+                              "G4 dados Brasilia recusado: %s", esp_err_to_name(result));
     }
 }
 
@@ -747,15 +886,70 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_center(s_state.wifi_setup_button_label);
     lv_obj_add_event_cb(s_state.wifi_setup_button, wifi_setup_button_event_cb, LV_EVENT_CLICKED, NULL);
 
+    s_state.cache_full_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.cache_full_button, 280, 30);
+    lv_obj_align(s_state.cache_full_button, LV_ALIGN_TOP_LEFT, 44, 516);
+    lv_obj_set_style_radius(s_state.cache_full_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.cache_full_button, lv_color_hex(0x6B4214), LV_PART_MAIN);
+    s_state.cache_full_button_label = lv_label_create(s_state.cache_full_button);
+    lv_label_set_text(s_state.cache_full_button_label, "G4: FS CHEIO");
+    lv_obj_set_style_text_color(s_state.cache_full_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.cache_full_button_label);
+    lv_obj_add_event_cb(s_state.cache_full_button, cache_test_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)&s_cache_full_action);
+
+    s_state.cache_cut_before_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.cache_cut_before_button, 280, 30);
+    lv_obj_align(s_state.cache_cut_before_button, LV_ALIGN_TOP_MID, 0, 516);
+    lv_obj_set_style_radius(s_state.cache_cut_before_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.cache_cut_before_button, lv_color_hex(0x7A321D), LV_PART_MAIN);
+    s_state.cache_cut_before_button_label = lv_label_create(s_state.cache_cut_before_button);
+    lv_label_set_text(s_state.cache_cut_before_button_label, "G4: CORTE PRE-RENAME");
+    lv_obj_set_style_text_color(s_state.cache_cut_before_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.cache_cut_before_button_label);
+    lv_obj_add_event_cb(s_state.cache_cut_before_button, cache_test_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)&s_cache_cut_before_action);
+
+    s_state.cache_cut_after_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.cache_cut_after_button, 280, 30);
+    lv_obj_align(s_state.cache_cut_after_button, LV_ALIGN_TOP_RIGHT, -44, 516);
+    lv_obj_set_style_radius(s_state.cache_cut_after_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.cache_cut_after_button, lv_color_hex(0x7A321D), LV_PART_MAIN);
+    s_state.cache_cut_after_button_label = lv_label_create(s_state.cache_cut_after_button);
+    lv_label_set_text(s_state.cache_cut_after_button_label, "G4: CORTE POS-RENAME");
+    lv_obj_set_style_text_color(s_state.cache_cut_after_button_label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
+    lv_obj_center(s_state.cache_cut_after_button_label);
+    lv_obj_add_event_cb(s_state.cache_cut_after_button, cache_test_button_event_cb, LV_EVENT_CLICKED,
+                        (void *)&s_cache_cut_after_action);
+
+    s_state.offline_refresh_button = lv_button_create(screen);
+    lv_obj_set_size(s_state.offline_refresh_button, 280, 30);
+    lv_obj_align(s_state.offline_refresh_button, LV_ALIGN_TOP_MID, 0, 550);
+    lv_obj_set_style_radius(s_state.offline_refresh_button, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.offline_refresh_button, lv_color_hex(0x126A50), LV_PART_MAIN);
+    s_state.offline_refresh_button_label = lv_label_create(s_state.offline_refresh_button);
+    lv_label_set_text(s_state.offline_refresh_button_label, "G4: ATUALIZAR DADOS BRASILIA");
+    lv_obj_set_style_text_color(s_state.offline_refresh_button_label, lv_color_hex(0xF4F7FB),
+                                LV_PART_MAIN);
+    lv_obj_center(s_state.offline_refresh_button_label);
+    lv_obj_add_event_cb(s_state.offline_refresh_button, offline_refresh_button_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+
+    s_state.cache_test_status_label = lv_label_create(screen);
+    lv_obj_add_flag(s_state.cache_test_status_label, LV_OBJ_FLAG_HIDDEN);
+
     s_state.provisioning_label = lv_label_create(screen);
     lv_label_set_text(s_state.provisioning_label, "USB: fechado");
     lv_obj_set_style_text_color(s_state.provisioning_label, lv_color_hex(0x9DB4D1), LV_PART_MAIN);
-    lv_obj_align(s_state.provisioning_label, LV_ALIGN_TOP_MID, 0, 518);
+    lv_obj_align(s_state.provisioning_label, LV_ALIGN_TOP_MID, 0, 646);
 
     s_state.state_label = lv_label_create(screen);
     lv_label_set_text(s_state.state_label, "AGUARDANDO TOQUE");
     lv_obj_set_style_text_color(s_state.state_label, lv_color_hex(0xF4C95D), LV_PART_MAIN);
-    lv_obj_align(s_state.state_label, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_width(s_state.state_label, 920);
+    lv_label_set_long_mode(s_state.state_label, LV_LABEL_LONG_MODE_CLIP);
+    lv_obj_set_style_text_align(s_state.state_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(s_state.state_label, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     s_state.targets[0] = create_target(screen, 0, LV_ALIGN_TOP_LEFT, DIAG_TARGET_MARGIN, 130);
     s_state.targets[1] = create_target(screen, 1, LV_ALIGN_TOP_RIGHT, -DIAG_TARGET_MARGIN, 130);

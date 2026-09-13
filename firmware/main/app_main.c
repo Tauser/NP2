@@ -3,11 +3,13 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
+#include "app_state.h"
 #include "board_bringup.h"
 #include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
 #include "provisioning_service.h"
+#include "time_service.h"
 
 static const char *const TAG = "np2_boot";
 
@@ -50,11 +52,21 @@ void app_main(void)
                  esp_err_to_name(provisioning_err));
     }
 
+    const esp_err_t time_service_err = time_service_start();
+    if (time_service_err != ESP_OK) {
+        ESP_LOGE(TAG, "Time service unavailable: %s", esp_err_to_name(time_service_err));
+    }
+
     const esp_err_t validation_err = network_validation_service_start();
     if (validation_err != ESP_OK) {
         ESP_LOGE(TAG, "Network validation service unavailable: %s",
                  esp_err_to_name(validation_err));
     }
 
-    ESP_LOGI(TAG, "P4 local bring-up ready; Phase 3 Hosted/Wi-Fi probe runs asynchronously");
+    const esp_err_t app_state_err = app_state_start();
+    if (app_state_err != ESP_OK) {
+        ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
+    }
+
+    ESP_LOGI(TAG, "P4 local bring-up ready; Phase 4 state projection runs asynchronously");
 }

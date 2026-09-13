@@ -8,9 +8,13 @@
  */
 #include "flash_coordinator.h"
 
+#include "cache_record.h"
+#include "offline_data_codec.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -33,8 +37,13 @@
 #define FLASH_COORDINATOR_LITTLEFS_WRITES 64U
 #define FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES 4096U
 #define FLASH_COORDINATOR_LITTLEFS_VERIFY_CHUNK_BYTES 256U
-#define FLASH_COORDINATOR_CACHE_MAGIC UINT32_C(0x4e503243)
-#define FLASH_COORDINATOR_CACHE_SCHEMA_VERSION 1U
+#define FLASH_COORDINATOR_FULL_PROBE_CHUNK_BYTES (16U * 1024U)
+#define FLASH_COORDINATOR_FULL_PROBE_TAIL_BYTES \
+    (sizeof(cache_record_header_t) + OFFLINE_DATA_ENCODED_SIZE)
+#define FLASH_COORDINATOR_FULL_PROBE_MAX_PROPOSALS 60U
+#define FLASH_COORDINATOR_FULL_PROBE_PATH_BYTES 48U
+#define FLASH_COORDINATOR_POWER_CUT_WINDOW_MS 10000U
+#define FLASH_COORDINATOR_OFFLINE_DATA_MIN_INTERVAL_US (30LL * 60LL * 1000LL * 1000LL)
 
 static const char *const TAG = "flash_coord";
 static const char *const NVS_PARTITION = "nvs";
@@ -48,16 +57,8 @@ static const char *const LITTLEFS_BASE_PATH = "/lfsdiag";
 static const char *const LITTLEFS_TMP_PATH = "/lfsdiag/cache.tmp";
 static const char *const LITTLEFS_GENERATION_ZERO_PATH = "/lfsdiag/cache.0";
 static const char *const LITTLEFS_GENERATION_ONE_PATH = "/lfsdiag/cache.1";
-
-typedef struct {
-    uint32_t magic;
-    uint16_t schema_version;
-    uint16_t header_size;
-    uint32_t generation;
-    uint32_t payload_size;
-    uint32_t payload_crc32;
-    uint32_t header_crc32;
-} cache_record_header_t;
+static const char *const LITTLEFS_FULL_PROBE_PATH = "/lfsdiag/full-probe.tmp";
+static const char *const LITTLEFS_FULL_PROBE_TAIL_PATH = "/lfsdiag/full-probe.tail";
 
 typedef struct {
     cache_record_header_t header;
@@ -70,6 +71,10 @@ typedef enum {
     FLASH_REQUEST_LITTLEFS_PROBE,
     FLASH_REQUEST_LITTLEFS_FORMAT,
     FLASH_REQUEST_CACHE_CORRUPT_NEWEST,
+    FLASH_REQUEST_CACHE_FULL_PROBE,
+    FLASH_REQUEST_CACHE_CUT_BEFORE_RENAME,
+    FLASH_REQUEST_CACHE_CUT_AFTER_RENAME,
+    FLASH_REQUEST_OFFLINE_DATA_WRITE,
     FLASH_REQUEST_CONFIG_JOURNAL_WRITE,
     FLASH_REQUEST_CONFIG_CORRUPT_NEWEST,
 } flash_request_kind_t;
@@ -77,26 +82,80 @@ typedef enum {
 typedef struct {
     flash_request_kind_t kind;
     uint32_t sequence;
+    offline_data_snapshot_t offline_data;
 } flash_request_t;
 
 static QueueHandle_t s_request_queue;
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static flash_coordinator_status_t s_status;
 static int64_t s_last_success_us;
+static int64_t s_last_offline_data_write_us;
+static int64_t s_power_cut_deadline_us;
 
 static void refresh_cache_status(void);
 static void refresh_config_status(void);
 
-static uint32_t crc32(const uint8_t *data, size_t length)
+static bool make_full_probe_proposal_path(size_t index, char *out_path, size_t out_size)
 {
-    uint32_t crc = UINT32_MAX;
-    for (size_t index = 0; index < length; ++index) {
-        crc ^= data[index];
-        for (uint32_t bit = 0; bit < 8U; ++bit) {
-            crc = (crc >> 1U) ^ (UINT32_C(0xedb88320) & (0U - (crc & 1U)));
+    const int written = snprintf(out_path, out_size, "/lfsdiag/full-probe.proposal.%u",
+                                 (unsigned int)index);
+    return written > 0 && (size_t)written < out_size;
+}
+
+static esp_err_t remove_full_probe_files(void)
+{
+    esp_err_t result = ESP_OK;
+    const char *const paths[] = {
+        LITTLEFS_FULL_PROBE_PATH,
+        LITTLEFS_FULL_PROBE_TAIL_PATH,
+    };
+    for (size_t index = 0; index < sizeof(paths) / sizeof(paths[0]); ++index) {
+        if (unlink(paths[index]) != 0 && errno != ENOENT) {
+            ESP_LOGE(TAG, "cannot remove full-filesystem probe file %s: errno=%d", paths[index],
+                     errno);
+            result = ESP_FAIL;
         }
     }
-    return ~crc;
+    for (size_t index = 0; index < FLASH_COORDINATOR_FULL_PROBE_MAX_PROPOSALS; ++index) {
+        char path[FLASH_COORDINATOR_FULL_PROBE_PATH_BYTES] = {0};
+        if (!make_full_probe_proposal_path(index, path, sizeof(path))) {
+            result = ESP_ERR_INVALID_SIZE;
+            continue;
+        }
+        if (unlink(path) != 0 && errno != ENOENT) {
+            ESP_LOGE(TAG, "cannot remove full-filesystem probe proposal %s: errno=%d",
+                     path, errno);
+            result = ESP_FAIL;
+        }
+    }
+    return result;
+}
+
+static esp_err_t read_selected_offline_data(const cache_record_header_t *header,
+                                            offline_data_snapshot_t *out_snapshot)
+{
+    if (header == NULL || out_snapshot == NULL ||
+        header->payload_size != OFFLINE_DATA_ENCODED_SIZE) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const char *const path = (header->generation & 1U) == 0U
+                                 ? LITTLEFS_GENERATION_ZERO_PATH
+                                 : LITTLEFS_GENERATION_ONE_PATH;
+    const int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        return errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    }
+    uint8_t payload[OFFLINE_DATA_ENCODED_SIZE] = {0};
+    esp_err_t result = ESP_OK;
+    if (lseek(fd, (off_t)sizeof(cache_record_header_t), SEEK_SET) < 0 ||
+        read(fd, payload, sizeof(payload)) != (ssize_t)sizeof(payload) ||
+        !offline_data_snapshot_decode(payload, sizeof(payload), out_snapshot)) {
+        result = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (close(fd) != 0 && result == ESP_OK) {
+        result = ESP_FAIL;
+    }
+    return result;
 }
 
 static esp_err_t mount_littlefs(void)
@@ -113,7 +172,18 @@ static esp_err_t mount_littlefs(void)
         .dont_mount = false,
         .grow_on_mount = false,
     };
-    return esp_vfs_littlefs_register(&config);
+    const esp_err_t result = esp_vfs_littlefs_register(&config);
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    /* A reset during the deliberately full G4 probe must not strand storage
+     * full. This path is probe-owned only and never touches cache generations. */
+    if (remove_full_probe_files() != ESP_OK) {
+        ESP_LOGE(TAG, "cannot remove interrupted full-filesystem probe files");
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 static esp_err_t format_and_mount_littlefs(void)
@@ -136,6 +206,30 @@ static void set_busy(bool busy, bool pending)
     portENTER_CRITICAL(&s_status_lock);
     s_status.busy = busy;
     s_status.pending = pending;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void set_full_probe_progress(bool active, bool syncing, uint32_t written_bytes,
+                                    uint32_t target_bytes)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.full_probe_active = active;
+    s_status.full_probe_syncing = syncing;
+    s_status.full_probe_written_bytes = written_bytes;
+    s_status.full_probe_target_bytes = target_bytes;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static void set_power_cut_window(bool active, bool after_rename)
+{
+    const int64_t deadline_us = active
+                                    ? esp_timer_get_time() +
+                                          (int64_t)FLASH_COORDINATOR_POWER_CUT_WINDOW_MS * 1000LL
+                                    : 0LL;
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.power_cut_window_active = active;
+    s_status.power_cut_after_rename = active && after_rename;
+    s_power_cut_deadline_us = deadline_us;
     portEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -225,24 +319,14 @@ static esp_err_t write_all(int fd, const uint8_t *buffer, size_t size)
     while (offset < size) {
         const ssize_t written = write(fd, buffer + offset, size - offset);
         if (written <= 0) {
-            ESP_LOGE(TAG, "LittleFS write failed: errno=%d", errno);
+            const int failure_errno = written < 0 ? errno : EIO;
+            ESP_LOGE(TAG, "LittleFS write failed: errno=%d", failure_errno);
+            errno = failure_errno;
             return ESP_FAIL;
         }
         offset += (size_t)written;
     }
     return ESP_OK;
-}
-
-static bool cache_header_is_valid(const cache_record_header_t *header)
-{
-    if (header->magic != FLASH_COORDINATOR_CACHE_MAGIC ||
-        header->schema_version != FLASH_COORDINATOR_CACHE_SCHEMA_VERSION ||
-        header->header_size != sizeof(*header) ||
-        header->payload_size > FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES) {
-        return false;
-    }
-    return header->header_crc32 ==
-           crc32((const uint8_t *)header, offsetof(cache_record_header_t, header_crc32));
 }
 
 static esp_err_t validate_cache_generation(const char *path, cache_record_header_t *out_header)
@@ -255,7 +339,7 @@ static esp_err_t validate_cache_generation(const char *path, cache_record_header
     cache_record_header_t header = {0};
     esp_err_t result = ESP_OK;
     if (read(fd, &header, sizeof(header)) != (ssize_t)sizeof(header) ||
-        !cache_header_is_valid(&header)) {
+        !cache_record_header_is_valid(&header, FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES)) {
         result = ESP_ERR_INVALID_CRC;
     }
 
@@ -307,10 +391,8 @@ static esp_err_t select_latest_cache(cache_record_header_t *out_header)
                    : ESP_ERR_INVALID_CRC;
     }
     if (out_header != NULL) {
-        *out_header = (one_result == ESP_OK &&
-                       (zero_result != ESP_OK || generation_one.generation > generation_zero.generation))
-                          ? generation_one
-                          : generation_zero;
+        (void)cache_record_select_newest(&generation_zero, zero_result == ESP_OK,
+                                         &generation_one, one_result == ESP_OK, out_header);
     }
     return ESP_OK;
 }
@@ -319,46 +401,92 @@ static void refresh_cache_status(void)
 {
     cache_record_header_t selected = {0};
     const esp_err_t result = select_latest_cache(&selected);
+    offline_data_snapshot_t offline_data = {0};
+    const esp_err_t offline_data_result =
+        result == ESP_OK ? read_selected_offline_data(&selected, &offline_data) : result;
     portENTER_CRITICAL(&s_status_lock);
     s_status.cache_result = result;
     s_status.cache_valid = result == ESP_OK;
     s_status.cache_generation = result == ESP_OK ? selected.generation : 0U;
     s_status.cache_schema_version = result == ESP_OK ? selected.schema_version : 0U;
+    s_status.offline_data_valid = offline_data_result == ESP_OK;
+    s_status.offline_data = offline_data_result == ESP_OK ? offline_data : (offline_data_snapshot_t){0};
     portEXIT_CRITICAL(&s_status_lock);
+}
+
+static esp_err_t write_cache_record_at_path(const char *path, uint32_t generation,
+                                            const uint8_t *payload, size_t payload_size,
+                                            int *out_failure_errno)
+{
+    if (out_failure_errno != NULL) {
+        *out_failure_errno = 0;
+    }
+    if (path == NULL || payload == NULL || payload_size > FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cache_record_header_t header = {
+        .magic = NP2_CACHE_RECORD_MAGIC,
+        .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+        .header_size = sizeof(cache_record_header_t),
+        .generation = generation,
+        .payload_size = payload_size,
+        .payload_crc32 = cache_record_crc32(payload, payload_size),
+    };
+    header.header_crc32 =
+        cache_record_crc32((const uint8_t *)&header, offsetof(cache_record_header_t, header_crc32));
+
+    const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) {
+        if (out_failure_errno != NULL) {
+            *out_failure_errno = errno;
+        }
+        ESP_LOGE(TAG, "LittleFS cache temp open failed: errno=%d", errno);
+        return ESP_FAIL;
+    }
+    errno = 0;
+    esp_err_t result = write_all(fd, (const uint8_t *)&header, sizeof(header));
+    if (result == ESP_OK) {
+        result = write_all(fd, payload, payload_size);
+    }
+    if (result != ESP_OK && out_failure_errno != NULL) {
+        *out_failure_errno = errno;
+    }
+    if (result == ESP_OK && fsync(fd) != 0) {
+        if (out_failure_errno != NULL) {
+            *out_failure_errno = errno;
+        }
+        result = ESP_FAIL;
+    }
+    if (close(fd) != 0) {
+        const int close_errno = errno;
+        if (result == ESP_OK || (out_failure_errno != NULL &&
+                                 *out_failure_errno == ENOSPC && close_errno != ENOSPC)) {
+            if (out_failure_errno != NULL) {
+                *out_failure_errno = close_errno;
+            }
+            result = ESP_FAIL;
+        }
+    }
+    if (result != ESP_OK) {
+        return result;
+    }
+
+    cache_record_header_t verified = {0};
+    result = validate_cache_generation(path, &verified);
+    return result == ESP_OK && verified.generation == generation ? ESP_OK :
+           (result == ESP_OK ? ESP_ERR_INVALID_RESPONSE : result);
+}
+
+static esp_err_t write_cache_temp_record(uint32_t generation, const uint8_t *payload,
+                                         size_t payload_size)
+{
+    return write_cache_record_at_path(LITTLEFS_TMP_PATH, generation, payload, payload_size, NULL);
 }
 
 static esp_err_t write_cache_generation(uint32_t generation, const uint8_t *payload,
                                         size_t payload_size)
 {
-    if (payload == NULL || payload_size > FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    cache_record_header_t header = {
-        .magic = FLASH_COORDINATOR_CACHE_MAGIC,
-        .schema_version = FLASH_COORDINATOR_CACHE_SCHEMA_VERSION,
-        .header_size = sizeof(cache_record_header_t),
-        .generation = generation,
-        .payload_size = payload_size,
-        .payload_crc32 = crc32(payload, payload_size),
-    };
-    header.header_crc32 =
-        crc32((const uint8_t *)&header, offsetof(cache_record_header_t, header_crc32));
-
-    const int fd = open(LITTLEFS_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0) {
-        ESP_LOGE(TAG, "LittleFS cache temp open failed: errno=%d", errno);
-        return ESP_FAIL;
-    }
-    esp_err_t result = write_all(fd, (const uint8_t *)&header, sizeof(header));
-    if (result == ESP_OK) {
-        result = write_all(fd, payload, payload_size);
-    }
-    if (result == ESP_OK && fsync(fd) != 0) {
-        result = ESP_FAIL;
-    }
-    if (close(fd) != 0 && result == ESP_OK) {
-        result = ESP_FAIL;
-    }
+    esp_err_t result = write_cache_temp_record(generation, payload, payload_size);
     if (result != ESP_OK) {
         return result;
     }
@@ -420,6 +548,262 @@ static esp_err_t corrupt_newest_cache_generation(void)
     return result == ESP_OK && selected.generation == older.generation ? ESP_OK : ESP_FAIL;
 }
 
+/* Checkpoint every successful append. LittleFS marks an errored file with
+ * LFS_F_ERRED: sync/close may then return success without committing its data.
+ * Reopen after ENOSPC to discard only the last uncommitted append, never the
+ * entire bulk filler. Smaller appends consume the remaining durable slack. */
+static esp_err_t fill_full_probe_file(const char *path, uint8_t *buffer, size_t buffer_size,
+                                      uint32_t *written_bytes, uint32_t target_bytes,
+                                      int64_t deadline_us)
+{
+    size_t attempt_bytes = buffer_size;
+    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd < 0) {
+        return errno == ENOSPC ? ESP_OK : ESP_FAIL;
+    }
+    for (;;) {
+        if (esp_timer_get_time() >= deadline_us || *written_bytes > target_bytes) {
+            const esp_err_t result = esp_timer_get_time() >= deadline_us
+                                         ? ESP_ERR_TIMEOUT : ESP_ERR_INVALID_SIZE;
+            if (close(fd) != 0) {
+                ESP_LOGE(TAG, "full probe close failed on budget exit: errno=%d", errno);
+                return ESP_FAIL;
+            }
+            return result;
+        }
+        errno = 0;
+        const ssize_t written = write(fd, buffer, attempt_bytes);
+        int failure_errno = written < 0 ? errno : 0;
+        if (written == 0) {
+            failure_errno = EIO;
+        }
+        if (written > 0) {
+            if (fsync(fd) != 0) {
+                failure_errno = errno;
+            } else {
+                *written_bytes += (uint32_t)written;
+                set_full_probe_progress(true, false, *written_bytes, target_bytes);
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+        }
+        /* Do not sync after a failed write: that can report a false commit. */
+        const int close_result = close(fd);
+        const int close_errno = errno;
+        if ((close_result != 0 && close_errno != ENOSPC) || failure_errno != ENOSPC) {
+            ESP_LOGE(TAG, "full probe filler failed: io_errno=%d close_errno=%d",
+                     failure_errno, close_result != 0 ? close_errno : 0);
+            return ESP_FAIL;
+        }
+        if (attempt_bytes == FLASH_COORDINATOR_FULL_PROBE_TAIL_BYTES) {
+            return ESP_OK;
+        }
+        attempt_bytes /= 4U;
+        if (attempt_bytes < FLASH_COORDINATOR_FULL_PROBE_TAIL_BYTES) {
+            attempt_bytes = FLASH_COORDINATOR_FULL_PROBE_TAIL_BYTES;
+        }
+        fd = open(path, O_WRONLY | O_APPEND);
+        if (fd < 0) {
+            ESP_LOGE(TAG, "full probe cannot reopen committed filler: errno=%d", errno);
+            return ESP_FAIL;
+        }
+    }
+}
+
+static esp_err_t run_cache_full_probe(uint32_t sequence)
+{
+    const int64_t deadline_us = esp_timer_get_time() + 180LL * 1000LL * 1000LL;
+    set_full_probe_progress(true, false, 0U, 0U);
+    cache_record_header_t before = {0};
+    esp_err_t result = select_latest_cache(&before);
+    if (result != ESP_OK) {
+        set_full_probe_progress(false, false, 0U, 0U);
+        return result;
+    }
+
+    uint32_t written_bytes = 0U;
+    uint32_t target_bytes = 0U;
+    size_t total_bytes = 0U, used_bytes = 0U;
+    bool baseline_ready = false;
+    bool proposal_rejected = false;
+    size_t accepted_proposals = 0U;
+    static uint8_t fill_chunk[FLASH_COORDINATOR_FULL_PROBE_CHUNK_BYTES];
+    uint8_t payload[OFFLINE_DATA_ENCODED_SIZE] = {0};
+    const offline_data_snapshot_t proposal = {
+        .schema_version = OFFLINE_DATA_SCHEMA_VERSION,
+        .origin = OFFLINE_DATA_ORIGIN_LIVE,
+        .weather = {.available = true, .temperature_deci_c = 215,
+                    .relative_humidity_percent = 50U, .weather_code = 1U,
+                    .observed_at_unix_s = UINT32_C(1760000000)},
+    };
+
+    result = remove_full_probe_files();
+    if (result != ESP_OK) {
+        goto cleanup;
+    }
+    if (unlink(LITTLEFS_TMP_PATH) != 0 && errno != ENOENT) {
+        result = ESP_FAIL;
+        goto cleanup;
+    }
+    result = esp_littlefs_info(LITTLEFS_PARTITION, &total_bytes, &used_bytes);
+    if (result != ESP_OK || total_bytes > UINT32_MAX || used_bytes > total_bytes) {
+        result = ESP_FAIL;
+        goto cleanup;
+    }
+    baseline_ready = true;
+    target_bytes = (uint32_t)(total_bytes - used_bytes);
+    memset(fill_chunk, (int)(sequence & UINT32_C(0xff)), sizeof(fill_chunk));
+    result = fill_full_probe_file(LITTLEFS_FULL_PROBE_PATH, fill_chunk, sizeof(fill_chunk),
+                                  &written_bytes, target_bytes, deadline_us);
+    if (result != ESP_OK) {
+        goto cleanup;
+    }
+    set_full_probe_progress(true, true, written_bytes, target_bytes);
+    if (!offline_data_snapshot_encode(&proposal, payload, sizeof(payload))) {
+        result = ESP_ERR_INVALID_ARG;
+        goto cleanup;
+    }
+    for (size_t index = 0; index < FLASH_COORDINATOR_FULL_PROBE_MAX_PROPOSALS; ++index) {
+        if (esp_timer_get_time() >= deadline_us) {
+            result = ESP_ERR_TIMEOUT;
+            goto cleanup;
+        }
+        char proposal_path[FLASH_COORDINATOR_FULL_PROBE_PATH_BYTES] = {0};
+        if (!make_full_probe_proposal_path(index, proposal_path, sizeof(proposal_path))) {
+            result = ESP_ERR_INVALID_SIZE;
+            goto cleanup;
+        }
+        int failure_errno = 0;
+        result = write_cache_record_at_path(proposal_path, before.generation + 1U, payload,
+                                            sizeof(payload), &failure_errno);
+        if (result != ESP_OK) {
+            proposal_rejected = failure_errno == ENOSPC;
+            ESP_LOGI(TAG, "full probe proposal: accepted=%u errno=%d result=%s",
+                     (unsigned int)accepted_proposals, failure_errno, esp_err_to_name(result));
+            if (proposal_rejected) {
+                result = ESP_OK;
+            }
+            goto cleanup;
+        }
+        ++accepted_proposals;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    ESP_LOGE(TAG, "full probe inconclusive: all %u proposals fit after durable fill",
+             (unsigned int)accepted_proposals);
+    result = ESP_ERR_INVALID_STATE;
+
+cleanup:;
+    /* Every exit verifies cleanup. Never turn an I/O error into a passed test. */
+    const esp_err_t cleanup_result = remove_full_probe_files();
+    const int tmp_result = unlink(LITTLEFS_TMP_PATH);
+    const int tmp_errno = errno;
+    set_full_probe_progress(false, false, written_bytes, target_bytes);
+    refresh_cache_status();
+    if (cleanup_result != ESP_OK || (tmp_result != 0 && tmp_errno != ENOENT)) {
+        ESP_LOGE(TAG, "full probe failed cleanup; result=%s tmp_errno=%d",
+                 esp_err_to_name(cleanup_result), tmp_result != 0 ? tmp_errno : 0);
+        return ESP_FAIL;
+    }
+    cache_record_header_t after = {0};
+    const esp_err_t selected_result = select_latest_cache(&after);
+    if (selected_result != ESP_OK || memcmp(&before, &after, sizeof(before)) != 0) {
+        ESP_LOGE(TAG, "full probe cache preservation failed");
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    if (baseline_ready) {
+        size_t recovered_total = 0U, recovered_used = 0U;
+        const esp_err_t info_result =
+            esp_littlefs_info(LITTLEFS_PARTITION, &recovered_total, &recovered_used);
+        ESP_LOGI(TAG, "full probe cleanup: used=%lu -> %lu bytes; committed filler=%lu",
+                 (unsigned long)used_bytes, (unsigned long)recovered_used,
+                 (unsigned long)written_bytes);
+        if (info_result != ESP_OK || recovered_total != total_bytes || recovered_used > used_bytes) {
+            ESP_LOGE(TAG, "full probe space recovery failed");
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+    return result == ESP_OK && !proposal_rejected ? ESP_ERR_INVALID_STATE : result;
+}
+static esp_err_t run_cache_power_cut_probe(uint32_t sequence, bool after_rename)
+{
+    cache_record_header_t latest = {0};
+    ESP_RETURN_ON_ERROR(select_latest_cache(&latest), TAG,
+                        "No valid cache generation before power-cut probe");
+
+    const uint32_t generation = latest.generation + 1U;
+    static uint8_t payload[FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES];
+    memset(payload, (int)(sequence & UINT32_C(0xff)), sizeof(payload));
+    cache_record_header_t header = {
+        .magic = NP2_CACHE_RECORD_MAGIC,
+        .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+        .header_size = sizeof(cache_record_header_t),
+        .generation = generation,
+        .payload_size = sizeof(payload),
+        .payload_crc32 = cache_record_crc32(payload, sizeof(payload)),
+    };
+    header.header_crc32 =
+        cache_record_crc32((const uint8_t *)&header, offsetof(cache_record_header_t, header_crc32));
+
+    const int fd = open(LITTLEFS_TMP_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) {
+        return ESP_FAIL;
+    }
+    esp_err_t result = write_all(fd, (const uint8_t *)&header, sizeof(header));
+    if (result == ESP_OK) {
+        result = write_all(fd, payload, sizeof(payload));
+    }
+    if (result == ESP_OK && fsync(fd) != 0) {
+        result = ESP_FAIL;
+    }
+    if (close(fd) != 0 && result == ESP_OK) {
+        result = ESP_FAIL;
+    }
+    if (result != ESP_OK) {
+        (void)unlink(LITTLEFS_TMP_PATH);
+        return result;
+    }
+
+    if (!after_rename) {
+        set_power_cut_window(true, false);
+        ESP_LOGW(TAG, "POWER_CUT_NOW before rename; window=%ums", FLASH_COORDINATOR_POWER_CUT_WINDOW_MS);
+        vTaskDelay(pdMS_TO_TICKS(FLASH_COORDINATOR_POWER_CUT_WINDOW_MS));
+        set_power_cut_window(false, false);
+        (void)unlink(LITTLEFS_TMP_PATH);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    const char *const destination = (generation & 1U) == 0U
+                                        ? LITTLEFS_GENERATION_ZERO_PATH
+                                        : LITTLEFS_GENERATION_ONE_PATH;
+    if (rename(LITTLEFS_TMP_PATH, destination) != 0) {
+        return ESP_FAIL;
+    }
+    set_power_cut_window(true, true);
+    ESP_LOGW(TAG, "POWER_CUT_NOW after rename; window=%ums", FLASH_COORDINATOR_POWER_CUT_WINDOW_MS);
+    vTaskDelay(pdMS_TO_TICKS(FLASH_COORDINATOR_POWER_CUT_WINDOW_MS));
+    set_power_cut_window(false, false);
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t write_offline_data_snapshot(const offline_data_snapshot_t *snapshot)
+{
+    if (!offline_data_snapshot_is_valid(snapshot)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cache_record_header_t latest = {0};
+    const esp_err_t latest_result = select_latest_cache(&latest);
+    const uint32_t generation = latest_result == ESP_OK ? latest.generation + 1U : 1U;
+    uint8_t payload[OFFLINE_DATA_ENCODED_SIZE] = {0};
+    if (!offline_data_snapshot_encode(snapshot, payload, sizeof(payload))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t result = write_cache_generation(generation, payload, sizeof(payload));
+    if (result == ESP_OK) {
+        refresh_cache_status();
+    }
+    return result;
+}
+
 static esp_err_t read_config_slot(const char *key, config_record_t *out_record)
 {
     nvs_handle_t handle;
@@ -435,9 +819,11 @@ static esp_err_t read_config_slot(const char *key, config_record_t *out_record)
     if (result != ESP_OK) {
         return result;
     }
-    if (record_size != sizeof(record) || !cache_header_is_valid(&record.header) ||
+    if (record_size != sizeof(record) ||
+        !cache_record_header_is_valid(&record.header, sizeof(record.value)) ||
         record.header.payload_size != sizeof(record.value) ||
-        record.header.payload_crc32 != crc32((const uint8_t *)&record.value, sizeof(record.value))) {
+        record.header.payload_crc32 !=
+            cache_record_crc32((const uint8_t *)&record.value, sizeof(record.value))) {
         return ESP_ERR_INVALID_CRC;
     }
     if (out_record != NULL) {
@@ -485,17 +871,18 @@ static esp_err_t write_config_journal(void)
     const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
     config_record_t record = {
         .header = {
-            .magic = FLASH_COORDINATOR_CACHE_MAGIC,
-            .schema_version = FLASH_COORDINATOR_CACHE_SCHEMA_VERSION,
+            .magic = NP2_CACHE_RECORD_MAGIC,
+            .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
             .header_size = sizeof(cache_record_header_t),
             .generation = generation,
             .payload_size = sizeof(uint32_t),
         },
         .value = generation,
     };
-    record.header.payload_crc32 = crc32((const uint8_t *)&record.value, sizeof(record.value));
-    record.header.header_crc32 = crc32((const uint8_t *)&record.header,
-                                      offsetof(cache_record_header_t, header_crc32));
+    record.header.payload_crc32 =
+        cache_record_crc32((const uint8_t *)&record.value, sizeof(record.value));
+    record.header.header_crc32 = cache_record_crc32((const uint8_t *)&record.header,
+                                                    offsetof(cache_record_header_t, header_crc32));
 
     nvs_handle_t handle;
     ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, CONFIG_NAMESPACE,
@@ -642,6 +1029,18 @@ static void flash_worker_task(void *arg)
         case FLASH_REQUEST_CACHE_CORRUPT_NEWEST:
             result = corrupt_newest_cache_generation();
             break;
+        case FLASH_REQUEST_CACHE_FULL_PROBE:
+            result = run_cache_full_probe(request.sequence);
+            break;
+        case FLASH_REQUEST_CACHE_CUT_BEFORE_RENAME:
+            result = run_cache_power_cut_probe(request.sequence, false);
+            break;
+        case FLASH_REQUEST_CACHE_CUT_AFTER_RENAME:
+            result = run_cache_power_cut_probe(request.sequence, true);
+            break;
+        case FLASH_REQUEST_OFFLINE_DATA_WRITE:
+            result = write_offline_data_snapshot(&request.offline_data);
+            break;
         case FLASH_REQUEST_CONFIG_JOURNAL_WRITE:
             result = write_config_journal();
             break;
@@ -660,6 +1059,9 @@ static void flash_worker_task(void *arg)
         if (result == ESP_OK) {
             portENTER_CRITICAL(&s_status_lock);
             s_last_success_us = esp_timer_get_time();
+            if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
+                s_last_offline_data_write_us = s_last_success_us;
+            }
             portEXIT_CRITICAL(&s_status_lock);
             if (request.kind == FLASH_REQUEST_LITTLEFS_PROBE) {
                 ESP_LOGI(TAG, "LittleFS batch %lu completed in %lums; writes=%lu verified=%luB",
@@ -672,6 +1074,18 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_CACHE_CORRUPT_NEWEST) {
                 ESP_LOGW(TAG, "cache newest-generation corruption %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_CACHE_FULL_PROBE) {
+                ESP_LOGW(TAG, "cache full-filesystem probe %lu preserved generation in %lums",
+                         (unsigned long)request.sequence, (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_CACHE_CUT_BEFORE_RENAME ||
+                       request.kind == FLASH_REQUEST_CACHE_CUT_AFTER_RENAME) {
+                ESP_LOGE(TAG, "cache power-cut probe was not cut within its window");
+            } else if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
+                flash_coordinator_status_t data_status = {0};
+                flash_coordinator_get_status(&data_status);
+                ESP_LOGI(TAG, "offline snapshot cache generation %lu completed in %lums",
+                         (unsigned long)data_status.cache_generation,
+                         (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CONFIG_JOURNAL_WRITE) {
                 flash_coordinator_status_t config_status = {0};
                 flash_coordinator_get_status(&config_status);
@@ -690,7 +1104,9 @@ static void flash_worker_task(void *arg)
                          (unsigned long)free_entries_after);
             }
         } else {
-            ESP_LOGE(TAG, "diagnostic NVS commit failed: %s", esp_err_to_name(result));
+            ESP_LOGE(TAG, "flash request kind=%u sequence=%lu failed: %s",
+                     (unsigned int)request.kind, (unsigned long)request.sequence,
+                     esp_err_to_name(result));
         }
         complete_request(request.sequence, result, duration_ms, batch_writes,
                          free_entries_before, free_entries_after, littlefs_writes,
@@ -840,6 +1256,71 @@ esp_err_t flash_coordinator_request_cache_corrupt_newest(void)
     return enqueue_littlefs_request(FLASH_REQUEST_CACHE_CORRUPT_NEWEST);
 }
 
+esp_err_t flash_coordinator_request_cache_full_probe(void)
+{
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.cache_valid || !status.littlefs_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return enqueue_littlefs_request(FLASH_REQUEST_CACHE_FULL_PROBE);
+}
+
+esp_err_t flash_coordinator_request_cache_cut_before_rename(void)
+{
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.cache_valid || !status.littlefs_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return enqueue_littlefs_request(FLASH_REQUEST_CACHE_CUT_BEFORE_RENAME);
+}
+
+esp_err_t flash_coordinator_request_cache_cut_after_rename(void)
+{
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.cache_valid || !status.littlefs_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return enqueue_littlefs_request(FLASH_REQUEST_CACHE_CUT_AFTER_RENAME);
+}
+
+esp_err_t flash_coordinator_request_offline_data_write(const offline_data_snapshot_t *snapshot)
+{
+    if (!offline_data_snapshot_is_valid(snapshot) || s_request_queue == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || !status.littlefs_ready || status.busy || status.pending) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const int64_t now_us = esp_timer_get_time();
+    portENTER_CRITICAL(&s_status_lock);
+    const bool too_soon = s_last_offline_data_write_us != 0LL &&
+                          now_us - s_last_offline_data_write_us <
+                              FLASH_COORDINATOR_OFFLINE_DATA_MIN_INTERVAL_US;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (too_soon) {
+        return ESP_ERR_TIMEOUT;
+    }
+    const flash_request_t request = {
+        .kind = FLASH_REQUEST_OFFLINE_DATA_WRITE,
+        .sequence = status.last_sequence + 1U,
+        .offline_data = *snapshot,
+    };
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
+        portENTER_CRITICAL(&s_status_lock);
+        ++s_status.rejected_count;
+        s_status.last_result = ESP_ERR_TIMEOUT;
+        portEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    set_busy(false, true);
+    return ESP_OK;
+}
+
 esp_err_t flash_coordinator_request_config_journal_write(void)
 {
     if (s_request_queue == NULL) {
@@ -887,7 +1368,14 @@ void flash_coordinator_get_status(flash_coordinator_status_t *out_status)
     if (out_status == NULL) {
         return;
     }
+    const int64_t now_us = esp_timer_get_time();
     portENTER_CRITICAL(&s_status_lock);
     *out_status = s_status;
+    if (s_status.power_cut_window_active) {
+        const int64_t remaining_us = s_power_cut_deadline_us - now_us;
+        out_status->power_cut_remaining_ms = remaining_us <= 0
+                                                  ? 0U
+                                                  : (uint32_t)((remaining_us + 999LL) / 1000LL);
+    }
     portEXIT_CRITICAL(&s_status_lock);
 }

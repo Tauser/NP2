@@ -18,7 +18,7 @@
 #include "lvgl.h"
 
 #include "board_bringup.h"
-#include "diagnostic_ui.h"
+#include "offline_dashboard.h"
 
 static const char *const TAG = "np2_bringup";
 
@@ -130,7 +130,7 @@ esp_err_t board_bringup_start(void)
 
     /* All direct LVGL calls remain serialized by the adapter lock. */
     ESP_RETURN_ON_ERROR(esp_lv_adapter_lock(-1), TAG, "LVGL lock failed");
-    err = diagnostic_ui_create(display, touch_indev);
+    err = offline_dashboard_create(display, touch_indev);
     esp_lv_adapter_unlock();
     if (err != ESP_OK) {
         return err;
@@ -141,6 +141,6 @@ esp_err_t board_bringup_start(void)
     ESP_RETURN_ON_ERROR(bsp_display_brightness_set(NP2_BOOT_BACKLIGHT_PERCENT), TAG,
                         "Backlight enable failed");
 
-    ESP_LOGI(TAG, "Phase 2 touch diagnostic active: RGB565, rotation=180, triple-partial, 3 FBs");
+    ESP_LOGI(TAG, "Phase 4 offline dashboard active: RGB565, rotation=180, triple-partial, 3 FBs");
     return ESP_OK;
 }

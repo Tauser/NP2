@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "offline_data_model.h"
 
 /*
  * The coordinator is the sole owner of normal flash writes. Callers only
@@ -24,10 +25,19 @@ typedef struct {
     uint32_t last_littlefs_verified_bytes;
     bool littlefs_ready;
     bool last_littlefs_format;
+    bool full_probe_active;
+    bool full_probe_syncing;
+    uint32_t full_probe_written_bytes;
+    uint32_t full_probe_target_bytes;
+    bool power_cut_window_active;
+    bool power_cut_after_rename;
+    uint32_t power_cut_remaining_ms;
     bool cache_valid;
     uint32_t cache_generation;
     uint16_t cache_schema_version;
     esp_err_t cache_result;
+    bool offline_data_valid;
+    offline_data_snapshot_t offline_data;
     bool config_valid;
     uint32_t config_generation;
     uint16_t config_schema_version;
@@ -64,6 +74,20 @@ esp_err_t flash_coordinator_request_littlefs_format(void);
  * generation to fall back to. It never formats storage.
  */
 esp_err_t flash_coordinator_request_cache_corrupt_newest(void);
+
+/*
+ * Physical G4 test only. Fills LittleFS through an isolated temporary file,
+ * verifies that a proposed cache generation is rejected, then removes the
+ * filler and confirms the last valid generation remains selected.
+ */
+esp_err_t flash_coordinator_request_cache_full_probe(void);
+
+/* Physical power-cut windows at the tmp+fsync and rename durability boundaries. */
+esp_err_t flash_coordinator_request_cache_cut_before_rename(void);
+esp_err_t flash_coordinator_request_cache_cut_after_rename(void);
+
+/* Persists one validated product snapshot through the serialized coordinator. */
+esp_err_t flash_coordinator_request_offline_data_write(const offline_data_snapshot_t *snapshot);
 
 /* Queues a small two-slot NVS configuration-journal write for G4 validation. */
 esp_err_t flash_coordinator_request_config_journal_write(void);

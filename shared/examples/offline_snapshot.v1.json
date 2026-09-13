@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "origin": "cache",
+  "weather": {
+    "available": true,
+    "stale": true,
+    "temperatureDeciC": 247,
+    "relativeHumidityPercent": 61,
+    "weatherCode": 3,
+    "observedAtUnixS": 1789176000
+  },
+  "market": {
+    "available": true,
+    "stale": true,
+    "bitcoinUsdCents": 6718734,
+    "change24hBasisPoints": 364,
+    "observedAtUnixS": 1789176000
+  }
+}
