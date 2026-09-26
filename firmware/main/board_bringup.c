@@ -15,12 +15,16 @@
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
 #include "esp_psram.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "lvgl.h"
 
 #include "board_bringup.h"
-#include "offline_dashboard.h"
+#include "ui/screens/product_ui.h"
 
 static const char *const TAG = "np2_bringup";
+static portMUX_TYPE s_health_lock = portMUX_INITIALIZER_UNLOCKED;
+static board_bringup_health_t s_health;
 
 #define NP2_EXPECTED_PSRAM_BYTES (32U * 1024U * 1024U)
 #define NP2_BOOT_BACKLIGHT_PERCENT 60
@@ -49,6 +53,25 @@ static esp_err_t verify_psram(void)
     }
 
     return ESP_OK;
+}
+
+static void display_render_ready_cb(lv_event_t *event)
+{
+    (void)event;
+    portENTER_CRITICAL(&s_health_lock);
+    s_health.first_frame_presented = true;
+    s_health.last_ui_progress_ms = (uint64_t)esp_timer_get_time() / 1000U;
+    portEXIT_CRITICAL(&s_health_lock);
+}
+
+/* A static screen is healthy too. This timer runs on the LVGL owner and
+ * observes its progress without forcing redraws or claiming a new frame. */
+static void ui_health_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    portENTER_CRITICAL(&s_health_lock);
+    s_health.last_ui_progress_ms = (uint64_t)esp_timer_get_time() / 1000U;
+    portEXIT_CRITICAL(&s_health_lock);
 }
 
 esp_err_t board_bringup_start(void)
@@ -126,21 +149,48 @@ esp_err_t board_bringup_start(void)
         return ESP_FAIL;
     }
 
-    ESP_RETURN_ON_ERROR(esp_lv_adapter_start(), TAG, "LVGL task start failed");
-
-    /* All direct LVGL calls remain serialized by the adapter lock. */
+    /*
+     * Build the initial object tree while the adapter mutex is idle. Starting
+     * the worker first can race the first touch poll and leave main waiting
+     * indefinitely for the mutex before it has installed any screen.
+     */
     ESP_RETURN_ON_ERROR(esp_lv_adapter_lock(-1), TAG, "LVGL lock failed");
-    err = offline_dashboard_create(display, touch_indev);
+    err = product_ui_create(display, touch_indev);
+    if (err == ESP_OK) {
+        lv_display_add_event_cb(display, display_render_ready_cb, LV_EVENT_RENDER_READY, NULL);
+        if (lv_timer_create(ui_health_timer_cb, 250U, NULL) == NULL) {
+            err = ESP_ERR_NO_MEM;
+        }
+    }
     esp_lv_adapter_unlock();
     if (err != ESP_OK) {
         return err;
     }
 
-    /* Render synchronously before allowing any backlight output. */
-    ESP_RETURN_ON_ERROR(esp_lv_adapter_refresh_now(display), TAG, "Initial frame refresh failed");
+    ESP_RETURN_ON_ERROR(esp_lv_adapter_start(), TAG, "LVGL task start failed");
+
+    /*
+     * The first frame is flushed through the normal LVGL worker. Forcing it
+     * synchronously can deadlock the EK79007 triple-partial pipeline before
+     * its frame-complete path is active.
+     */
     ESP_RETURN_ON_ERROR(bsp_display_brightness_set(NP2_BOOT_BACKLIGHT_PERCENT), TAG,
                         "Backlight enable failed");
 
-    ESP_LOGI(TAG, "Phase 4 offline dashboard active: RGB565, rotation=180, triple-partial, 3 FBs");
+    portENTER_CRITICAL(&s_health_lock);
+    s_health.display_ready = true;
+    portEXIT_CRITICAL(&s_health_lock);
+
+    ESP_LOGI(TAG, "Direct LVGL UI active: RGB565, rotation=180, triple-partial, 3 FBs");
     return ESP_OK;
+}
+
+void board_bringup_get_health(board_bringup_health_t *out_health)
+{
+    if (out_health == NULL) {
+        return;
+    }
+    portENTER_CRITICAL(&s_health_lock);
+    *out_health = s_health;
+    portEXIT_CRITICAL(&s_health_lock);
 }

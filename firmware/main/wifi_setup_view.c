@@ -102,11 +102,19 @@ static void refresh_view(void)
     secure_zero(bullets, sizeof(bullets));
 }
 
+static void destroy_view_async(void)
+{
+    lv_obj_t *const overlay = s_view.overlay;
+    memset(&s_view, 0, sizeof(s_view));
+    if (overlay != NULL) {
+        lv_obj_delete_async(overlay);
+    }
+}
+
 static void close_view(void)
 {
     provisioning_service_touch_cancel();
-    lv_obj_delete(s_view.overlay);
-    memset(&s_view, 0, sizeof(s_view));
+    destroy_view_async();
 }
 
 static void key_event_cb(lv_event_t *event)
@@ -183,8 +191,7 @@ static void connect_event_cb(lv_event_t *event)
         return;
     }
     /* touch_submit has wiped the owned secret buffers before returning. */
-    lv_obj_delete(s_view.overlay);
-    memset(&s_view, 0, sizeof(s_view));
+    destroy_view_async();
 }
 
 static void cancel_event_cb(lv_event_t *event)

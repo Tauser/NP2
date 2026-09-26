@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "offline_data_model.h"
+#include "connectivity_diagnostic.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,8 @@ typedef struct {
 typedef struct {
     app_network_state_t state;
     uint16_t access_points_found;
+    uint8_t scan_results_count;
+    connectivity_scan_result_t scan_results[CONNECTIVITY_DIAGNOSTIC_MAX_SCAN_RESULTS];
     uint32_t reconnect_attempts;
     uint32_t transport_failures;
     bool online;
@@ -64,16 +67,45 @@ typedef struct {
 } app_network_projection_t;
 
 typedef struct {
+    bool required;
+    bool completed;
+    bool clock_24h;
+    uint8_t timezone_index;
+    uint8_t stage;
+    esp_err_t last_result;
+} app_onboarding_projection_t;
+
+/* Only a stable animated icon descriptor crosses to the UI. The SD worker
+ * owns mounting, buffers and file I/O. */
+typedef struct {
+    bool ready;
+    bool mounted;
+    bool pending;
+    const void *icon_source;
+    uint32_t generation;
+    esp_err_t last_result;
+} app_weather_asset_projection_t;
+
+typedef struct {
     uint32_t revision;
     bool ready;
     app_storage_projection_t storage;
     app_network_projection_t network;
+    app_onboarding_projection_t onboarding;
+    app_weather_asset_projection_t weather_assets;
     bool time_trusted;
+    uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;
     offline_data_snapshot_t offline_data;
     uint32_t weather_age_s;
     uint32_t market_age_s;
+    uint32_t exchange_age_s;
 } app_ui_projection_t;
+
+typedef struct {
+    bool ready;
+    uint64_t last_progress_ms;
+} app_state_health_t;
 
 /* Starts the 8 KiB app_loop task. It is the sole writer of the state below. */
 esp_err_t app_state_start(void);
@@ -83,6 +115,9 @@ esp_err_t app_state_request_refresh(void);
 
 /* Lock-protected copy for the LVGL task; no service I/O is performed here. */
 void app_state_get_ui_projection(app_ui_projection_t *out_projection);
+
+/* Read-only heartbeat produced by app_loop after each state projection pass. */
+void app_state_get_health(app_state_health_t *out_health);
 
 #ifdef __cplusplus
 }

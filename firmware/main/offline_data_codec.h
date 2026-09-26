@@ -7,7 +7,10 @@
 
 #include "offline_data_model.h"
 
-#define OFFLINE_DATA_ENCODED_SIZE 25U
+#define OFFLINE_DATA_V1_ENCODED_SIZE 25U
+#define OFFLINE_DATA_V2_ENCODED_SIZE 34U
+#define OFFLINE_DATA_V3_ENCODED_SIZE 34U
+#define OFFLINE_DATA_ENCODED_SIZE 169U
 
 bool offline_data_snapshot_is_valid(const offline_data_snapshot_t *snapshot);
 bool offline_data_snapshot_encode(const offline_data_snapshot_t *snapshot, uint8_t *out_bytes,

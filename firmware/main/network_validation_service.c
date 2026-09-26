@@ -6,6 +6,10 @@
  * single task. It retains neither time nor credentials and accepts no URL.
  */
 #include "network_validation_service.h"
+#include "esp_hosted.h"
+#include "esp_ota_ops.h"
+#include "esp_chip_info.h"
+#include "esp_app_desc.h"
 
 #include <string.h>
 #include <time.h>
@@ -14,6 +18,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -22,10 +27,16 @@
 #include "lwip/ip4_addr.h"
 
 #include "connectivity_diagnostic.h"
+#include "app_event_bus.h"
+#include "data_refresh_scheduler.h"
 #include "flash_coordinator.h"
 #include "offline_data_codec.h"
 #include "offline_data_provider.h"
 #include "time_service.h"
+#include "weather_condition.h"
+#include "update_admission.h"
+#include "update_journal.h"
+#include "update_p4_writer.h"
 
 #define NP2_NETWORK_VALIDATION_TASK_STACK_BYTES (8U * 1024U)
 #define NP2_NETWORK_VALIDATION_TASK_PRIORITY 2U
@@ -35,8 +46,14 @@
 #define NP2_HTTPS_TIMEOUT_MS 10000U
 #define NP2_HTTPS_READ_TIMEOUT_MS 5000U
 #define NP2_REQUEST_TOTAL_TIMEOUT_MS 20000U
+#define NP2_PRODUCT_CACHE_WRITE_INTERVAL_US (30LL * 60LL * 1000LL * 1000LL)
+#define NP2_TIME_SYNC_INTERVAL_S UINT32_C(21600)
 #define NP2_HTTPS_MAX_BODY_BYTES 512U
-#define NP2_PROVIDER_MAX_BODY_BYTES 768U
+#define NP2_PROVIDER_MAX_BODY_BYTES OFFLINE_MARKET_MAX_BODY_BYTES
+#define NP2_UPDATE_URL_MAX_BYTES 192U
+#define NP2_UPDATE_TOTAL_TIMEOUT_MS (20U * 60U * 1000U)
+#define NP2_UPDATE_OPERATION_TIMEOUT_MS 15000U
+#define NP2_UPDATE_JOURNAL_TIMEOUT_MS 20000U
 #define NP2_VALID_EPOCH_SECONDS 1735689600LL /* 2025-01-01 UTC */
 
 static const char *const TAG = "np2_netcheck";
@@ -52,10 +69,13 @@ static const char *const NP2_HTTPS_OVERSIZE_URL = "https://httpbin.org/bytes/204
  */
 static const char *const NP2_OPEN_METEO_BRASILIA_URL =
     "https://api.open-meteo.com/v1/forecast?latitude=-15.793889&longitude=-47.882778"
-    "&current=temperature_2m,relative_humidity_2m,weather_code&timezone=UTC";
+    "&current=temperature_2m,relative_humidity_2m,weather_code,apparent_temperature,"
+    "wind_speed_10m,uv_index&timezone=UTC";
 static const char *const NP2_COINGECKO_BITCOIN_URL =
-    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-    "&include_24hr_change=true&include_last_updated_at=true";
+    "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin"
+    "&order=market_cap_desc&per_page=1&page=1&sparkline=false";
+static const char *const NP2_BCB_USD_BRL_URL =
+    "https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/2?formato=json";
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static network_validation_status_t s_status = {
@@ -66,6 +86,20 @@ static network_validation_status_t s_status = {
 static bool s_started;
 static bool s_request_pending;
 static network_validation_mode_t s_request_mode;
+static char s_update_manifest_url[NP2_UPDATE_URL_MAX_BYTES];
+static char s_update_signature_url[NP2_UPDATE_URL_MAX_BYTES];
+static char s_update_image_url[NP2_UPDATE_URL_MAX_BYTES];
+static update_keyring_entry_t s_update_keyring_entries[NETWORK_P4_UPDATE_MAX_TRUSTED_KEYS];
+static size_t s_update_keyring_entries_count;
+static update_environment_t s_update_environment;
+static uint8_t s_update_stream_chunk[UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES];
+/* Only the HTTPS worker mutates this snapshot. The app_loop owns its separate
+ * projected copy, received through the bounded EventBus. */
+static offline_data_snapshot_t s_product_snapshot;
+static bool s_product_snapshot_initialized;
+static int64_t s_last_product_cache_write_us;
+/* Owned by the sole HTTPS worker; kept out of its 8 KiB task stack. */
+static uint8_t s_product_body[NP2_PROVIDER_MAX_BODY_BYTES];
 
 typedef struct {
     SemaphoreHandle_t done;
@@ -312,7 +346,7 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
     if (result != ESP_OK) {
         return result;
     }
-    if (status_code < 200 || status_code >= 400) {
+    if (status_code < 200 || status_code >= 300) {
         return ESP_FAIL;
     }
     if (out_body_length != NULL) {
@@ -326,6 +360,121 @@ static esp_err_t validate_https(const char *url, uint32_t timeout_ms,
 {
     return perform_https_request(url, timeout_ms, method, maximum_body_bytes,
                                  NULL, 0U, NULL);
+}
+
+static esp_err_t stream_update_image(const char *url, uint32_t expected_bytes,
+                                     update_p4_writer_t *writer,
+                                     update_image_hash_session_t *hash)
+{
+    if (url == NULL || expected_bytes == 0U || writer == NULL || hash == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t start_us = esp_timer_get_time();
+    const esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = NP2_UPDATE_OPERATION_TIMEOUT_MS,
+        .disable_auto_redirect = true,
+        .max_redirection_count = 0,
+        .buffer_size = 512,
+        .buffer_size_tx = 512,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+#if CONFIG_MBEDTLS_DYNAMIC_BUFFER
+        .tls_dyn_buf_strategy = HTTP_TLS_DYN_BUF_RX_STATIC,
+#endif
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t result = set_client_budget(client, start_us, NP2_UPDATE_TOTAL_TIMEOUT_MS,
+                                         NP2_UPDATE_OPERATION_TIMEOUT_MS);
+    if (result == ESP_OK) {
+        result = esp_http_client_open(client, 0);
+    }
+    int64_t content_length = -1;
+    if (result == ESP_OK) {
+        result = set_client_budget(client, start_us, NP2_UPDATE_TOTAL_TIMEOUT_MS,
+                                   NP2_UPDATE_OPERATION_TIMEOUT_MS);
+    }
+    if (result == ESP_OK) {
+        content_length = esp_http_client_fetch_headers(client);
+        if (content_length < 0) {
+            result = content_length == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_TIMEOUT
+                                                            : ESP_ERR_HTTP_FETCH_HEADER;
+        } else if ((uint64_t)content_length != expected_bytes) {
+            result = ESP_ERR_INVALID_SIZE;
+        }
+    }
+    if (result == ESP_OK) {
+        const int status = esp_http_client_get_status_code(client);
+        if (status < 200 || status >= 300) {
+            result = ESP_FAIL;
+        }
+    }
+    uint32_t received = 0U;
+    while (result == ESP_OK && received < expected_bytes) {
+        result = set_client_budget(client, start_us, NP2_UPDATE_TOTAL_TIMEOUT_MS,
+                                   NP2_UPDATE_OPERATION_TIMEOUT_MS);
+        if (result != ESP_OK) {
+            break;
+        }
+        const int read = esp_http_client_read(client, (char *)s_update_stream_chunk,
+                                              sizeof(s_update_stream_chunk));
+        if (read == -ESP_ERR_HTTP_EAGAIN) {
+            result = ESP_ERR_TIMEOUT;
+        } else if (read <= 0) {
+            result = read == 0 ? ESP_ERR_HTTP_INCOMPLETE_DATA : ESP_FAIL;
+        } else if ((uint32_t)read > expected_bytes - received ||
+                   update_p4_writer_append(writer, hash, s_update_stream_chunk,
+                                           (size_t)read) != UPDATE_P4_WRITER_OK) {
+            result = ESP_FAIL;
+        } else {
+            received += (uint32_t)read;
+        }
+    }
+    (void)esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return result == ESP_OK && received == expected_bytes ? ESP_OK
+                                                           : (result == ESP_OK ? ESP_ERR_HTTP_INCOMPLETE_DATA : result);
+}
+
+static esp_err_t persist_update_journal_and_wait(const update_journal_record_t *record,
+                                                  uint32_t *out_generation)
+{
+    if (record == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    flash_coordinator_status_t before = {0};
+    flash_coordinator_get_status(&before);
+    const uint32_t previous_generation = before.update_journal_generation;
+    const esp_err_t request_result = flash_coordinator_request_update_journal(record);
+    if (request_result != ESP_OK) {
+        return request_result;
+    }
+    const int64_t deadline = esp_timer_get_time() +
+                             (int64_t)NP2_UPDATE_JOURNAL_TIMEOUT_MS * 1000LL;
+    for (;;) {
+        flash_coordinator_status_t after = {0};
+        flash_coordinator_get_status(&after);
+        if (!after.busy && !after.pending) {
+            if (after.last_result != ESP_OK) {
+                return after.last_result;
+            }
+            if (after.update_journal_valid && after.update_journal_state == record->state &&
+                after.update_journal_generation > previous_generation) {
+                if (out_generation != NULL) {
+                    *out_generation = after.update_journal_generation;
+                }
+                return ESP_OK;
+            }
+            return ESP_FAIL;
+        }
+        if (esp_timer_get_time() >= deadline) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(pdMS_TO_TICKS(NP2_NETWORK_VALIDATION_POLL_MS));
+    }
 }
 
 static esp_err_t provider_result_to_esp_err(offline_provider_result_t result)
@@ -358,69 +507,296 @@ static void retain_market_as_stale(offline_data_snapshot_t *snapshot)
     }
 }
 
-/*
- * This runs only in the sole HTTPS worker after DNS/NTP. It has no scheduler:
- * a physical maintenance request is the only trigger until product polling
- * policy is separately approved.
- */
-static esp_err_t refresh_offline_data(int64_t request_start_us)
+static void retain_exchange_as_stale(offline_data_snapshot_t *snapshot)
 {
+    if (snapshot != NULL && snapshot->exchange.available) {
+        snapshot->exchange.stale = true;
+    }
+}
+
+/* The snapshot persists the last confirmed period, not a clock. A later boot
+ * can therefore restore the exact visual choice without treating a stale
+ * timestamp as current time. */
+static void update_weather_visual(offline_data_snapshot_t *snapshot, time_t now)
+{
+    if (snapshot == NULL || !snapshot->weather.available) {
+        return;
+    }
+    struct tm local = {0};
+    if (localtime_r(&now, &local) == NULL || local.tm_hour < 0 || local.tm_hour > 23) {
+        return;
+    }
+    snapshot->weather_visual = (offline_weather_visual_t){
+        .available = true,
+        .is_day = weather_condition_is_day((uint8_t)local.tm_hour),
+    };
+}
+
+static void ensure_product_snapshot(void)
+{
+    if (s_product_snapshot_initialized) return;
     flash_coordinator_status_t storage = {0};
     flash_coordinator_get_status(&storage);
-    offline_data_snapshot_t snapshot = storage.offline_data_valid
-                                           ? storage.offline_data
-                                           : (offline_data_snapshot_t){0};
-    snapshot.schema_version = OFFLINE_DATA_SCHEMA_VERSION;
-    snapshot.origin = OFFLINE_DATA_ORIGIN_LIVE;
+    s_product_snapshot = storage.offline_data_valid ? storage.offline_data
+                                                     : (offline_data_snapshot_t){0};
+    s_product_snapshot.schema_version = OFFLINE_DATA_SCHEMA_VERSION;
+    s_product_snapshot.origin = OFFLINE_DATA_ORIGIN_LIVE;
+    s_product_snapshot_initialized = true;
+}
+
+static void publish_product_snapshot(void)
+{
+    if (!offline_data_snapshot_is_valid(&s_product_snapshot)) return;
+    const esp_err_t event_result = app_event_bus_post_product_data(&s_product_snapshot);
+    if (event_result != ESP_OK) {
+        ESP_LOGW(TAG, "product-data event deferred: %s", esp_err_to_name(event_result));
+    }
+    const int64_t now_us = esp_timer_get_time();
+    if (s_last_product_cache_write_us != 0LL &&
+        now_us - s_last_product_cache_write_us < NP2_PRODUCT_CACHE_WRITE_INTERVAL_US) {
+        return;
+    }
+    const esp_err_t persist_result =
+        flash_coordinator_request_offline_data_write(&s_product_snapshot);
+    if (persist_result == ESP_OK || persist_result == ESP_ERR_TIMEOUT) {
+        /* ESP_ERR_TIMEOUT here means the coordinator's own write throttle. */
+        s_last_product_cache_write_us = now_us;
+    } else if (persist_result != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "product-data cache deferred: %s", esp_err_to_name(persist_result));
+    }
+}
+
+/* This runs only in the sole HTTPS worker, after DNS and trusted time. */
+static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t request_start_us)
+{
+    ensure_product_snapshot();
 
     const time_t now = time(NULL);
     if (now < (time_t)NP2_VALID_EPOCH_SECONDS || (uint64_t)now > UINT32_MAX) {
         return ESP_ERR_INVALID_STATE;
     }
+    update_weather_visual(&s_product_snapshot, now);
 
-    uint8_t body[NP2_PROVIDER_MAX_BODY_BYTES] = {0};
+    uint8_t *const body = s_product_body;
     size_t body_size = 0U;
-    esp_err_t weather_result = perform_https_request(
-        NP2_OPEN_METEO_BRASILIA_URL, remaining_request_budget_ms(request_start_us),
-        HTTP_METHOD_GET, OFFLINE_WEATHER_MAX_BODY_BYTES, body, sizeof(body), &body_size);
-    if (weather_result == ESP_OK) {
-        weather_result = provider_result_to_esp_err(offline_open_meteo_parse_current(
-            body, body_size, (uint32_t)now, &snapshot.weather));
-        if (weather_result == ESP_OK) {
-            snapshot.weather.stale = false;
+    esp_err_t result = ESP_ERR_INVALID_ARG;
+    switch (domain) {
+    case DATA_REFRESH_DOMAIN_WEATHER:
+        result = perform_https_request(NP2_OPEN_METEO_BRASILIA_URL,
+                                       remaining_request_budget_ms(request_start_us),
+                                       HTTP_METHOD_GET, OFFLINE_WEATHER_MAX_BODY_BYTES, body,
+                                       NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+        if (result == ESP_OK) {
+            result = provider_result_to_esp_err(offline_open_meteo_parse_current(
+                body, body_size, (uint32_t)now, &s_product_snapshot.weather));
+        }
+        if (result == ESP_OK) {
+            s_product_snapshot.weather.stale = false;
+            update_weather_visual(&s_product_snapshot, now);
+        }
+        else retain_weather_as_stale(&s_product_snapshot);
+        break;
+    case DATA_REFRESH_DOMAIN_BITCOIN:
+        result = perform_https_request(NP2_COINGECKO_BITCOIN_URL,
+                                       remaining_request_budget_ms(request_start_us),
+                                       HTTP_METHOD_GET, OFFLINE_MARKET_MAX_BODY_BYTES, body,
+                                       NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+        if (result == ESP_OK) {
+            result = provider_result_to_esp_err(
+                offline_coingecko_parse_bitcoin_market(
+                    body, body_size, (uint32_t)now, &s_product_snapshot.market));
+        }
+        if (result == ESP_OK) s_product_snapshot.market.stale = false;
+        else retain_market_as_stale(&s_product_snapshot);
+        break;
+    case DATA_REFRESH_DOMAIN_USD_BRL:
+        result = perform_https_request(NP2_BCB_USD_BRL_URL,
+                                       remaining_request_budget_ms(request_start_us),
+                                       HTTP_METHOD_GET, OFFLINE_EXCHANGE_MAX_BODY_BYTES, body,
+                                       NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+        if (result == ESP_OK) {
+            result = provider_result_to_esp_err(offline_bcb_parse_usd_brl(
+                body, body_size, (uint32_t)now, &s_product_snapshot.exchange));
+        }
+        if (result == ESP_OK) s_product_snapshot.exchange.stale = false;
+        else retain_exchange_as_stale(&s_product_snapshot);
+        break;
+    case DATA_REFRESH_DOMAIN_COUNT:
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+    publish_product_snapshot();
+    return result;
+}
+
+static esp_err_t refresh_all_product_domains(int64_t request_start_us)
+{
+    esp_err_t first_failure = ESP_OK;
+    const data_refresh_domain_t domains[] = {
+        DATA_REFRESH_DOMAIN_BITCOIN,
+        DATA_REFRESH_DOMAIN_WEATHER,
+        DATA_REFRESH_DOMAIN_USD_BRL,
+    };
+    for (size_t index = 0U; index < sizeof(domains) / sizeof(domains[0]); ++index) {
+        const esp_err_t result = refresh_product_domain(domains[index], request_start_us);
+        if (result != ESP_OK && first_failure == ESP_OK) first_failure = result;
+        if (remaining_request_budget_ms(request_start_us) == 0U) break;
+    }
+    return first_failure;
+}
+
+static esp_err_t preflight_p4_update(int64_t request_start_us)
+{
+    uint8_t manifest[104] = {0};
+    uint8_t signature[388] = {0};
+    size_t manifest_bytes = 0U;
+    size_t signature_bytes = 0U;
+    esp_err_t result = perform_https_request(s_update_manifest_url,
+                                              remaining_request_budget_ms(request_start_us),
+                                              HTTP_METHOD_GET, sizeof(manifest), manifest,
+                                              sizeof(manifest), &manifest_bytes);
+    if (result != ESP_OK || manifest_bytes != sizeof(manifest)) {
+        return result == ESP_OK ? ESP_ERR_INVALID_SIZE : result;
+    }
+    result = perform_https_request(s_update_signature_url,
+                                   remaining_request_budget_ms(request_start_us),
+                                   HTTP_METHOD_GET, sizeof(signature), signature,
+                                   sizeof(signature), &signature_bytes);
+    if (result != ESP_OK || signature_bytes != sizeof(signature)) {
+        return result == ESP_OK ? ESP_ERR_INVALID_SIZE : result;
+    }
+    /* Image URL is validated at request time but is not fetched until a keyring,
+     * metadata environment and journal transaction are supplied to this worker. */
+    return ESP_OK;
+}
+
+static esp_err_t apply_p4_update(int64_t request_start_us)
+{
+    uint8_t manifest_wire[UPDATE_MANIFEST_WIRE_BYTES] = {0};
+    uint8_t signature_wire[UPDATE_SIGNATURE_WIRE_BYTES] = {0};
+    size_t manifest_bytes = 0U;
+    size_t signature_bytes = 0U;
+    esp_err_t result = perform_https_request(
+        s_update_manifest_url, remaining_request_budget_ms(request_start_us), HTTP_METHOD_GET,
+        sizeof(manifest_wire), manifest_wire, sizeof(manifest_wire), &manifest_bytes);
+    if (result != ESP_OK || manifest_bytes != sizeof(manifest_wire)) {
+        return result == ESP_OK ? ESP_ERR_INVALID_SIZE : result;
+    }
+    result = perform_https_request(
+        s_update_signature_url, remaining_request_budget_ms(request_start_us), HTTP_METHOD_GET,
+        sizeof(signature_wire), signature_wire, sizeof(signature_wire), &signature_bytes);
+    if (result != ESP_OK || signature_bytes != sizeof(signature_wire)) {
+        return result == ESP_OK ? ESP_ERR_INVALID_SIZE : result;
+    }
+
+    update_journal_record_t prior = {0};
+    const esp_err_t prior_result = flash_coordinator_get_update_journal(&prior);
+    if (prior_result != ESP_OK && prior_result != ESP_ERR_NOT_FOUND) {
+        return prior_result;
+    }
+    if (prior_result == ESP_OK && prior.state != UPDATE_JOURNAL_IDLE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    update_replay_record_t accepted = {0};
+    if (prior_result == ESP_OK && !update_journal_to_replay_record(&prior, &accepted)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    flash_coordinator_status_t storage = {0};
+    flash_coordinator_get_status(&storage);
+    update_environment_t environment = s_update_environment;
+    /* Re-read device facts on the sole network worker, not from caller data.
+     * RPC v2/SW_AGGR are the fixed, bench-qualified 3.0.6 transport profile;
+     * this version RPC does not attest the installed C6 hash/bootloader. */
+    esp_hosted_coprocessor_fwver_t c6 = {0};
+    if (esp_hosted_get_coprocessor_fwversion(&c6) != ESP_OK ||
+        c6.major1 != 3U || c6.minor1 != 0U || c6.patch1 != 6U) {
+        return ESP_ERR_INVALID_VERSION;
+    }
+    environment.current_c6 = (update_link_version_t){3U, 0U, 6U, 2U, true};
+    const esp_partition_t *const running = esp_ota_get_running_partition();
+    const esp_partition_t *const next = esp_ota_get_next_update_partition(NULL);
+    esp_ota_img_states_t running_state = ESP_OTA_IMG_UNDEFINED;
+    if (running == NULL || next == NULL || next == running) return ESP_ERR_INVALID_STATE;
+    environment.current_app_confirmed =
+        esp_ota_get_state_partition(running, &running_state) == ESP_OK &&
+        running_state == ESP_OTA_IMG_VALID;
+    environment.inactive_slot_bytes = next->size;
+    environment.security_version = esp_app_get_description()->secure_version;
+    esp_chip_info_t chip = {0};
+    esp_chip_info(&chip);
+    environment.revision = chip.revision;
+    environment.transaction_idle = !storage.busy && !storage.pending &&
+                                   !storage.p4_ota_active && !storage.p4_ota_finished &&
+                                   (prior_result == ESP_ERR_NOT_FOUND ||
+                                    prior.state == UPDATE_JOURNAL_IDLE);
+    const update_keyring_t keyring = {
+        .entries = s_update_keyring_entries,
+        .entries_count = s_update_keyring_entries_count,
+    };
+    update_image_hash_session_t hash = {0};
+    update_manifest_t manifest = {0};
+    if (update_admission_begin(manifest_wire, manifest_bytes, signature_wire, signature_bytes,
+                               &keyring, &environment, &accepted, &hash,
+                               &manifest) != UPDATE_ADMISSION_OK) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    update_journal_record_t journal = {0};
+    update_journal_init(&journal);
+    if (!update_journal_prepare(&journal, &manifest) ||
+        !update_journal_transition(&journal, UPDATE_JOURNAL_P4_STAGED)) {
+        update_image_hash_abort(&hash);
+        return ESP_ERR_INVALID_STATE;
+    }
+    result = persist_update_journal_and_wait(&journal, NULL);
+    if (result != ESP_OK) {
+        update_image_hash_abort(&hash);
+        return result;
+    }
+    const update_journal_record_t staged_journal = journal;
+    bool pending_journal_persisted = false;
+
+    update_p4_writer_t writer = {0};
+    if (update_p4_writer_begin(&writer, &hash) != UPDATE_P4_WRITER_OK) {
+        result = ESP_FAIL;
+        goto abort_staged;
+    }
+    result = stream_update_image(s_update_image_url, manifest.metadata.image_bytes, &writer, &hash);
+    if (result != ESP_OK || update_p4_writer_finish(&writer, &hash) != UPDATE_P4_WRITER_OK) {
+        result = result == ESP_OK ? ESP_FAIL : result;
+        goto abort_writer;
+    }
+    uint32_t persisted_generation = 0U;
+    if (!update_journal_transition(&journal, UPDATE_JOURNAL_P4_PENDING) ||
+        persist_update_journal_and_wait(&journal, &persisted_generation) != ESP_OK) {
+        result = ESP_FAIL;
+        goto abort_writer;
+    }
+    pending_journal_persisted = true;
+    /* Changing generation directly leaves the CRC stale and blocks activation. */
+    if (!update_journal_set_generation(&journal, persisted_generation)) {
+        result = ESP_ERR_INVALID_CRC;
+        goto abort_writer;
+    }
+    if (update_p4_writer_request_activation(&writer, &journal) != UPDATE_P4_WRITER_OK) {
+        result = ESP_FAIL;
+        goto abort_writer;
+    }
+
+    ESP_LOGW(TAG, "authenticated P4 candidate selected; restarting into pending verification");
+    esp_restart();
+
+abort_writer:
+    update_p4_writer_abort(&writer, &hash);
+abort_staged:
+    if (!pending_journal_persisted) {
+        update_journal_record_t idle_journal = staged_journal;
+        if (update_journal_transition(&idle_journal, UPDATE_JOURNAL_IDLE)) {
+            (void)persist_update_journal_and_wait(&idle_journal, NULL);
         }
     }
-    if (weather_result != ESP_OK) {
-        retain_weather_as_stale(&snapshot);
-    }
-
-    body_size = 0U;
-    esp_err_t market_result = perform_https_request(
-        NP2_COINGECKO_BITCOIN_URL, remaining_request_budget_ms(request_start_us),
-        HTTP_METHOD_GET, OFFLINE_MARKET_MAX_BODY_BYTES, body, sizeof(body), &body_size);
-    if (market_result == ESP_OK) {
-        market_result = provider_result_to_esp_err(
-            offline_coingecko_parse_bitcoin(body, body_size, &snapshot.market));
-        if (market_result == ESP_OK) {
-            snapshot.market.stale = false;
-        }
-    }
-    if (market_result != ESP_OK) {
-        retain_market_as_stale(&snapshot);
-    }
-
-    if (!offline_data_snapshot_is_valid(&snapshot)) {
-        return weather_result != ESP_OK ? weather_result : market_result;
-    }
-
-    const esp_err_t persist_result =
-        flash_coordinator_request_offline_data_write(&snapshot);
-    if (persist_result != ESP_OK) {
-        return persist_result;
-    }
-    return weather_result == ESP_OK && market_result == ESP_OK
-               ? ESP_OK
-               : (weather_result != ESP_OK ? weather_result : market_result);
+    return result;
 }
 
 static void publish_results(esp_err_t dns_result, esp_err_t ntp_result,
@@ -440,14 +816,40 @@ static void publish_results(esp_err_t dns_result, esp_err_t ntp_result,
 static void network_validation_task(void *arg)
 {
     (void)arg;
+    data_refresh_scheduler_t scheduler = {0};
+    data_refresh_scheduler_init(&scheduler);
+    bool station_was_online = false;
     for (;;) {
         bool request_pending = false;
+        bool scheduled_product_refresh = false;
+        data_refresh_domain_t scheduled_domain = DATA_REFRESH_DOMAIN_COUNT;
         network_validation_mode_t mode = NETWORK_VALIDATION_MODE_NORMAL;
         taskENTER_CRITICAL(&s_status_lock);
         request_pending = s_request_pending;
         mode = s_request_mode;
         s_request_pending = false;
         taskEXIT_CRITICAL(&s_status_lock);
+
+        if (!request_pending) {
+            connectivity_diagnostic_status_t connectivity = {0};
+            connectivity_diagnostic_get_status(&connectivity);
+            const int64_t now_us = esp_timer_get_time();
+            if (!connectivity.online) {
+                /* A new DHCP lease starts all domains as due. No offline
+                 * panel attempts DNS, NTP or HTTPS. */
+                if (station_was_online) data_refresh_scheduler_mark_all_due(&scheduler);
+                station_was_online = false;
+            } else if (data_refresh_scheduler_take_due(&scheduler, now_us, &scheduled_domain)) {
+                request_pending = true;
+                scheduled_product_refresh = true;
+                taskENTER_CRITICAL(&s_status_lock);
+                s_status.busy = true;
+                taskEXIT_CRITICAL(&s_status_lock);
+                ESP_LOGI(TAG, "product refresh scheduled domain=%u",
+                         (unsigned int)scheduled_domain);
+            }
+            station_was_online = connectivity.online;
+        }
         if (!request_pending) {
             vTaskDelay(pdMS_TO_TICKS(NP2_NETWORK_VALIDATION_POLL_MS));
             continue;
@@ -467,14 +869,28 @@ static void network_validation_task(void *arg)
         esp_err_t https_result = ESP_ERR_INVALID_STATE;
         if (dns_result == ESP_OK && mode != NETWORK_VALIDATION_MODE_DNS_NXDOMAIN &&
             mode != NETWORK_VALIDATION_MODE_DNS_TIMEOUT) {
-            ntp_result = time_service_sync();
+            time_service_status_t time_status = {0};
+            time_service_get_status(&time_status);
+            const time_t now = time(NULL);
+            const bool sync_due = !time_status.trusted || time_status.last_sync_unix_s == 0U ||
+                                  now < (time_t)NP2_VALID_EPOCH_SECONDS ||
+                                  (uint64_t)now - time_status.last_sync_unix_s >=
+                                      NP2_TIME_SYNC_INTERVAL_S;
+            ntp_result = sync_due ? time_service_sync()
+                                  : (time_status.trusted ? ESP_OK : ESP_ERR_INVALID_STATE);
         }
         const uint32_t https_budget_ms = remaining_request_budget_ms(start_us);
         if (ntp_result == ESP_OK && https_budget_ms > 0U) {
             const bool slow_https = mode == NETWORK_VALIDATION_MODE_HTTPS_TIMEOUT;
             const bool oversize_https = mode == NETWORK_VALIDATION_MODE_HTTPS_OVERSIZE;
-            if (mode == NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH) {
-                https_result = refresh_offline_data(start_us);
+            if (scheduled_product_refresh) {
+                https_result = refresh_product_domain(scheduled_domain, start_us);
+            } else if (mode == NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH) {
+                https_result = refresh_all_product_domains(start_us);
+            } else if (mode == NETWORK_VALIDATION_MODE_P4_UPDATE_PREFLIGHT) {
+                https_result = preflight_p4_update(start_us);
+            } else if (mode == NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY) {
+                https_result = apply_p4_update(start_us);
             } else {
                 https_result = validate_https(mode == NETWORK_VALIDATION_MODE_TLS_REJECT
                                                   ? NP2_TLS_REJECT_URL
@@ -495,12 +911,25 @@ static void network_validation_task(void *arg)
         }
 
         const uint32_t duration_ms = elapsed_ms_since(start_us);
-        if (duration_ms > NP2_REQUEST_TOTAL_TIMEOUT_MS) {
+        if (mode != NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY &&
+            duration_ms > NP2_REQUEST_TOTAL_TIMEOUT_MS) {
             https_result = ESP_ERR_TIMEOUT;
         }
         publish_results(dns_result, ntp_result, https_result, duration_ms);
-        ESP_LOGI(TAG, "maintenance check complete mode=%u dns=%s ntp=%s https=%s duration=%lums",
+        if (scheduled_product_refresh) {
+            data_refresh_scheduler_note_result(&scheduler, scheduled_domain,
+                                               esp_timer_get_time(), https_result == ESP_OK);
+        } else if (mode == NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH) {
+            const bool success = dns_result == ESP_OK && ntp_result == ESP_OK &&
+                                 https_result == ESP_OK;
+            for (size_t index = 0U; index < DATA_REFRESH_DOMAIN_COUNT; ++index) {
+                data_refresh_scheduler_note_result(&scheduler, (data_refresh_domain_t)index,
+                                                   esp_timer_get_time(), success);
+            }
+        }
+        ESP_LOGI(TAG, "network work complete mode=%u domain=%u dns=%s ntp=%s https=%s duration=%lums",
                  (unsigned int)mode,
+                 (unsigned int)scheduled_domain,
                  esp_err_to_name(dns_result), esp_err_to_name(ntp_result),
                  esp_err_to_name(https_result), (unsigned long)duration_ms);
     }
@@ -561,6 +990,83 @@ esp_err_t network_validation_service_request_check(network_validation_mode_t mod
 esp_err_t network_validation_service_request_offline_data_refresh(void)
 {
     return network_validation_service_request_check(NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH);
+}
+
+esp_err_t network_validation_service_request_p4_update_preflight(
+    const update_https_endpoints_t *endpoints)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    if (!s_started || !connectivity.online) return ESP_ERR_INVALID_STATE;
+    if (update_https_endpoints_validate(endpoints) != UPDATE_HTTPS_POLICY_OK) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t manifest_length = strlen(endpoints->manifest_url);
+    const size_t signature_length = strlen(endpoints->signature_url);
+    const size_t image_length = strlen(endpoints->image_url);
+    if (manifest_length >= sizeof(s_update_manifest_url) ||
+        signature_length >= sizeof(s_update_signature_url) ||
+        image_length >= sizeof(s_update_image_url)) return ESP_ERR_INVALID_SIZE;
+    taskENTER_CRITICAL(&s_status_lock);
+    if (s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    memcpy(s_update_manifest_url, endpoints->manifest_url, manifest_length + 1U);
+    memcpy(s_update_signature_url, endpoints->signature_url, signature_length + 1U);
+    memcpy(s_update_image_url, endpoints->image_url, image_length + 1U);
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_P4_UPDATE_PREFLIGHT;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
+}
+
+esp_err_t network_validation_service_request_p4_update_apply(
+    const network_p4_update_request_t *request)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    if (!s_started || !connectivity.online) return ESP_ERR_INVALID_STATE;
+    if (request == NULL ||
+        update_https_endpoints_validate(&request->endpoints) != UPDATE_HTTPS_POLICY_OK ||
+        request->keyring_entries == NULL || request->keyring_entries_count == 0U ||
+        request->keyring_entries_count > NETWORK_P4_UPDATE_MAX_TRUSTED_KEYS) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t manifest_length = strlen(request->endpoints.manifest_url);
+    const size_t signature_length = strlen(request->endpoints.signature_url);
+    const size_t image_length = strlen(request->endpoints.image_url);
+    if (manifest_length >= sizeof(s_update_manifest_url) ||
+        signature_length >= sizeof(s_update_signature_url) ||
+        image_length >= sizeof(s_update_image_url)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    for (size_t index = 0U; index < request->keyring_entries_count; ++index) {
+        const update_trusted_key_t *const key = &request->keyring_entries[index].trusted_key;
+        if (key->key_id == 0U || key->public_key_der == NULL ||
+            key->public_key_der_bytes == 0U ||
+            key->public_key_der_bytes > UPDATE_SIGNATURE_PUBLIC_KEY_MAX_BYTES) {
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    taskENTER_CRITICAL(&s_status_lock);
+    if (!s_started || s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    memcpy(s_update_manifest_url, request->endpoints.manifest_url, manifest_length + 1U);
+    memcpy(s_update_signature_url, request->endpoints.signature_url, signature_length + 1U);
+    memcpy(s_update_image_url, request->endpoints.image_url, image_length + 1U);
+    memcpy(s_update_keyring_entries, request->keyring_entries,
+           request->keyring_entries_count * sizeof(s_update_keyring_entries[0]));
+    s_update_keyring_entries_count = request->keyring_entries_count;
+    s_update_environment = request->environment;
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
 }
 
 void network_validation_service_get_status(network_validation_status_t *out_status)

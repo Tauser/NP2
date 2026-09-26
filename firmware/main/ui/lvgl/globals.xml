@@ -1,0 +1,49 @@
+<globals>
+  <!-- Fonte visual da UI. Estes tokens correspondem a np_tokens.h. -->
+  <consts>
+    <color name="np_bg" value="0x0D0F18"/>
+    <color name="np_surface" value="0x141721"/>
+    <color name="np_hairline" value="0x1E2235"/>
+    <color name="np_text" value="0xE8EAF2"/>
+    <color name="np_text_2" value="0xBCC0CE"/>
+    <color name="np_text_3" value="0x7A8298"/>
+    <color name="np_text_disabled" value="0x464E64"/>
+    <color name="np_accent" value="0xE8A83C"/>
+    <color name="np_positive" value="0x4ABB78"/>
+    <color name="np_negative" value="0xD05252"/>
+    <int name="np_radius_surface" value="20"/>
+    <int name="np_radius_control" value="8"/>
+  </consts>
+  <fonts>
+    <tiny_ttf name="np_font_16" src_path="fonts/Montserrat-Medium.ttf" size="16" as_file="true"/>
+    <tiny_ttf name="np_font_20" src_path="fonts/Montserrat-Medium.ttf" size="20" as_file="true"/>
+    <tiny_ttf name="np_font_24" src_path="fonts/Montserrat-Medium.ttf" size="24" as_file="true"/>
+    <tiny_ttf name="np_font_32" src_path="fonts/Montserrat-Medium.ttf" size="32" as_file="true"/>
+    <tiny_ttf name="np_font_48" src_path="fonts/Montserrat-Medium.ttf" size="48" as_file="true"/>
+  </fonts>
+
+  <styles>
+    <style name="np_screen" bg_color="#np_bg" bg_opa="100%" border_width="0" pad_all="0"/>
+    <style name="np_card" bg_color="#np_surface" bg_opa="80%" border_color="#np_hairline"
+           border_width="1" radius="#np_radius_surface" pad_all="24"/>
+    <style name="np_caption" text_color="#np_text_3" text_font="np_font_16"/>
+    <style name="np_body" text_color="#np_text" text_font="np_font_20"/>
+    <style name="np_metric" text_color="#np_text" text_font="np_font_24"/>
+  </styles>
+
+  <!-- A ponte C atualiza estes dados a partir de AppState após a exportação. -->
+  <subjects>
+    <string name="boot_status" value="Preparando o display"/>
+    <string name="boot_detail" value="A inicialização continua mesmo sem internet."/>
+    <string name="home_clock" value="--:--"/>
+    <string name="home_date" value="Aguardando sincronização de data e hora"/>
+    <string name="weather_temperature" value="--°"/>
+    <string name="weather_place" value="Brasília"/>
+    <string name="weather_summary" value="Dados de clima indisponíveis"/>
+    <string name="weather_humidity" value="--"/>
+    <string name="btc_whole" value="--"/>
+    <string name="btc_fraction" value=",--"/>
+    <string name="btc_change" value="-- em 24 h"/>
+    <string name="btc_age" value="Aguardando primeira cotação válida"/>
+  </subjects>
+</globals>

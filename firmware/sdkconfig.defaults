@@ -10,6 +10,12 @@ CONFIG_SPIRAM=y
 # write/erase does not disable the cache. This remains gated by physical
 # validation of display, NVS erase/GC and OTA; it is not a product baseline.
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+
+# Weather backgrounds on the microSD use descriptive names such as
+# np_bg_day_partly_cloudy.bin. Keep the FAT long-name buffer bounded and off
+# service task stacks while preserving those names on the card.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=64
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=32768
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_LV_COLOR_DEPTH_16=y

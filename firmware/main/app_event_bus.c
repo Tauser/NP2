@@ -1,5 +1,7 @@
 #include "app_event_bus.h"
 
+#include "offline_data_codec.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -42,6 +44,18 @@ esp_err_t app_event_bus_post(const app_event_t *event)
     ++s_status.posted_count;
     portEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;
+}
+
+esp_err_t app_event_bus_post_product_data(const offline_data_snapshot_t *snapshot)
+{
+    if (!offline_data_snapshot_is_valid(snapshot)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const app_event_t event = {
+        .type = APP_EVENT_PRODUCT_DATA_UPDATED,
+        .offline_data = *snapshot,
+    };
+    return app_event_bus_post(&event);
 }
 
 esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms)

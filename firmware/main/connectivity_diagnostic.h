@@ -7,8 +7,10 @@
 
 /*
  * Phase 3 Hosted/Wi-Fi owner. It runs outside LVGL, retains station settings
- * only in RAM and exposes a private-copy request API for a future credential
- * mailbox. It does not persist, perform DNS, NTP or HTTPS, or call LVGL.
+ * in RAM and exposes a private-copy request API. CredentialVault retention
+ * uses FlashCoordinator only after NVS Encryption and Flash Encryption are
+ * active; it never uses Wi-Fi driver's implicit flash storage. It does not
+ * perform DNS, NTP or HTTPS, or call LVGL.
  */
 typedef enum {
     CONNECTIVITY_DIAGNOSTIC_STATE_IDLE = 0,
@@ -26,10 +28,20 @@ typedef enum {
     CONNECTIVITY_DIAGNOSTIC_STATE_FAILED,
 } connectivity_diagnostic_state_t;
 
+#define CONNECTIVITY_DIAGNOSTIC_MAX_SCAN_RESULTS 40U
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    bool secure;
+} connectivity_scan_result_t;
+
 typedef struct {
     connectivity_diagnostic_state_t state;
     esp_err_t last_result;
     uint16_t access_points_found;
+    uint8_t scan_results_count;
+    connectivity_scan_result_t scan_results[CONNECTIVITY_DIAGNOSTIC_MAX_SCAN_RESULTS];
     uint32_t reconnect_attempts;
     uint32_t consecutive_dns_failures;
     uint32_t transport_failures;
@@ -38,6 +50,8 @@ typedef struct {
     bool link_up;
     bool wifi_ready;
     bool station_credentials_in_ram;
+    bool credential_vault_saved;
+    bool credential_vault_save_pending;
     bool online;
 } connectivity_diagnostic_status_t;
 
@@ -50,7 +64,7 @@ esp_err_t connectivity_diagnostic_start(void);
  */
 esp_err_t connectivity_diagnostic_request_join(const char *ssid, const char *password);
 
-/* Removes the RAM-only station configuration and cancels future reconnects. */
+/* Removes the active station configuration, durable credential, and retries. */
 esp_err_t connectivity_diagnostic_request_forget(void);
 
 /*

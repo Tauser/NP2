@@ -10,6 +10,7 @@
 
 #include "cache_record.h"
 #include "offline_data_codec.h"
+#include "update_journal.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -19,17 +20,20 @@
 #include <unistd.h>
 
 #include "esp_check.h"
+#include "esp_flash_encrypt.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
 #define FLASH_COORDINATOR_QUEUE_LENGTH 1
-#define FLASH_COORDINATOR_TASK_STACK_BYTES 6144
+#define FLASH_COORDINATOR_TASK_STACK_BYTES 10240
 #define FLASH_COORDINATOR_TASK_PRIORITY 2
 #define FLASH_COORDINATOR_NVS_MIN_INTERVAL_US (60LL * 1000LL * 1000LL)
 #define FLASH_COORDINATOR_NVS_COMPACTION_WRITES 64U
@@ -44,6 +48,11 @@
 #define FLASH_COORDINATOR_FULL_PROBE_PATH_BYTES 48U
 #define FLASH_COORDINATOR_POWER_CUT_WINDOW_MS 10000U
 #define FLASH_COORDINATOR_OFFLINE_DATA_MIN_INTERVAL_US (30LL * 60LL * 1000LL * 1000LL)
+#define FLASH_COORDINATOR_OTA_CHUNK_BYTES 4096U
+#define FLASH_COORDINATOR_OTA_WAIT_TIMEOUT_MS 20000U
+#define FLASH_COORDINATOR_OTA_WAIT_POLL_MS 10U
+#define FLASH_COORDINATOR_WIFI_SSID_BYTES 33U
+#define FLASH_COORDINATOR_WIFI_PASSWORD_BYTES 64U
 
 static const char *const TAG = "flash_coord";
 static const char *const NVS_PARTITION = "nvs";
@@ -52,6 +61,15 @@ static const char *const CONFIG_NAMESPACE = "np2_config";
 static const char *const NVS_KEY = "probe_seq";
 static const char *const CONFIG_SLOT_ZERO_KEY = "cfg0";
 static const char *const CONFIG_SLOT_ONE_KEY = "cfg1";
+static const char *const UPDATE_NAMESPACE = "np2_update";
+static const char *const ONBOARDING_NAMESPACE = "np2_onboard";
+static const char *const ONBOARDING_SLOT_ZERO_KEY = "onb0";
+static const char *const ONBOARDING_SLOT_ONE_KEY = "onb1";
+static const char *const CREDENTIAL_VAULT_NAMESPACE = "np2_credentials";
+static const char *const CREDENTIAL_VAULT_SLOT_ZERO_KEY = "cred0";
+static const char *const CREDENTIAL_VAULT_SLOT_ONE_KEY = "cred1";
+static const char *const UPDATE_SLOT_ZERO_KEY = "ota0";
+static const char *const UPDATE_SLOT_ONE_KEY = "ota1";
 static const char *const LITTLEFS_PARTITION = "storage";
 static const char *const LITTLEFS_BASE_PATH = "/lfsdiag";
 static const char *const LITTLEFS_TMP_PATH = "/lfsdiag/cache.tmp";
@@ -65,7 +83,15 @@ typedef struct {
     uint32_t value;
 } config_record_t;
 
+typedef struct {
+    char ssid[FLASH_COORDINATOR_WIFI_SSID_BYTES];
+    char password[FLASH_COORDINATOR_WIFI_PASSWORD_BYTES];
+} credential_vault_t;
+
 typedef enum {
+    FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
+    FLASH_REQUEST_CREDENTIAL_VAULT_WRITE,
+    FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR,
     FLASH_REQUEST_NVS_PROBE,
     FLASH_REQUEST_NVS_COMPACTION_PROBE,
     FLASH_REQUEST_LITTLEFS_PROBE,
@@ -77,23 +103,81 @@ typedef enum {
     FLASH_REQUEST_OFFLINE_DATA_WRITE,
     FLASH_REQUEST_CONFIG_JOURNAL_WRITE,
     FLASH_REQUEST_CONFIG_CORRUPT_NEWEST,
+    FLASH_REQUEST_UPDATE_JOURNAL_WRITE,
+    FLASH_REQUEST_P4_OTA_BEGIN,
+    FLASH_REQUEST_P4_OTA_APPEND,
+    FLASH_REQUEST_P4_OTA_FINISH,
+    FLASH_REQUEST_P4_OTA_ABORT,
+    FLASH_REQUEST_P4_OTA_ACTIVATE,
+    FLASH_REQUEST_P4_OTA_CONFIRM,
+    FLASH_REQUEST_P4_OTA_ROLLBACK,
 } flash_request_kind_t;
 
 typedef struct {
     flash_request_kind_t kind;
     uint32_t sequence;
     offline_data_snapshot_t offline_data;
+    onboarding_profile_t onboarding_profile;
+    credential_vault_t credential_vault;
+    update_journal_record_t update_journal;
+    const esp_partition_t *ota_partition;
+    uint32_t ota_expected_bytes;
+    uint32_t ota_chunk_bytes;
+    uint8_t ota_chunk[FLASH_COORDINATOR_OTA_CHUNK_BYTES];
 } flash_request_t;
 
+typedef struct {
+    const esp_partition_t *partition;
+    esp_ota_handle_t handle;
+    uint32_t expected_bytes;
+    uint32_t written_bytes;
+    bool active;
+    bool finished;
+} p4_ota_session_t;
+
 static QueueHandle_t s_request_queue;
+static flash_request_t s_p4_ota_request;
+static SemaphoreHandle_t s_p4_ota_submission_lock;
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static flash_coordinator_status_t s_status;
 static int64_t s_last_success_us;
 static int64_t s_last_offline_data_write_us;
 static int64_t s_power_cut_deadline_us;
+static p4_ota_session_t s_p4_ota_session;
 
 static void refresh_cache_status(void);
 static void refresh_config_status(void);
+static void refresh_update_journal_status(void);
+static void refresh_onboarding_profile_status(void);
+static void refresh_credential_vault_status(void);
+
+static void secure_zero(void *buffer, size_t length)
+{
+    volatile uint8_t *bytes = buffer;
+    while (length-- > 0U) {
+        *bytes++ = 0;
+    }
+}
+
+static size_t bounded_length(const char *value, size_t limit)
+{
+    size_t length = 0U;
+    while (length < limit && value[length] != '\0') {
+        ++length;
+    }
+    return length;
+}
+
+static void refresh_p4_ota_status(void)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.p4_ota_active = s_p4_ota_session.active;
+    s_status.p4_ota_finished = s_p4_ota_session.finished;
+    s_status.p4_ota_expected_bytes = s_p4_ota_session.expected_bytes;
+    s_status.p4_ota_written_bytes = s_p4_ota_session.written_bytes;
+    s_status.p4_ota_partition = s_p4_ota_session.partition;
+    portEXIT_CRITICAL(&s_status_lock);
+}
 
 static bool make_full_probe_proposal_path(size_t index, char *out_path, size_t out_size)
 {
@@ -135,7 +219,9 @@ static esp_err_t read_selected_offline_data(const cache_record_header_t *header,
                                             offline_data_snapshot_t *out_snapshot)
 {
     if (header == NULL || out_snapshot == NULL ||
-        header->payload_size != OFFLINE_DATA_ENCODED_SIZE) {
+        (header->payload_size != OFFLINE_DATA_V1_ENCODED_SIZE &&
+         header->payload_size != OFFLINE_DATA_V3_ENCODED_SIZE &&
+         header->payload_size != OFFLINE_DATA_ENCODED_SIZE)) {
         return ESP_ERR_INVALID_SIZE;
     }
     const char *const path = (header->generation & 1U) == 0U
@@ -148,8 +234,8 @@ static esp_err_t read_selected_offline_data(const cache_record_header_t *header,
     uint8_t payload[OFFLINE_DATA_ENCODED_SIZE] = {0};
     esp_err_t result = ESP_OK;
     if (lseek(fd, (off_t)sizeof(cache_record_header_t), SEEK_SET) < 0 ||
-        read(fd, payload, sizeof(payload)) != (ssize_t)sizeof(payload) ||
-        !offline_data_snapshot_decode(payload, sizeof(payload), out_snapshot)) {
+        read(fd, payload, header->payload_size) != (ssize_t)header->payload_size ||
+        !offline_data_snapshot_decode(payload, header->payload_size, out_snapshot)) {
         result = ESP_ERR_INVALID_RESPONSE;
     }
     if (close(fd) != 0 && result == ESP_OK) {
@@ -905,6 +991,506 @@ static esp_err_t write_config_journal(void)
     return result;
 }
 
+static bool onboarding_profile_is_valid(const onboarding_profile_t *profile)
+{
+    return profile != NULL && profile->timezone_index <= 1U;
+}
+
+typedef struct {
+    cache_record_header_t header;
+    onboarding_profile_t profile;
+} onboarding_profile_record_t;
+
+static esp_err_t read_onboarding_profile_slot(const char *key,
+                                              onboarding_profile_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, ONBOARDING_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+    onboarding_profile_record_t record = {0};
+    size_t record_size = sizeof(record);
+    result = nvs_get_blob(handle, key, &record, &record_size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    if (record_size != sizeof(record) ||
+        !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
+        record.header.payload_size != sizeof(record.profile) ||
+        record.header.payload_crc32 != cache_record_crc32((const uint8_t *)&record.profile,
+                                                            sizeof(record.profile)) ||
+        !onboarding_profile_is_valid(&record.profile)) {
+        return ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) *out_record = record;
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_onboarding_profile(onboarding_profile_record_t *out_record)
+{
+    onboarding_profile_record_t slot_zero = {0};
+    onboarding_profile_record_t slot_one = {0};
+    const esp_err_t zero_result = read_onboarding_profile_slot(ONBOARDING_SLOT_ZERO_KEY, &slot_zero);
+    const esp_err_t one_result = read_onboarding_profile_slot(ONBOARDING_SLOT_ONE_KEY, &slot_one);
+    if (zero_result != ESP_OK && one_result != ESP_OK) {
+        return zero_result == ESP_ERR_NVS_NOT_FOUND && one_result == ESP_ERR_NVS_NOT_FOUND
+                   ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) {
+        *out_record = (one_result == ESP_OK &&
+                       (zero_result != ESP_OK || slot_one.header.generation > slot_zero.header.generation))
+                          ? slot_one : slot_zero;
+    }
+    return ESP_OK;
+}
+
+static void refresh_onboarding_profile_status(void)
+{
+    onboarding_profile_record_t selected = {0};
+    const esp_err_t result = select_latest_onboarding_profile(&selected);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.onboarding_profile_result = result;
+    s_status.onboarding_profile_valid = result == ESP_OK;
+    s_status.onboarding_profile_generation = result == ESP_OK ? selected.header.generation : 0U;
+    s_status.onboarding_profile = result == ESP_OK ? selected.profile : (onboarding_profile_t){0};
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static esp_err_t write_onboarding_profile(const onboarding_profile_t *profile)
+{
+    if (!onboarding_profile_is_valid(profile)) return ESP_ERR_INVALID_ARG;
+    onboarding_profile_record_t latest = {0};
+    const esp_err_t latest_result = select_latest_onboarding_profile(&latest);
+    const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
+    onboarding_profile_record_t record = {
+        .header = {.magic = NP2_CACHE_RECORD_MAGIC,
+                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .header_size = sizeof(cache_record_header_t),
+                   .generation = generation,
+                   .payload_size = sizeof(profile[0])},
+        .profile = *profile,
+    };
+    record.header.payload_crc32 = cache_record_crc32((const uint8_t *)&record.profile,
+                                                      sizeof(record.profile));
+    record.header.header_crc32 = cache_record_crc32((const uint8_t *)&record.header,
+                                                     offsetof(cache_record_header_t, header_crc32));
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, ONBOARDING_NAMESPACE,
+                                                NVS_READWRITE, &handle), TAG,
+                        "Onboarding profile open failed");
+    const char *target = (generation & 1U) == 0U ? ONBOARDING_SLOT_ZERO_KEY : ONBOARDING_SLOT_ONE_KEY;
+    esp_err_t result = nvs_set_blob(handle, target, &record, sizeof(record));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result == ESP_OK) {
+        refresh_onboarding_profile_status();
+        onboarding_profile_record_t selected = {0};
+        result = select_latest_onboarding_profile(&selected);
+        if (result == ESP_OK && selected.header.generation != generation) result = ESP_FAIL;
+    }
+    return result;
+}
+
+typedef struct {
+    cache_record_header_t header;
+    credential_vault_t credentials;
+} credential_vault_record_t;
+
+static credential_vault_t s_credential_vault;
+
+static bool credential_vault_is_valid(const credential_vault_t *credentials)
+{
+    if (credentials == NULL) return false;
+    const size_t ssid_length = bounded_length(credentials->ssid, sizeof(credentials->ssid));
+    const size_t password_length = bounded_length(credentials->password, sizeof(credentials->password));
+    return ssid_length > 0U && ssid_length < sizeof(credentials->ssid) &&
+           password_length >= 8U && password_length < sizeof(credentials->password);
+}
+
+static esp_err_t read_credential_vault_slot(
+    const char *key, credential_vault_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, CREDENTIAL_VAULT_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+    credential_vault_record_t record = {0};
+    size_t record_size = sizeof(record);
+    result = nvs_get_blob(handle, key, &record, &record_size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    if (record_size != sizeof(record) ||
+        !cache_record_header_is_valid(&record.header, sizeof(record.credentials)) ||
+        record.header.payload_size != sizeof(record.credentials) ||
+        record.header.payload_crc32 != cache_record_crc32(
+                                        (const uint8_t *)&record.credentials,
+                                        sizeof(record.credentials)) ||
+        !credential_vault_is_valid(&record.credentials)) {
+        secure_zero(&record, sizeof(record));
+        return ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) *out_record = record;
+    secure_zero(&record, sizeof(record));
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_credential_vault(
+    credential_vault_record_t *out_record)
+{
+    credential_vault_record_t slot_zero = {0};
+    credential_vault_record_t slot_one = {0};
+    const esp_err_t zero_result = read_credential_vault_slot(
+        CREDENTIAL_VAULT_SLOT_ZERO_KEY, &slot_zero);
+    const esp_err_t one_result = read_credential_vault_slot(
+        CREDENTIAL_VAULT_SLOT_ONE_KEY, &slot_one);
+    if (zero_result != ESP_OK && one_result != ESP_OK) {
+        secure_zero(&slot_zero, sizeof(slot_zero));
+        secure_zero(&slot_one, sizeof(slot_one));
+        /* Present a missing two-slot vault like the other record stores.
+         * The first credential write accepts ESP_ERR_NOT_FOUND to create
+         * generation 1. Returning the NVS-specific code here made that
+         * initial write fail before it reached nvs_set_blob(). */
+        return zero_result == ESP_ERR_NVS_NOT_FOUND && one_result == ESP_ERR_NVS_NOT_FOUND
+                   ? ESP_ERR_NOT_FOUND
+                   : zero_result == ESP_ERR_NOT_SUPPORTED ? zero_result : ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) {
+        *out_record = one_result == ESP_OK &&
+                              (zero_result != ESP_OK ||
+                               slot_one.header.generation > slot_zero.header.generation)
+                          ? slot_one
+                          : slot_zero;
+    }
+    secure_zero(&slot_zero, sizeof(slot_zero));
+    secure_zero(&slot_one, sizeof(slot_one));
+    return ESP_OK;
+}
+
+static void refresh_credential_vault_status(void)
+{
+    credential_vault_record_t selected = {0};
+    const esp_err_t result = select_latest_credential_vault(&selected);
+    portENTER_CRITICAL(&s_status_lock);
+    secure_zero(&s_credential_vault, sizeof(s_credential_vault));
+    if (result == ESP_OK) {
+        s_credential_vault = selected.credentials;
+    }
+    s_status.credential_vault_result = result;
+    s_status.credential_vault_valid = result == ESP_OK;
+    s_status.credential_vault_generation = result == ESP_OK
+                                                            ? selected.header.generation
+                                                            : 0U;
+    portEXIT_CRITICAL(&s_status_lock);
+    secure_zero(&selected, sizeof(selected));
+}
+
+static esp_err_t write_credential_vault(const credential_vault_t *credentials)
+{
+    if (!flash_coordinator_credential_vault_ready()) return ESP_ERR_NOT_SUPPORTED;
+    if (!credential_vault_is_valid(credentials)) return ESP_ERR_INVALID_ARG;
+    credential_vault_record_t latest = {0};
+    const esp_err_t latest_result = select_latest_credential_vault(&latest);
+    if (latest_result != ESP_OK && latest_result != ESP_ERR_NOT_FOUND) {
+        secure_zero(&latest, sizeof(latest));
+        return latest_result;
+    }
+    const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
+    secure_zero(&latest, sizeof(latest));
+    if (generation == 0U) return ESP_ERR_INVALID_STATE;
+    credential_vault_record_t record = {
+        .header = {.magic = NP2_CACHE_RECORD_MAGIC,
+                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .header_size = sizeof(cache_record_header_t),
+                   .generation = generation,
+                   .payload_size = sizeof(credentials[0])},
+        .credentials = *credentials,
+    };
+    record.header.payload_crc32 = cache_record_crc32((const uint8_t *)&record.credentials,
+                                                      sizeof(record.credentials));
+    record.header.header_crc32 = cache_record_crc32((const uint8_t *)&record.header,
+                                                     offsetof(cache_record_header_t, header_crc32));
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, CREDENTIAL_VAULT_NAMESPACE,
+                                               NVS_READWRITE, &handle);
+    if (result == ESP_OK) {
+        const char *const target = (generation & 1U) == 0U
+                                       ? CREDENTIAL_VAULT_SLOT_ZERO_KEY
+                                       : CREDENTIAL_VAULT_SLOT_ONE_KEY;
+        result = nvs_set_blob(handle, target, &record, sizeof(record));
+        if (result == ESP_OK) result = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    secure_zero(&record, sizeof(record));
+    refresh_credential_vault_status();
+    return result;
+}
+
+static esp_err_t clear_credential_vault(void)
+{
+    if (!flash_coordinator_credential_vault_ready()) return ESP_ERR_NOT_SUPPORTED;
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, CREDENTIAL_VAULT_NAMESPACE,
+                                               NVS_READWRITE, &handle);
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        secure_zero(&s_credential_vault, sizeof(s_credential_vault));
+        refresh_credential_vault_status();
+        return ESP_OK;
+    }
+    if (result != ESP_OK) return result;
+    const esp_err_t zero_result = nvs_erase_key(handle, CREDENTIAL_VAULT_SLOT_ZERO_KEY);
+    const esp_err_t one_result = nvs_erase_key(handle, CREDENTIAL_VAULT_SLOT_ONE_KEY);
+    if ((zero_result != ESP_OK && zero_result != ESP_ERR_NVS_NOT_FOUND) ||
+        (one_result != ESP_OK && one_result != ESP_ERR_NVS_NOT_FOUND)) {
+        result = zero_result != ESP_OK && zero_result != ESP_ERR_NVS_NOT_FOUND
+                     ? zero_result
+                     : one_result;
+    } else {
+        result = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    refresh_credential_vault_status();
+    return result;
+}
+
+static esp_err_t initialize_nvs(void)
+{
+#if defined(CONFIG_NVS_ENCRYPTION)
+    /* Do not generate or use an NVS key before its key partition is protected
+     * by Flash Encryption. The production provisioning sequence enables this
+     * eFuse before this application is allowed to initialize NVS. */
+    if (!esp_flash_encryption_enabled()) return ESP_ERR_INVALID_STATE;
+#endif
+    return nvs_flash_init();
+}
+
+static esp_err_t read_update_journal_slot(const char *key, update_journal_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, UPDATE_NAMESPACE, NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+    update_journal_record_t record = {0};
+    size_t size = sizeof(record);
+    result = nvs_get_blob(handle, key, &record, &size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    if (size != sizeof(record) || !update_journal_is_valid(&record)) return ESP_ERR_INVALID_CRC;
+    if (out_record != NULL) *out_record = record;
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_update_journal(update_journal_record_t *out_record)
+{
+    update_journal_record_t zero = {0}, one = {0};
+    const esp_err_t zero_result = read_update_journal_slot(UPDATE_SLOT_ZERO_KEY, &zero);
+    const esp_err_t one_result = read_update_journal_slot(UPDATE_SLOT_ONE_KEY, &one);
+    if (zero_result != ESP_OK && one_result != ESP_OK)
+        return zero_result == ESP_ERR_NVS_NOT_FOUND && one_result == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_CRC;
+    if (zero_result == ESP_OK && one_result == ESP_OK && zero.generation == one.generation &&
+        memcmp(&zero, &one, sizeof(zero)) != 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (out_record != NULL)
+        *out_record = one_result == ESP_OK && (zero_result != ESP_OK || one.generation > zero.generation) ? one : zero;
+    return ESP_OK;
+}
+
+static void refresh_update_journal_status(void)
+{
+    update_journal_record_t selected = {0};
+    const esp_err_t result = select_latest_update_journal(&selected);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.update_journal_result = result;
+    s_status.update_journal_valid = result == ESP_OK;
+    s_status.update_journal_generation = result == ESP_OK ? selected.generation : 0U;
+    s_status.update_journal_state = result == ESP_OK ? selected.state : UPDATE_JOURNAL_IDLE;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static esp_err_t write_update_journal(const update_journal_record_t *input)
+{
+    if (input == NULL || !update_journal_is_valid(input) || input->generation != 0U) return ESP_ERR_INVALID_ARG;
+    update_journal_record_t latest = {0};
+    const esp_err_t latest_result = select_latest_update_journal(&latest);
+    if (latest_result != ESP_OK && latest_result != ESP_ERR_NOT_FOUND) return latest_result;
+    if (latest_result == ESP_OK && latest.generation == UINT32_MAX) return ESP_ERR_INVALID_STATE;
+    if (latest_result == ESP_ERR_NOT_FOUND && input->state != UPDATE_JOURNAL_P4_STAGED) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (latest_result == ESP_OK && !update_journal_can_follow(&latest, input)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    update_journal_record_t candidate = *input;
+    const uint32_t generation = latest_result == ESP_OK ? latest.generation + 1U : 1U;
+    if (!update_journal_set_generation(&candidate, generation)) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, UPDATE_NAMESPACE, NVS_READWRITE, &handle), TAG, "OTA journal open failed");
+    const char *target = (generation & 1U) == 0U ? UPDATE_SLOT_ZERO_KEY : UPDATE_SLOT_ONE_KEY;
+    esp_err_t result = nvs_set_blob(handle, target, &candidate, sizeof(candidate));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    update_journal_record_t verified = {0};
+    const esp_err_t verified_result = select_latest_update_journal(&verified);
+    refresh_update_journal_status();
+    return result == ESP_OK && verified_result == ESP_OK && verified.generation == generation ?
+               ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t activate_p4_ota_partition(const esp_partition_t *partition,
+                                           const update_journal_record_t *journal)
+{
+    if (partition == NULL || journal == NULL || !update_journal_is_valid(journal) ||
+        journal->state != UPDATE_JOURNAL_P4_PENDING || journal->generation == 0U ||
+        partition->type != ESP_PARTITION_TYPE_APP ||
+        (partition->subtype != ESP_PARTITION_SUBTYPE_APP_OTA_0 &&
+         partition->subtype != ESP_PARTITION_SUBTYPE_APP_OTA_1)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    update_journal_record_t persisted = {0};
+    const esp_err_t journal_result = select_latest_update_journal(&persisted);
+    if (journal_result != ESP_OK || memcmp(&persisted, journal, sizeof(persisted)) != 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return esp_ota_set_boot_partition(partition);
+}
+
+static esp_err_t begin_p4_ota(uint32_t expected_bytes)
+{
+    if (expected_bytes == 0U || s_p4_ota_session.active || s_p4_ota_session.finished) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_partition_t *const partition = esp_ota_get_next_update_partition(NULL);
+    if (partition == NULL || expected_bytes > partition->size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    esp_ota_handle_t handle = 0;
+    /* Incremental erase; the signed size remains enforced by this session. */
+    const esp_err_t result = esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+    if (result != ESP_OK) {
+        return result;
+    }
+    s_p4_ota_session = (p4_ota_session_t){
+        .partition = partition,
+        .handle = handle,
+        .expected_bytes = expected_bytes,
+        .active = true,
+    };
+    refresh_p4_ota_status();
+    return ESP_OK;
+}
+
+static esp_err_t append_p4_ota(const uint8_t *bytes, uint32_t bytes_count)
+{
+    if (bytes == NULL || bytes_count == 0U || bytes_count > FLASH_COORDINATOR_OTA_CHUNK_BYTES ||
+        !s_p4_ota_session.active ||
+        s_p4_ota_session.written_bytes > s_p4_ota_session.expected_bytes ||
+        bytes_count > s_p4_ota_session.expected_bytes - s_p4_ota_session.written_bytes) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t result = esp_ota_write(s_p4_ota_session.handle, bytes, bytes_count);
+    if (result == ESP_OK) {
+        s_p4_ota_session.written_bytes += bytes_count;
+        refresh_p4_ota_status();
+    }
+    return result;
+}
+
+static esp_err_t finish_p4_ota(void)
+{
+    if (!s_p4_ota_session.active ||
+        s_p4_ota_session.written_bytes != s_p4_ota_session.expected_bytes) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t result = esp_ota_end(s_p4_ota_session.handle);
+    s_p4_ota_session.active = false;
+    if (result == ESP_OK) {
+        s_p4_ota_session.finished = true;
+    } else {
+        s_p4_ota_session = (p4_ota_session_t){0};
+    }
+    refresh_p4_ota_status();
+    return result;
+}
+
+static esp_err_t abort_p4_ota(void)
+{
+    esp_err_t result = ESP_OK;
+    if (s_p4_ota_session.active) {
+        result = esp_ota_abort(s_p4_ota_session.handle);
+    }
+    s_p4_ota_session = (p4_ota_session_t){0};
+    refresh_p4_ota_status();
+    return result;
+}
+
+static esp_err_t activate_finished_p4_ota(const update_journal_record_t *journal)
+{
+    if (!s_p4_ota_session.finished || s_p4_ota_session.partition == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t result = activate_p4_ota_partition(s_p4_ota_session.partition, journal);
+    if (result == ESP_OK) {
+        s_p4_ota_session = (p4_ota_session_t){0};
+        refresh_p4_ota_status();
+    }
+    return result;
+}
+
+static esp_err_t confirm_running_p4_ota(void)
+{
+    const esp_partition_t *const running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    if (running == NULL || esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    update_journal_record_t persisted = {0};
+    const esp_err_t journal_result = select_latest_update_journal(&persisted);
+    if (journal_result != ESP_OK) {
+        return journal_result;
+    }
+    if (persisted.state == UPDATE_JOURNAL_P4_PENDING) {
+        update_journal_record_t accepted = {0};
+        if (!update_journal_next(&persisted, UPDATE_JOURNAL_ACCEPTED, &accepted)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        const esp_err_t persist_result = write_update_journal(&accepted);
+        if (persist_result != ESP_OK) {
+            return persist_result;
+        }
+    } else if (persisted.state != UPDATE_JOURNAL_ACCEPTED) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t confirm_result = esp_ota_mark_app_valid_cancel_rollback();
+    if (confirm_result != ESP_OK) {
+        return confirm_result;
+    }
+    update_journal_record_t accepted = {0};
+    const esp_err_t accepted_result = select_latest_update_journal(&accepted);
+    update_journal_record_t idle = {0};
+    if (accepted_result != ESP_OK || accepted.state != UPDATE_JOURNAL_ACCEPTED ||
+        !update_journal_next(&accepted, UPDATE_JOURNAL_IDLE, &idle)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return write_update_journal(&idle);
+}
+
+static esp_err_t rollback_running_p4_ota(void)
+{
+    const esp_partition_t *const running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    if (running == NULL || esp_ota_get_state_partition(running, &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_partition_t *const fallback = esp_ota_get_next_update_partition(NULL);
+    esp_ota_img_states_t fallback_state = ESP_OTA_IMG_UNDEFINED;
+    if (fallback == NULL || esp_ota_get_state_partition(fallback, &fallback_state) != ESP_OK ||
+        fallback_state != ESP_OTA_IMG_VALID || !esp_ota_check_rollback_is_possible()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return esp_ota_mark_app_invalid_rollback_and_reboot();
+}
+
 static esp_err_t corrupt_newest_config_generation(void)
 {
     config_record_t newest = {0};
@@ -938,6 +1524,7 @@ static esp_err_t corrupt_newest_config_generation(void)
     }
 
     refresh_config_status();
+    refresh_update_journal_status();
     config_record_t selected = {0};
     result = select_latest_config(&selected);
     return result == ESP_OK && selected.header.generation == older.header.generation ? ESP_OK : ESP_FAIL;
@@ -977,7 +1564,7 @@ static void flash_worker_task(void *arg)
 {
     (void)arg;
 
-    const esp_err_t init_result = nvs_flash_init_partition(NVS_PARTITION);
+    const esp_err_t init_result = initialize_nvs();
     const esp_err_t littlefs_init_result = mount_littlefs();
     portENTER_CRITICAL(&s_status_lock);
     s_status.init_result = init_result;
@@ -995,6 +1582,9 @@ static void flash_worker_task(void *arg)
         return;
     }
     refresh_config_status();
+    refresh_onboarding_profile_status();
+    refresh_credential_vault_status();
+    refresh_update_journal_status();
     if (littlefs_init_result != ESP_OK) {
         ESP_LOGW(TAG, "LittleFS unavailable until explicit format: %s",
                  esp_err_to_name(littlefs_init_result));
@@ -1014,6 +1604,15 @@ static void flash_worker_task(void *arg)
         bool littlefs_format = false;
         esp_err_t result;
         switch (request.kind) {
+        case FLASH_REQUEST_ONBOARDING_PROFILE_WRITE:
+            result = write_onboarding_profile(&request.onboarding_profile);
+            break;
+        case FLASH_REQUEST_CREDENTIAL_VAULT_WRITE:
+            result = write_credential_vault(&request.credential_vault);
+            break;
+        case FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR:
+            result = clear_credential_vault();
+            break;
         case FLASH_REQUEST_NVS_COMPACTION_PROBE:
             result = commit_nvs_compaction_probe(request.sequence, &batch_writes,
                                                   &free_entries_before, &free_entries_after);
@@ -1047,6 +1646,32 @@ static void flash_worker_task(void *arg)
         case FLASH_REQUEST_CONFIG_CORRUPT_NEWEST:
             result = corrupt_newest_config_generation();
             break;
+        case FLASH_REQUEST_UPDATE_JOURNAL_WRITE:
+            result = write_update_journal(&request.update_journal);
+            break;
+        case FLASH_REQUEST_P4_OTA_BEGIN:
+            result = begin_p4_ota(request.ota_expected_bytes);
+            break;
+        case FLASH_REQUEST_P4_OTA_APPEND:
+            result = append_p4_ota(request.ota_chunk, request.ota_chunk_bytes);
+            break;
+        case FLASH_REQUEST_P4_OTA_FINISH:
+            result = finish_p4_ota();
+            break;
+        case FLASH_REQUEST_P4_OTA_ABORT:
+            result = abort_p4_ota();
+            break;
+        case FLASH_REQUEST_P4_OTA_ACTIVATE:
+            result = request.ota_partition == s_p4_ota_session.partition
+                         ? activate_finished_p4_ota(&request.update_journal)
+                         : ESP_ERR_INVALID_STATE;
+            break;
+        case FLASH_REQUEST_P4_OTA_CONFIRM:
+            result = confirm_running_p4_ota();
+            break;
+        case FLASH_REQUEST_P4_OTA_ROLLBACK:
+            result = rollback_running_p4_ota();
+            break;
         case FLASH_REQUEST_NVS_PROBE:
         default:
             result = commit_nvs_probe(request.sequence);
@@ -1059,7 +1684,15 @@ static void flash_worker_task(void *arg)
         if (result == ESP_OK) {
             portENTER_CRITICAL(&s_status_lock);
             s_last_success_us = esp_timer_get_time();
-            if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
+            if (request.kind == FLASH_REQUEST_ONBOARDING_PROFILE_WRITE) {
+                ESP_LOGI(TAG, "onboarding profile saved in %lums", (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_WRITE) {
+                ESP_LOGI(TAG, "credential vault credentials saved in %lums",
+                         (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR) {
+                ESP_LOGI(TAG, "credential vault credentials cleared in %lums",
+                         (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
                 s_last_offline_data_write_us = s_last_success_us;
             }
             portEXIT_CRITICAL(&s_status_lock);
@@ -1129,10 +1762,16 @@ esp_err_t flash_coordinator_start(void)
     s_status.last_result = ESP_ERR_INVALID_STATE;
     portEXIT_CRITICAL(&s_status_lock);
 
+    s_p4_ota_submission_lock = xSemaphoreCreateMutex();
+    if (s_p4_ota_submission_lock == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
     const BaseType_t task_created = xTaskCreate(flash_worker_task, "flash_worker",
                                                  FLASH_COORDINATOR_TASK_STACK_BYTES, NULL,
                                                  FLASH_COORDINATOR_TASK_PRIORITY, NULL);
     if (task_created != pdPASS) {
+        vSemaphoreDelete(s_p4_ota_submission_lock);
+        s_p4_ota_submission_lock = NULL;
         vQueueDelete(s_request_queue);
         s_request_queue = NULL;
         return ESP_ERR_NO_MEM;
@@ -1321,6 +1960,102 @@ esp_err_t flash_coordinator_request_offline_data_write(const offline_data_snapsh
     return ESP_OK;
 }
 
+esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_profile_t *profile)
+{
+    if (!onboarding_profile_is_valid(profile) || s_request_queue == NULL) return ESP_ERR_INVALID_ARG;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) return ESP_ERR_INVALID_STATE;
+    const flash_request_t request = {.kind = FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
+                                     .sequence = status.last_sequence + 1U,
+                                     .onboarding_profile = *profile};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+bool flash_coordinator_credential_vault_ready(void)
+{
+#if defined(CONFIG_NVS_ENCRYPTION)
+    return esp_flash_encryption_enabled();
+#elif defined(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION)
+    /* Development-only opt-in. Production builds never define this path. */
+    return true;
+#else
+    return false;
+#endif
+}
+
+esp_err_t flash_coordinator_request_credential_vault_write(const char *ssid,
+                                                                        const char *password)
+{
+    if (!flash_coordinator_credential_vault_ready() || ssid == NULL ||
+        password == NULL || s_request_queue == NULL) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    flash_request_t request = {.kind = FLASH_REQUEST_CREDENTIAL_VAULT_WRITE};
+    const size_t ssid_length = bounded_length(ssid, sizeof(request.credential_vault.ssid));
+    const size_t password_length = bounded_length(password,
+                                                  sizeof(request.credential_vault.password));
+    if (ssid_length == 0U || ssid_length >= sizeof(request.credential_vault.ssid) ||
+        password_length < 8U ||
+        password_length >= sizeof(request.credential_vault.password)) {
+        secure_zero(&request, sizeof(request));
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(request.credential_vault.ssid, ssid, ssid_length);
+    memcpy(request.credential_vault.password, password, password_length);
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) {
+        secure_zero(&request, sizeof(request));
+        return ESP_ERR_INVALID_STATE;
+    }
+    request.sequence = status.last_sequence + 1U;
+    const BaseType_t sent = xQueueSend(s_request_queue, &request, 0);
+    secure_zero(&request, sizeof(request));
+    if (sent != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_request_credential_vault_clear(void)
+{
+    if (!flash_coordinator_credential_vault_ready() || s_request_queue == NULL) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) return ESP_ERR_INVALID_STATE;
+    const flash_request_t request = {.kind = FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR,
+                                     .sequence = status.last_sequence + 1U};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_copy_credential_vault(char *out_ssid, size_t ssid_size,
+                                                               char *out_password, size_t password_size)
+{
+    if (!flash_coordinator_credential_vault_ready() || out_ssid == NULL ||
+        out_password == NULL || ssid_size < FLASH_COORDINATOR_WIFI_SSID_BYTES ||
+        password_size < FLASH_COORDINATOR_WIFI_PASSWORD_BYTES) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    esp_err_t result = ESP_OK;
+    portENTER_CRITICAL(&s_status_lock);
+    if (!s_status.credential_vault_valid) {
+        result = s_status.credential_vault_result;
+    } else {
+        memcpy(out_ssid, s_credential_vault.ssid,
+               sizeof(s_credential_vault.ssid));
+        memcpy(out_password, s_credential_vault.password,
+               sizeof(s_credential_vault.password));
+    }
+    portEXIT_CRITICAL(&s_status_lock);
+    return result;
+}
+
 esp_err_t flash_coordinator_request_config_journal_write(void)
 {
     if (s_request_queue == NULL) {
@@ -1361,6 +2096,152 @@ esp_err_t flash_coordinator_request_config_corrupt_newest(void)
     }
     set_busy(false, true);
     return ESP_OK;
+}
+
+esp_err_t flash_coordinator_request_update_journal(const update_journal_record_t *record)
+{
+    if (record == NULL || !update_journal_is_valid(record) || record->generation != 0U ||
+        s_request_queue == NULL) return ESP_ERR_INVALID_ARG;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) return ESP_ERR_INVALID_STATE;
+    const flash_request_t request = {.kind = FLASH_REQUEST_UPDATE_JOURNAL_WRITE,
+                                     .sequence = status.last_sequence + 1U,
+                                     .update_journal = *record};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_get_update_journal(update_journal_record_t *out_record)
+{
+    if (out_record == NULL || s_request_queue == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return select_latest_update_journal(out_record);
+}
+
+static esp_err_t enqueue_p4_ota_and_wait(flash_request_kind_t kind,
+                                          uint32_t expected_bytes,
+                                          const uint8_t *bytes,
+                                          uint32_t bytes_count,
+                                          const update_journal_record_t *journal,
+                                          const esp_partition_t **out_partition)
+{
+    if (s_request_queue == NULL || s_p4_ota_submission_lock == NULL ||
+        (bytes_count > 0U && bytes == NULL) ||
+        bytes_count > FLASH_COORDINATOR_OTA_CHUNK_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    flash_coordinator_status_t before = {0};
+    flash_coordinator_get_status(&before);
+    if (!before.ready || before.busy || before.pending) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (journal != NULL && !update_journal_is_valid(journal)) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint32_t sequence = before.last_sequence + 1U;
+    s_p4_ota_request = (flash_request_t){
+        .kind = kind,
+        .sequence = sequence,
+        .ota_expected_bytes = expected_bytes,
+        .ota_chunk_bytes = bytes_count,
+    };
+    if (journal != NULL) {
+        s_p4_ota_request.update_journal = *journal;
+    }
+    if (before.p4_ota_partition != NULL) {
+        s_p4_ota_request.ota_partition = before.p4_ota_partition;
+    }
+    if (bytes_count > 0U) {
+        memcpy(s_p4_ota_request.ota_chunk, bytes, bytes_count);
+    }
+    if (xQueueSend(s_request_queue, &s_p4_ota_request, 0) != pdPASS) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    set_busy(false, true);
+    const int64_t deadline_us = esp_timer_get_time() +
+                                (int64_t)FLASH_COORDINATOR_OTA_WAIT_TIMEOUT_MS * 1000LL;
+    for (;;) {
+        flash_coordinator_status_t after = {0};
+        flash_coordinator_get_status(&after);
+        if (!after.busy && !after.pending && after.last_sequence == sequence) {
+            if (after.last_result == ESP_OK && out_partition != NULL) {
+                *out_partition = after.p4_ota_partition;
+            }
+            const esp_err_t result = after.last_result;
+            xSemaphoreGive(s_p4_ota_submission_lock);
+            return result;
+        }
+        if (esp_timer_get_time() >= deadline_us || after.last_sequence > sequence) {
+            xSemaphoreGive(s_p4_ota_submission_lock);
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(pdMS_TO_TICKS(FLASH_COORDINATOR_OTA_WAIT_POLL_MS));
+    }
+}
+
+esp_err_t flash_coordinator_p4_ota_begin(uint32_t expected_bytes,
+                                         const esp_partition_t **out_partition)
+{
+    if (out_partition == NULL || expected_bytes == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_partition = NULL;
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_P4_OTA_BEGIN, expected_bytes,
+                                   NULL, 0U, NULL, out_partition);
+}
+
+esp_err_t flash_coordinator_p4_ota_append(const uint8_t *bytes, uint32_t bytes_count)
+{
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_P4_OTA_APPEND, 0U, bytes,
+                                   bytes_count, NULL, NULL);
+}
+
+esp_err_t flash_coordinator_p4_ota_finish(void)
+{
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_P4_OTA_FINISH, 0U, NULL, 0U, NULL, NULL);
+}
+
+esp_err_t flash_coordinator_p4_ota_abort(void)
+{
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_P4_OTA_ABORT, 0U, NULL, 0U, NULL, NULL);
+}
+
+esp_err_t flash_coordinator_p4_ota_activate(const update_journal_record_t *journal)
+{
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_P4_OTA_ACTIVATE, 0U, NULL, 0U,
+                                   journal, NULL);
+}
+
+static esp_err_t enqueue_p4_ota_state_request(flash_request_kind_t kind)
+{
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (s_request_queue == NULL || !status.ready || status.busy || status.pending) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const flash_request_t request = {.kind = kind, .sequence = status.last_sequence + 1U};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_request_p4_ota_confirm(void)
+{
+    return enqueue_p4_ota_state_request(FLASH_REQUEST_P4_OTA_CONFIRM);
+}
+
+esp_err_t flash_coordinator_request_p4_ota_rollback(void)
+{
+    return enqueue_p4_ota_state_request(FLASH_REQUEST_P4_OTA_ROLLBACK);
 }
 
 void flash_coordinator_get_status(flash_coordinator_status_t *out_status)

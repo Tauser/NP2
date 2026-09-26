@@ -1,5 +1,6 @@
 #include "time_service.h"
 
+#include <stdlib.h>
 #include <time.h>
 
 #include "esp_netif_sntp.h"
@@ -36,6 +37,13 @@ static bool read_valid_system_time(uint32_t *out_unix_s)
 
 esp_err_t time_service_start(void)
 {
+    /* Newlib acquires its own lock here, so this must remain outside the
+     * FreeRTOS critical section used for the small service status. */
+    if (setenv("TZ", "BRT3", 1) != 0) {
+        return ESP_FAIL;
+    }
+    tzset();
+
     portENTER_CRITICAL(&s_status_lock);
     if (s_started) {
         portEXIT_CRITICAL(&s_status_lock);

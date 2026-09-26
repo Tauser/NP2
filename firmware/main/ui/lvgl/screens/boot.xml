@@ -1,0 +1,27 @@
+<screen>
+  <view style_bg_color="#np_bg" style_bg_opa="100%" style_border_width="0">
+    <lv_obj x="100" y="232" width="11" height="11" style_bg_color="#np_accent"
+            style_bg_opa="100%" style_radius="2" style_border_width="0"/>
+    <lv_label text="Nova" x="100" y="258" width="230" style_text_color="#np_text"
+              style_text_font="np_font_48"/>
+    <lv_label text="Panel" x="300" y="258" width="250" style_text_color="#np_text_3"
+              style_text_font="np_font_48"/>
+
+    <!-- Barra segmentada: os cinco blocos refletem os estágios reais do boot. -->
+    <lv_obj x="100" y="380" width="148" height="5" style_bg_color="#np_accent" style_bg_opa="100%" style_border_width="0"/>
+    <lv_obj x="260" y="380" width="148" height="5" style_bg_color="#np_accent" style_bg_opa="100%" style_border_width="0"/>
+    <lv_obj x="420" y="380" width="148" height="5" style_bg_color="#np_accent" style_bg_opa="100%" style_border_width="0"/>
+    <lv_obj x="580" y="380" width="148" height="5" style_bg_color="#np_hairline" style_bg_opa="100%" style_border_width="0"/>
+    <lv_obj x="740" y="380" width="148" height="5" style_bg_color="#np_hairline" style_bg_opa="100%" style_border_width="0"/>
+
+    <lv_label text="Display" x="100" y="391" width="148" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+    <lv_label text="Armazenamento" x="260" y="391" width="148" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+    <lv_label text="Rede" x="420" y="391" width="148" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+    <lv_label text="Hora" x="580" y="391" width="148" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+    <lv_label text="Dados" x="740" y="391" width="148" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+
+    <lv_label bind_text="boot_status" x="100" y="435" width="788" style_text_color="#np_text" style_text_font="np_font_20"/>
+    <lv_label bind_text="boot_detail" x="100" y="470" width="788" style_text_color="#np_text_3" style_text_font="np_font_16"/>
+    <lv_label text="NovaOS · ESP32-P4 + C6" x="100" y="530" width="500" style_text_color="#np_text_disabled" style_text_font="np_font_16"/>
+  </view>
+</screen>

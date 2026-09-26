@@ -3,8 +3,9 @@
  *
  * Hosted setup can wait tens of seconds when the C6 is absent, so all work
  * stays out of app_main and LVGL. Station settings use WIFI_STORAGE_RAM.
- * The one-entry private mailbox copies a request, never logs
- * it, and is wiped after the worker consumes it.
+ * The one-entry private mailbox copies a request, never logs it, and is wiped
+ * after the worker consumes it. A separately opted-in development build may
+ * restore a disposable lab credential from FlashCoordinator after startup.
  */
 #include "connectivity_diagnostic.h"
 
@@ -17,6 +18,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "flash_coordinator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -26,6 +28,7 @@ static const char *const TAG = "np2_connect";
 #define NP2_CONNECTIVITY_TASK_PRIORITY 3U
 #define NP2_CONNECTIVITY_POLL_MS 250U
 #define NP2_WIFI_SSID_MAX_BYTES 32U
+#define NP2_WIFI_SCAN_RESULTS_MAX CONNECTIVITY_DIAGNOSTIC_MAX_SCAN_RESULTS
 #define NP2_WIFI_PASSWORD_MAX_BYTES 63U
 #define NP2_WIFI_ASSOCIATION_TIMEOUT_MS 15000U
 #define NP2_WIFI_DHCP_TIMEOUT_MS 20000U
@@ -37,6 +40,7 @@ static const char *const TAG = "np2_connect";
 #define NP2_RECOVERY_CAMPAIGN_IP_TIMEOUT_MS 20000U
 #define NP2_HOSTED_STARTUP_TIMEOUT_MS 30000U
 #define NP2_HOSTED_STARTUP_TASK_STACK_BYTES (6U * 1024U)
+#define NP2_WIFI_CREDENTIAL_PERSIST_STABLE_MS 30000U
 
 typedef enum {
     CONNECTIVITY_REQUEST_JOIN = 0,
@@ -73,13 +77,12 @@ static bool s_wifi_events_registered;
 static bool s_hosted_recovery_in_progress;
 static esp_netif_t *s_station_netif;
 /*
- * esp_wifi_disconnect() is asynchronous.  When replacing a RAM-only station
+ * esp_wifi_disconnect() is asynchronous.  When replacing a station
  * configuration or forgetting it, the driver can publish a disconnect event
  * after the request has already been queued. Consume one self-initiated
  * event; every other disconnect remains observable and retryable.
  */
 static bool s_intentional_station_disconnect_pending;
-static bool s_forget_after_auth_rejection;
 static bool s_retry_pending;
 static bool s_dns_reassociation_pending;
 static bool s_dhcp_silence_active;
@@ -88,6 +91,10 @@ static int64_t s_station_deadline_us;
 static int64_t s_next_dns_reassociation_us;
 static int64_t s_recovery_attempts_us[NP2_HOSTED_RECOVERY_MAX_CYCLES];
 static int64_t s_recovery_cooldown_until_us;
+static int64_t s_online_since_us;
+static uint32_t s_credential_vault_expected_generation;
+static bool s_credential_vault_write_in_flight;
+static bool s_credential_vault_write_attempted;
 
 static esp_err_t recover_hosted_link(void);
 static void set_status(connectivity_diagnostic_state_t state, esp_err_t result);
@@ -214,6 +221,12 @@ static void clear_active_credentials(void)
     s_status.reconnect_attempts = 0;
     s_status.online = false;
     s_status.station_credentials_in_ram = false;
+    s_status.credential_vault_saved = false;
+    s_status.credential_vault_save_pending = false;
+    s_online_since_us = 0;
+    s_credential_vault_expected_generation = 0;
+    s_credential_vault_write_in_flight = false;
+    s_credential_vault_write_attempted = false;
     taskEXIT_CRITICAL(&s_status_lock);
 }
 
@@ -270,6 +283,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_station_deadline_us = 0;
         s_status.reconnect_attempts = 0;
         s_status.online = true;
+        s_online_since_us = esp_timer_get_time();
         s_status.last_result = ESP_OK;
         s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_ONLINE;
         dhcp_silence_recovered = s_dhcp_silence_timeout_observed;
@@ -287,28 +301,32 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         const wifi_event_sta_disconnected_t *const disconnected = event_data;
         const uint8_t reason = disconnected == NULL ? 0U : disconnected->reason;
         bool intentional_disconnect = false;
-        bool credentials_rejected = false;
+        bool terminal_credentials_rejected = false;
         taskENTER_CRITICAL(&s_status_lock);
         intentional_disconnect = s_intentional_station_disconnect_pending;
         if (intentional_disconnect) {
             s_intentional_station_disconnect_pending = false;
         }
         if (intentional_disconnect) {
+            s_station_deadline_us = 0;
+            s_status.online = false;
+            s_status.last_result = ESP_OK;
+            s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF;
+            s_retry_pending = s_status.station_credentials_in_ram;
             taskEXIT_CRITICAL(&s_status_lock);
-            ESP_LOGI(TAG, "ignored expected station disconnect while replacing RAM-only config");
+            ESP_LOGI(TAG, "station configuration replaced; retrying after disconnect completes");
             return;
         }
         s_status.online = false;
         s_station_deadline_us = 0;
         s_status.last_disconnect_reason = reason;
-        credentials_rejected = reason == WIFI_REASON_AUTH_EXPIRE ||
-                               reason == WIFI_REASON_ASSOC_NOT_AUTHED ||
-                               reason == WIFI_REASON_AUTH_FAIL ||
-                               reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
-                               reason == WIFI_REASON_HANDSHAKE_TIMEOUT ||
-                               reason == WIFI_REASON_802_1X_AUTH_FAILED;
-        if (credentials_rejected) {
-            s_forget_after_auth_rejection = true;
+        /* AUTH_EXPIRE and handshake timeouts occur after an AP restart or a
+         * brief RF loss. They are retriable and must never discard the saved
+         * network. Only definitive credential rejection pauses retries; the
+         * durable record remains available until an explicit FORGET. */
+        terminal_credentials_rejected = reason == WIFI_REASON_AUTH_FAIL ||
+                                       reason == WIFI_REASON_802_1X_AUTH_FAILED;
+        if (terminal_credentials_rejected) {
             s_retry_pending = false;
             s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_FAILED;
             s_status.last_result = ESP_ERR_WIFI_PASSWORD;
@@ -317,12 +335,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF;
         }
         taskEXIT_CRITICAL(&s_status_lock);
-        if (credentials_rejected) {
-            /* Queue the driver-side erase outside the event callback. A new
-             * explicit credential request is required after authentication
-             * rejection; no password retry loop is permitted. */
-            (void)connectivity_diagnostic_request_forget();
-            ESP_LOGW(TAG, "station authentication rejected (reason=%u); new credential required",
+        if (terminal_credentials_rejected) {
+            ESP_LOGW(TAG, "station authentication rejected (reason=%u); durable credential retained",
                      (unsigned int)reason);
             return;
         }
@@ -379,6 +393,7 @@ static void hosted_event_handler(void *arg, esp_event_base_t event_base,
 static esp_err_t configure_station_from_request(const connectivity_request_t *request)
 {
     wifi_config_t config = {0};
+    bool replace_active_station_config = false;
     const size_t ssid_length = bounded_length(request->ssid, sizeof(request->ssid));
     const size_t password_length = bounded_length(request->password, sizeof(request->password));
 
@@ -394,26 +409,36 @@ static esp_err_t configure_station_from_request(const connectivity_request_t *re
         password_length == 0U ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
 
     taskENTER_CRITICAL(&s_status_lock);
+    replace_active_station_config = s_active_station_request_valid;
     s_retry_pending = false;
-    s_intentional_station_disconnect_pending = true;
+    s_intentional_station_disconnect_pending = replace_active_station_config;
     s_status.reconnect_attempts = 0;
     s_status.online = false;
     s_status.station_credentials_in_ram = true;
+    s_status.credential_vault_saved = false;
+    s_status.credential_vault_save_pending = false;
+    s_online_since_us = 0;
+    s_credential_vault_expected_generation = 0;
+    s_credential_vault_write_in_flight = false;
+    s_credential_vault_write_attempted = false;
     taskEXIT_CRITICAL(&s_status_lock);
 
-    esp_err_t err = esp_wifi_disconnect();
-    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
-        taskENTER_CRITICAL(&s_status_lock);
-        s_intentional_station_disconnect_pending = false;
-        taskEXIT_CRITICAL(&s_status_lock);
-        secure_zero(&config, sizeof(config));
-        clear_active_credentials();
-        return err;
-    }
-    if (err == ESP_ERR_WIFI_NOT_CONNECT) {
-        taskENTER_CRITICAL(&s_status_lock);
-        s_intentional_station_disconnect_pending = false;
-        taskEXIT_CRITICAL(&s_status_lock);
+    esp_err_t err = ESP_OK;
+    if (replace_active_station_config) {
+        err = esp_wifi_disconnect();
+        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
+            taskENTER_CRITICAL(&s_status_lock);
+            s_intentional_station_disconnect_pending = false;
+            taskEXIT_CRITICAL(&s_status_lock);
+            secure_zero(&config, sizeof(config));
+            clear_active_credentials();
+            return err;
+        }
+        if (err == ESP_ERR_WIFI_NOT_CONNECT) {
+            taskENTER_CRITICAL(&s_status_lock);
+            s_intentional_station_disconnect_pending = false;
+            taskEXIT_CRITICAL(&s_status_lock);
+        }
     }
 
     err = esp_wifi_set_config(WIFI_IF_STA, &config);
@@ -444,15 +469,20 @@ static esp_err_t configure_station_from_request(const connectivity_request_t *re
 static esp_err_t forget_station(void)
 {
     wifi_config_t empty_config = {0};
-    bool preserve_auth_failure = false;
 
     clear_active_credentials();
 
     taskENTER_CRITICAL(&s_status_lock);
-    preserve_auth_failure = s_forget_after_auth_rejection;
-    s_forget_after_auth_rejection = false;
     s_intentional_station_disconnect_pending = true;
     taskEXIT_CRITICAL(&s_status_lock);
+
+    /* FORGET is the sole path that removes the durable credential. */
+    const esp_err_t credential_clear_result =
+        flash_coordinator_request_credential_vault_clear();
+    if (credential_clear_result != ESP_OK && credential_clear_result != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "credential vault clear request failed: %s",
+                 esp_err_to_name(credential_clear_result));
+    }
 
     esp_err_t err = esp_wifi_disconnect();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
@@ -476,9 +506,7 @@ static esp_err_t forget_station(void)
         taskEXIT_CRITICAL(&s_status_lock);
     }
     if (err == ESP_OK) {
-        set_status(preserve_auth_failure ? CONNECTIVITY_DIAGNOSTIC_STATE_FAILED
-                                         : CONNECTIVITY_DIAGNOSTIC_STATE_WIFI_READY,
-                   preserve_auth_failure ? ESP_ERR_WIFI_PASSWORD : ESP_OK);
+        set_status(CONNECTIVITY_DIAGNOSTIC_STATE_WIFI_READY, ESP_OK);
     }
     return err;
 }
@@ -555,7 +583,7 @@ static void process_request(connectivity_request_t *request)
         if (err != ESP_OK) {
             fail_probe("station forget request", err);
         } else {
-            ESP_LOGI(TAG, "RAM-only station configuration cleared");
+            ESP_LOGI(TAG, "station configuration and durable credential cleared");
         }
     } else if (request->type == CONNECTIVITY_REQUEST_RECOVER_HOSTED) {
         err = recover_hosted_link();
@@ -623,6 +651,115 @@ static uint32_t next_backoff_delay_ms(void)
     return retry_seconds[index] * 1000U + (esp_random() % 500U);
 }
 
+static void maybe_persist_credential_vault(void)
+{
+    if (!flash_coordinator_credential_vault_ready()) return;
+
+    connectivity_request_t credentials = {0};
+    bool eligible = false;
+    bool write_in_flight = false;
+    bool write_attempted = false;
+    uint32_t expected_generation = 0U;
+    const int64_t now_us = esp_timer_get_time();
+    taskENTER_CRITICAL(&s_status_lock);
+    eligible = s_status.online && s_status.station_credentials_in_ram &&
+               s_online_since_us != 0 &&
+               now_us - s_online_since_us >=
+                   (int64_t)NP2_WIFI_CREDENTIAL_PERSIST_STABLE_MS * 1000LL;
+    write_in_flight = s_credential_vault_write_in_flight;
+    write_attempted = s_credential_vault_write_attempted;
+    expected_generation = s_credential_vault_expected_generation;
+    if (eligible && !write_in_flight && !write_attempted) {
+        memcpy(&credentials, &s_active_station_request, sizeof(credentials));
+    }
+    taskEXIT_CRITICAL(&s_status_lock);
+
+    if (!eligible) {
+        secure_zero(&credentials, sizeof(credentials));
+        return;
+    }
+
+    flash_coordinator_status_t storage = {0};
+    flash_coordinator_get_status(&storage);
+    if (write_in_flight) {
+        if (storage.pending || storage.busy) return;
+        const bool saved = storage.credential_vault_valid &&
+                           storage.credential_vault_generation == expected_generation;
+        taskENTER_CRITICAL(&s_status_lock);
+        s_credential_vault_write_in_flight = false;
+        s_status.credential_vault_save_pending = false;
+        s_status.credential_vault_saved = saved;
+        s_status.last_result = saved ? ESP_OK : storage.credential_vault_result;
+        taskEXIT_CRITICAL(&s_status_lock);
+        if (saved) {
+            ESP_LOGI(TAG, "credential vault credentials retained after 30s stable IP");
+        } else {
+            ESP_LOGW(TAG, "credential vault credential retention failed: %s",
+                     esp_err_to_name(storage.credential_vault_result));
+        }
+        return;
+    }
+    if (write_attempted) {
+        secure_zero(&credentials, sizeof(credentials));
+        return;
+    }
+    if (!storage.ready || storage.busy || storage.pending) {
+        secure_zero(&credentials, sizeof(credentials));
+        return;
+    }
+
+    const uint32_t next_generation = storage.credential_vault_valid
+                                         ? storage.credential_vault_generation + 1U
+                                         : 1U;
+    const esp_err_t result = flash_coordinator_request_credential_vault_write(
+        credentials.ssid, credentials.password);
+    secure_zero(&credentials, sizeof(credentials));
+    taskENTER_CRITICAL(&s_status_lock);
+    if (result == ESP_OK) {
+        s_credential_vault_write_attempted = true;
+        s_credential_vault_write_in_flight = true;
+        s_credential_vault_expected_generation = next_generation;
+        s_status.credential_vault_save_pending = true;
+    } else if (result != ESP_ERR_INVALID_STATE && result != ESP_ERR_TIMEOUT) {
+        s_credential_vault_write_attempted = true;
+        s_status.last_result = result;
+    }
+    taskEXIT_CRITICAL(&s_status_lock);
+    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE && result != ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "credential vault credential retention request failed: %s",
+                 esp_err_to_name(result));
+    }
+}
+
+static esp_err_t restore_credential_vault(void)
+{
+    if (!flash_coordinator_credential_vault_ready()) return ESP_ERR_NOT_SUPPORTED;
+    char ssid[NP2_WIFI_SSID_MAX_BYTES + 1U] = {0};
+    char password[NP2_WIFI_PASSWORD_MAX_BYTES + 1U] = {0};
+    const esp_err_t load_result = flash_coordinator_copy_credential_vault(
+        ssid, sizeof(ssid), password, sizeof(password));
+    if (load_result != ESP_OK) {
+        secure_zero(ssid, sizeof(ssid));
+        secure_zero(password, sizeof(password));
+        return load_result;
+    }
+    connectivity_request_t request = {.type = CONNECTIVITY_REQUEST_JOIN};
+    memcpy(request.ssid, ssid, sizeof(request.ssid));
+    memcpy(request.password, password, sizeof(request.password));
+    const esp_err_t result = configure_station_from_request(&request);
+    secure_zero(&request, sizeof(request));
+    secure_zero(ssid, sizeof(ssid));
+    secure_zero(password, sizeof(password));
+    if (result == ESP_OK) {
+        taskENTER_CRITICAL(&s_status_lock);
+        s_status.credential_vault_saved = true;
+        s_credential_vault_write_attempted = true;
+        taskEXIT_CRITICAL(&s_status_lock);
+        ESP_LOGI(TAG, "credential vault credentials restored to private mailbox");
+    }
+    return result;
+}
+
 static void run_station_loop(void)
 {
     int64_t retry_due_at_us = 0;
@@ -641,6 +778,7 @@ static void run_station_loop(void)
 
         if (online) {
             retry_due_at_us = 0;
+            maybe_persist_credential_vault();
         } else if (retry_requested && credentials_are_active() && hosted_link_is_up()) {
             const uint32_t delay_ms = next_backoff_delay_ms();
             retry_due_at_us = esp_timer_get_time() + (int64_t)delay_ms * 1000LL;
@@ -935,11 +1073,11 @@ static void connectivity_probe_task(void *arg)
     s_status.link_up = true;
     taskEXIT_CRITICAL(&s_status_lock);
     set_status(CONNECTIVITY_DIAGNOSTIC_STATE_LINK_UP, ESP_OK);
-    ESP_LOGI(TAG, "Hosted SDIO link is up; initializing RAM-only Wi-Fi station");
+    ESP_LOGI(TAG, "Hosted SDIO link is up; initializing Wi-Fi station");
 
     err = start_ram_only_wifi();
     if (err != ESP_OK) {
-        fail_probe("RAM-only Wi-Fi startup", err);
+        fail_probe("Wi-Fi startup", err);
         vTaskDelete(NULL);
         return;
     }
@@ -964,12 +1102,37 @@ static void connectivity_probe_task(void *arg)
         return;
     }
 
+    static wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
+    memset(records, 0, sizeof(records));
+    uint16_t records_count = access_points_found < NP2_WIFI_SCAN_RESULTS_MAX
+                                 ? access_points_found : NP2_WIFI_SCAN_RESULTS_MAX;
+    err = records_count > 0U ? esp_wifi_scan_get_ap_records(&records_count, records) : ESP_OK;
+    if (err != ESP_OK) {
+        fail_probe("esp_wifi_scan_get_ap_records", err);
+        vTaskDelete(NULL);
+        return;
+    }
     taskENTER_CRITICAL(&s_status_lock);
     s_status.access_points_found = access_points_found;
+    s_status.scan_results_count = (uint8_t)records_count;
+    memset(s_status.scan_results, 0, sizeof(s_status.scan_results));
+    for (uint16_t index = 0; index < records_count; ++index) {
+        memcpy(s_status.scan_results[index].ssid, records[index].ssid,
+               sizeof(s_status.scan_results[index].ssid) - 1U);
+        s_status.scan_results[index].rssi = records[index].rssi;
+        s_status.scan_results[index].secure = records[index].authmode != WIFI_AUTH_OPEN;
+    }
     taskEXIT_CRITICAL(&s_status_lock);
     set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE, ESP_OK);
     ESP_LOGI(TAG, "credential-free Wi-Fi scan complete: %u AP(s)",
              (unsigned int)access_points_found);
+
+    const esp_err_t restore_result = restore_credential_vault();
+    if (restore_result != ESP_OK && restore_result != ESP_ERR_NOT_FOUND &&
+        restore_result != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "credential vault credential restore skipped: %s",
+                 esp_err_to_name(restore_result));
+    }
 
     run_station_loop();
 }

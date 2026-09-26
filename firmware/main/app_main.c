@@ -8,8 +8,11 @@
 #include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
+#include "onboarding_service.h"
 #include "provisioning_service.h"
 #include "time_service.h"
+#include "update_boot_supervisor.h"
+#include "weather_asset_service.h"
 
 static const char *const TAG = "np2_boot";
 
@@ -24,6 +27,16 @@ void app_main(void)
     ESP_LOGI(TAG, "app=%s, version=%s", esp_app_get_description()->project_name,
              esp_app_get_description()->version);
 
+    /* Start recovery before display initialization, which can fail or stall. */
+    const esp_err_t flash_coordinator_err = flash_coordinator_start();
+    if (flash_coordinator_err != ESP_OK) {
+        ESP_LOGE(TAG, "Flash coordinator unavailable: %s", esp_err_to_name(flash_coordinator_err));
+    }
+    const esp_err_t update_boot_err = update_boot_supervisor_start();
+    if (update_boot_err != ESP_OK) {
+        ESP_LOGE(TAG, "P4 OTA boot supervisor unavailable: %s", esp_err_to_name(update_boot_err));
+    }
+
     const esp_err_t bringup_err = board_bringup_start();
     if (bringup_err != ESP_OK) {
         /*
@@ -35,15 +48,15 @@ void app_main(void)
         return;
     }
 
-    const esp_err_t flash_coordinator_err = flash_coordinator_start();
-    if (flash_coordinator_err != ESP_OK) {
-        ESP_LOGE(TAG, "Flash coordinator unavailable: %s", esp_err_to_name(flash_coordinator_err));
-    }
-
     const esp_err_t connectivity_err = connectivity_diagnostic_start();
     if (connectivity_err != ESP_OK) {
         ESP_LOGE(TAG, "Phase 3 connectivity probe unavailable: %s",
                  esp_err_to_name(connectivity_err));
+    }
+
+    const esp_err_t onboarding_err = onboarding_service_start();
+    if (onboarding_err != ESP_OK) {
+        ESP_LOGE(TAG, "Onboarding service unavailable: %s", esp_err_to_name(onboarding_err));
     }
 
     const esp_err_t provisioning_err = provisioning_service_start();
@@ -57,15 +70,23 @@ void app_main(void)
         ESP_LOGE(TAG, "Time service unavailable: %s", esp_err_to_name(time_service_err));
     }
 
+    const esp_err_t app_state_err = app_state_start();
+    if (app_state_err != ESP_OK) {
+        ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
+    }
+
+    const esp_err_t weather_assets_err = weather_asset_service_start();
+    if (weather_assets_err != ESP_OK) {
+        ESP_LOGE(TAG, "Weather-asset SD service unavailable: %s",
+                 esp_err_to_name(weather_assets_err));
+    }
+
+    /* Start the EventBus consumer before the producer. Product-data updates
+     * are then always delivered through app_loop, never directly to LVGL. */
     const esp_err_t validation_err = network_validation_service_start();
     if (validation_err != ESP_OK) {
         ESP_LOGE(TAG, "Network validation service unavailable: %s",
                  esp_err_to_name(validation_err));
-    }
-
-    const esp_err_t app_state_err = app_state_start();
-    if (app_state_err != ESP_OK) {
-        ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
     }
 
     ESP_LOGI(TAG, "P4 local bring-up ready; Phase 4 state projection runs asynchronously");

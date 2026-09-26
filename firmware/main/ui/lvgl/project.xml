@@ -1,0 +1,7 @@
+<project>
+  <targets>
+    <target name="waveshare_p4_7b">
+      <display width="1024" height="600"/>
+    </target>
+  </targets>
+</project>

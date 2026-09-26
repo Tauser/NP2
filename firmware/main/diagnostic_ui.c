@@ -19,7 +19,8 @@
 #include "diagnostic_ui.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
-#include "offline_dashboard.h"
+#include "ui/fonts/np_fonts.h"
+#include "ui/screens/product_ui.h"
 #include "provisioning_service.h"
 #include "wifi_setup_view.h"
 
@@ -143,7 +144,7 @@ static void back_to_dashboard_button_event_cb(lv_event_t *event)
     lv_indev_t *const touch_indev = s_state.touch_indev;
     diagnostic_ui_destroy();
     lv_obj_clean(lv_screen_active());
-    (void)offline_dashboard_create(display, touch_indev);
+    (void)product_ui_create(display, touch_indev);
 }
 
 static const char *cache_test_action_name(cache_test_action_t action)
@@ -826,6 +827,7 @@ esp_err_t diagnostic_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_t *const screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x09111F), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen, &np_font_montserrat_14_latin, LV_PART_MAIN);
 
     lv_obj_t *const title = lv_label_create(screen);
     lv_label_set_text(title, "NP2  |  DIAGNOSTICO DE TOUCH E RENDER");

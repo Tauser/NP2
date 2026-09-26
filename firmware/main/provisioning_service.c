@@ -3,9 +3,10 @@
  *
  * It accepts OPEN <ssid>, FORGET and bounded diagnostics while armed from the
  * touch UI. The
- * service intentionally has no password command, persistence, echo, or log of
- * input. It exists to validate association and recovery without introducing a
- * secret-bearing UI model or serial protocol.
+ * service intentionally has no password command, echo, or log of input. The
+ * touch WPA path can retain a credential only through the protected vault,
+ * after a stable connection; it never makes the password part of the serial
+ * protocol, UI model or log.
  */
 #include "provisioning_service.h"
 
@@ -15,6 +16,7 @@
 #include "connectivity_diagnostic.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
+#include "update_development.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -166,6 +168,13 @@ static void process_line(uint8_t *line, size_t length)
                 result = connectivity_diagnostic_request_join(ssid, "");
             }
         }
+    } else if (command_length == 10U && memcmp(command, "OTA_STATUS", 10U) == 0) {
+        update_development_log_status();
+        result = ESP_OK;
+    } else if (command_length == 13U && memcmp(command, "OTA_PREFLIGHT", 13U) == 0) {
+        result = update_development_request(false);
+    } else if (command_length == 9U && memcmp(command, "OTA_APPLY", 9U) == 0) {
+        result = update_development_request(true);
     } else if (command_length == 6U && memcmp(command, "FORGET", 6U) == 0) {
         result = connectivity_diagnostic_request_forget();
         ESP_LOGI(TAG, "maintenance command=FORGET result=%s", esp_err_to_name(result));
