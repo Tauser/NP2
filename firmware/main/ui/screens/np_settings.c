@@ -2,9 +2,9 @@
  *
  * Layout de Configurações:
  *   Header compartilhado                          0..64
- *   Tela e som       24,76   976x260
- *   Conectividade    24,352  480x224
- *   Sistema         520,352  480x224
+ *   Tela e som       24,76   976x286
+ *   Conectividade    24,378  480x198
+ *   Sistema         520,378  480x198
  *
  * O drawer pertence ao np_header() e permanece oculto por padrao.
  * Esta tela nao cria rail/menu lateral permanente.
@@ -26,11 +26,11 @@
 
 #define SETTINGS_LEFT_W       976
 #define SETTINGS_RIGHT_W      480
-#define SETTINGS_CONTENT_H    260
+#define SETTINGS_CONTENT_H    286
 
-#define SETTINGS_NETWORK_H    224
+#define SETTINGS_NETWORK_H    198
 #define SETTINGS_SYSTEM_Y     (SETTINGS_TOP_Y + SETTINGS_CONTENT_H + SETTINGS_GAP)
-#define SETTINGS_SYSTEM_H     224
+#define SETTINGS_SYSTEM_H     198
 
 #define SETTINGS_TOP_DIVIDER_X 524
 
@@ -92,11 +92,19 @@ static void settings_slider(lv_obj_t *parent,
     np_label(parent, pct, NP_FONT_MD, np_c_text_2(),
              420, y, 76, LV_TEXT_ALIGN_RIGHT);
 
-    np_fill(parent, text_x, y + 42, track_w, 8,
+    np_fill(parent, text_x, y + 40, track_w, 8,
             np_c_hairline(), LV_OPA_COVER, 4);
-    np_fill(parent, text_x, y + 42, fill_w, 8,
+    np_fill(parent, text_x, y + 40, fill_w, 8,
             np_c_accent(), LV_OPA_COVER, 4);
-    np_dot(parent, text_x + fill_w - 10, y + 36, 20, np_c_accent());
+    np_dot(parent, text_x + fill_w - 10, y + 34, 20, np_c_accent());
+}
+
+static void settings_theme_button(lv_obj_t *parent,
+                                  int32_t x, int32_t w,
+                                  const char *text, bool active)
+{
+    lv_obj_t *button = np_button(parent, x, 136, w, 48, text, active);
+    lv_obj_clear_flag(button, LV_OBJ_FLAG_CLICKABLE);
 }
 
 static lv_obj_t *settings_display_card(lv_obj_t *root)
@@ -106,28 +114,33 @@ static lv_obj_t *settings_display_card(lv_obj_t *root)
                                     SETTINGS_LEFT_W, SETTINGS_CONTENT_H);
 
     np_label(card, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
-             24, 24, 28, LV_TEXT_ALIGN_CENTER);
+             24, 22, 28, LV_TEXT_ALIGN_CENTER);
     np_label(card, "Tela e som", NP_FONT_LG, np_c_text(),
              68, 20, 300, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Ajuste brilho, volume e modo noturno.", NP_FONT_SM, np_c_text_2(),
-             68, 52, 440, LV_TEXT_ALIGN_LEFT);
 
-    settings_slider(card, 124,
+    settings_slider(card, 108,
                     NP_ICON_UV,
                     "Brilho da tela",
                     SETTINGS_BRIGHTNESS);
 
-    settings_slider(card, 196,
+    settings_slider(card, 198,
                     NP_ICON_VOLUME_UP,
                     "Volume geral",
                     SETTINGS_VOLUME);
 
-    np_vline(card, SETTINGS_TOP_DIVIDER_X, 126, 108);
+    np_vline(card, SETTINGS_TOP_DIVIDER_X, 96, 166);
+    np_label(card, "Tema", NP_FONT_MD, np_c_text(),
+             570, 104, 180, LV_TEXT_ALIGN_LEFT);
+    settings_theme_button(card, 570, 118, "Grafite", true);
+    settings_theme_button(card, 700, 118, "Carvão", false);
+    settings_theme_button(card, 830, 122, "Âmbar", false);
+
+    np_hline(card, 570, 202, 382);
     np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
-             570, 146, 220, LV_TEXT_ALIGN_LEFT);
+             570, 226, 220, LV_TEXT_ALIGN_LEFT);
     np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
-             570, 178, 180, LV_TEXT_ALIGN_LEFT);
-    settings_toggle(card, 900, 150, true);
+             570, 256, 180, LV_TEXT_ALIGN_LEFT);
+    settings_toggle(card, 900, 230, true);
 
     return card;
 }
@@ -143,15 +156,13 @@ static void settings_connection_row(lv_obj_t *card,
     np_label(card, icon, NP_FONT_ICON, icon_color,
              28, y, 28, LV_TEXT_ALIGN_CENTER);
     np_label(card, label, NP_FONT_MD, np_c_text(),
-             88, y, 110, LV_TEXT_ALIGN_LEFT);
+             88, y, 132, LV_TEXT_ALIGN_LEFT);
     np_label(card, value, NP_FONT_MD, np_c_text(),
-             216, y, 200, LV_TEXT_ALIGN_RIGHT);
-    np_label(card, ">", NP_FONT_LG, np_c_text_2(),
-             428, y - 3, 24, LV_TEXT_ALIGN_RIGHT);
+             236, y, 180, LV_TEXT_ALIGN_RIGHT);
 
     if (detail != NULL && detail[0] != '\0') {
         np_label(card, detail, NP_FONT_SM, np_c_text_2(),
-                 216, y + 24, 200, LV_TEXT_ALIGN_RIGHT);
+                 236, y + 24, 180, LV_TEXT_ALIGN_RIGHT);
     }
 }
 
@@ -161,21 +172,22 @@ static lv_obj_t *settings_connectivity_card(lv_obj_t *root)
                                     SETTINGS_RIGHT_X, SETTINGS_TOP_Y,
                                     SETTINGS_RIGHT_W, SETTINGS_NETWORK_H);
 
-    settings_section_title(card, NP_ICON_WIFI, "Conectividade",
-                           "Rede, Bluetooth e fuso horário.",
+    settings_section_title(card, NP_ICON_WIFI, "Conectividade", NULL,
                            SETTINGS_RIGHT_W);
 
-    settings_connection_row(card, 98,
-                            NP_ICON_WIFI, np_c_positive(),
-                            "Wi-Fi", "NovaNet 5G", "192.168.0.114 · -52 dBm");
+    settings_connection_row(card, 82,
+                            NP_ICON_WIFI, np_c_text_3(),
+                            "Wi-Fi", "--", "-- dBm");
+    np_hline(card, 24, 128, SETTINGS_RIGHT_W - 48);
 
-    settings_connection_row(card, 150,
-                            NP_ICON_BLUETOOTH, np_c_accent(),
-                            "Bluetooth", "Desativado", NULL);
+    settings_connection_row(card, 136,
+                            NP_ICON_BLUETOOTH, np_c_text_3(),
+                            "Bluetooth", "--", NULL);
+    np_hline(card, 24, 158, SETTINGS_RIGHT_W - 48);
 
-    settings_connection_row(card, 188,
+    settings_connection_row(card, 166,
                             NP_ICON_CALENDAR, np_c_text_2(),
-                            "Fuso", "America/Sao_Paulo", NULL);
+                            "Fuso horário", "--", NULL);
 
     return card;
 }
@@ -186,15 +198,33 @@ static lv_obj_t *settings_system_card(lv_obj_t *root)
                                     SETTINGS_RIGHT_X, SETTINGS_SYSTEM_Y,
                                     SETTINGS_RIGHT_W, SETTINGS_SYSTEM_H);
 
-    settings_section_title(card, NP_ICON_SETTINGS, "Sistema",
-                           "Atualização e reinício do painel.",
+    settings_section_title(card, NP_ICON_SETTINGS, "Sistema", NULL,
                            SETTINGS_RIGHT_W);
 
-    lv_obj_t *update = np_button(card, 24, 132, 260, 52,
+    np_label(card, "Display", NP_FONT_SM, np_c_text_2(),
+             24, 74, 192, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "1024x600 · RGB565", NP_FONT_SM, np_c_text(),
+             24, 92, 192, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "Touch", NP_FONT_SM, np_c_text_2(),
+             252, 74, 204, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "Capacitivo", NP_FONT_SM, np_c_text(),
+             252, 92, 204, LV_TEXT_ALIGN_LEFT);
+    np_vline(card, 240, 74, 66);
+
+    np_label(card, "Firmware", NP_FONT_SM, np_c_text_2(),
+             24, 110, 192, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "--", NP_FONT_SM, np_c_text_3(),
+             24, 128, 192, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "Temperatura", NP_FONT_SM, np_c_text_2(),
+             252, 110, 204, LV_TEXT_ALIGN_LEFT);
+    np_label(card, "--", NP_FONT_SM, np_c_text_3(),
+             252, 128, 204, LV_TEXT_ALIGN_LEFT);
+
+    lv_obj_t *update = np_button(card, 24, 150, 258, 44,
                                  "Atualizar", true);
     lv_obj_clear_flag(update, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *restart = np_button(card, 300, 132, 156, 52,
+    lv_obj_t *restart = np_button(card, 294, 150, 162, 44,
                                   "Reiniciar", false);
     lv_obj_clear_flag(restart, LV_OBJ_FLAG_CLICKABLE);
 

@@ -3054,3 +3054,21 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   8,001 s e Wi-Fi com IP; não houve panic nem watchdog na captura de 15 s.
+
+### 2026-09-27 — Três cards de Configurações
+
+- Settings usa exclusivamente `np_header()` e mantém seu drawer oculto por
+  padrão. A tela contém Tela e som (`24,76,976,286`), Conectividade
+  (`24,378,480,198`) e Sistema (`520,378,480,198`), criados em ciclos LVGL
+  separados. Tema e modo noturno foram organizados no lado direito do card
+  superior; Sistema usa grade 2x2 e dois botões. Dados sem contrato de binding
+  permanecem em `--`; schema offline, cache, providers e Home não mudaram.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286cc0` B
+  em partição de `0x800000` B, com `0x579340` B (68%) livres. SHA-256 P4:
+  `2BEE1FDAA3C0CDFEBEAB704DBE1695EB495000DCE17588F38EB93334E0D4A29C`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  8,042 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
