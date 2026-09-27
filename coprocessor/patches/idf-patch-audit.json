@@ -1,0 +1,14 @@
+{
+  "reference_url": "https://raw.githubusercontent.com/espressif/esp-idf/v5.5.4/components/esp_driver_sdio/src/sdio_slave.c",
+  "source": "components/esp_driver_sdio/src/sdio_slave.c",
+  "hosted_component_hash": "1b1c2aa8f82e0826950ec92ff16fd8f327abd2de6c8a3899301ad8cfb4747879",
+  "reference_sha256": "32041dcbbd0e1f4db26af901c68a3e0804b5d01142b291314c5016ca0ea0a6aa",
+  "before_raw_sha256": "1b04d1b8958bae7b3aa9c5927cf4bd23c899a11036ce907f993f0553aae7bf53",
+  "after_raw_sha256": "1b04d1b8958bae7b3aa9c5927cf4bd23c899a11036ce907f993f0553aae7bf53",
+  "patched_lf_sha256": "5bac8cc862aeb57f1971cacd39eb2fc92a464b2c1ce90700024b87db76b1cb16",
+  "patch_sha256": "3e2456f9a2c7e890572fe848e36c6144bf7e1031d1c15bfbd6b284671101a41f",
+  "patch_tool_sha256": "23f691af54e2e29a40fa5b1255357913a8d859868e48df61d106326f1c43d7e9",
+  "already_patched": true,
+  "idempotent": true,
+  "scope": "Whole sdio_slave.c only; not an audit of every SDK file"
+}

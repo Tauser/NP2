@@ -1,4 +1,8 @@
 CONFIG_IDF_TARGET="esp32c6"
+# ESP-IDF's supported deterministic-build mode removes timestamps and maps
+# build paths out of debug information. Artifact hashes can then identify the
+# exact pinned source/configuration rather than the time of compilation.
+CONFIG_APP_REPRODUCIBLE_BUILD=y
 CONFIG_ESP_HOSTED=y
 CONFIG_ESP_HOSTED_CP=y
 CONFIG_ESP_HOSTED_CP_FOR_MCU=y
