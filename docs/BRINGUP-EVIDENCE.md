@@ -3112,3 +3112,18 @@ cortes de energia; esses gates continuam pendentes.
   passou de 60 s sem novo `task_wdt` ou panic. O gesto que produziu o log
   original ainda não foi reproduzido neste ensaio; estabilidade sob toque
   e soak prolongado permanecem abertos.
+
+### 2026-09-27 — Transição Home para Settings
+
+- O commit `4941d26` libera a Home e sua animação antes de criar a árvore
+  Settings na task LVGL. A troca continua assíncrona em relação ao callback
+  do botão; o header e o drawer compartilhados não foram modificados.
+- `idf.py build` com IDF 5.5.4 para `esp32p4` passou. Aplicação `0x298780` B,
+  68% livres no slot de 8 MiB. SHA-256 da imagem P4:
+  `FC7576577BDA175FDB94248277FE5F29B770E47CD9323C8C0F0332A00A2E4B9F`.
+  `idf.py -p COM8 flash` confirmou `Hash of data verified` e reiniciou o P4.
+- `idf.py -p COM8 monitor` mostrou Home aos 8,014 s, ícone animado aos
+  12,164 s, C6 3.0.6/RPC v2/SW_AGGR e DNS/NTP/HTTPS `ESP_OK` até 17,004 s.
+  A observação em repouso passou de 60 s sem `task_wdt` ou panic. Não houve
+  toque físico em Settings durante essa captura; o gatilho original permanece
+  sem reprodução controlada. C6 e eFuses não foram escritos.
