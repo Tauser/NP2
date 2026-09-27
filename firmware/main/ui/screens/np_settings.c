@@ -263,7 +263,7 @@ static lv_obj_t *settings_system_card(lv_obj_t *root)
     return card;
 }
 
-np_settings_view_t np_settings_build(lv_obj_t *parent)
+np_settings_view_t np_settings_begin(lv_obj_t *parent)
 {
     np_settings_view_t view = {0};
     view.root = np_scene(parent);
@@ -275,16 +275,36 @@ np_settings_view_t np_settings_build(lv_obj_t *parent)
     view.header = np_header(view.root);
     view.home_button = NULL;
 
-    /* Mantemos os mesmos handles para nao quebrar np_settings_view_t e o
-     * staged reveal existente: left / middle / right. */
-    view.left_card = settings_display_card(view.root);
-    view.middle_card = settings_connectivity_card(view.root);
-    view.right_card = settings_system_card(view.root);
+    return view;
+}
 
-    np_set_visible(view.left_card, false);
-    np_set_visible(view.middle_card, false);
-    np_set_visible(view.right_card, false);
+bool np_settings_build_next_card(np_settings_view_t *view)
+{
+    if (view == NULL || view->root == NULL) return false;
 
+    if (view->left_card == NULL) {
+        view->left_card = settings_display_card(view->root);
+        np_set_visible(view->left_card, false);
+        return true;
+    }
+    if (view->middle_card == NULL) {
+        view->middle_card = settings_connectivity_card(view->root);
+        np_set_visible(view->middle_card, false);
+        return true;
+    }
+    if (view->right_card == NULL) {
+        view->right_card = settings_system_card(view->root);
+        np_set_visible(view->right_card, false);
+        return true;
+    }
+    return false;
+}
+
+np_settings_view_t np_settings_build(lv_obj_t *parent)
+{
+    np_settings_view_t view = np_settings_begin(parent);
+    while (np_settings_build_next_card(&view)) {
+    }
     return view;
 }
 

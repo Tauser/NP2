@@ -16,7 +16,7 @@
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
-#define SETTINGS_STAGE_INTERVAL_MS 48U
+#define SETTINGS_STAGE_INTERVAL_MS 80U
 #define SETTINGS_STAGE_COUNT 3U
 
 typedef struct {
@@ -44,6 +44,7 @@ static const char *const TAG = "product_ui";
 static void diagnostics_button_event_cb(lv_event_t *event);
 static void settings_home_event_cb(lv_event_t *event);
 static void settings_stage_timer_cb(lv_timer_t *timer);
+static void settings_stage_async(void *user_data);
 
 static np_data_state_t data_state(bool available, bool stale)
 {
@@ -613,11 +614,13 @@ static void open_settings_async(void *user_data)
     if (s_ui.active_screen != PRODUCT_SCREEN_HOME) return;
 
     lv_obj_t *const home_root = s_ui.home.root;
-    s_ui.settings = np_settings_build(lv_screen_active());
+    s_ui.settings = np_settings_begin(lv_screen_active());
     np_set_visible(s_ui.settings.root, true);
     np_settings_reset_stages(&s_ui.settings);
-    lv_obj_add_event_cb(s_ui.settings.home_button,
-                        settings_home_event_cb, LV_EVENT_CLICKED, NULL);
+    if (s_ui.settings.home_button != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.home_button,
+                            settings_home_event_cb, LV_EVENT_CLICKED, NULL);
+    }
     lv_obj_add_event_cb(s_ui.settings.header.drawer_home_button,
                         settings_home_event_cb, LV_EVENT_CLICKED, NULL);
     s_ui.active_screen = PRODUCT_SCREEN_SETTINGS;
@@ -628,10 +631,10 @@ static void open_settings_async(void *user_data)
                                                  SETTINGS_STAGE_INTERVAL_MS,
                                                  NULL);
     if (s_ui.settings_stage_timer == NULL) {
-        /* Sem timer disponivel, a tela continua utilizavel. */
-        np_set_visible(s_ui.settings.left_card, true);
-        np_set_visible(s_ui.settings.middle_card, true);
-        np_set_visible(s_ui.settings.right_card, true);
+        /* Cada card continua em um ciclo proprio, mesmo sem timer. */
+        if (lv_async_call(settings_stage_async, NULL) != LV_RESULT_OK) {
+            ESP_LOGE(TAG, "Settings cards unavailable: no LVGL work slot");
+        }
     }
 
     /* O callback do menu ja terminou: agora e seguro liberar a Home. */
@@ -641,6 +644,12 @@ static void open_settings_async(void *user_data)
 static void settings_stage_timer_cb(lv_timer_t *timer)
 {
     if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS) {
+        lv_timer_delete(timer);
+        s_ui.settings_stage_timer = NULL;
+        return;
+    }
+
+    if (!np_settings_build_next_card(&s_ui.settings)) {
         lv_timer_delete(timer);
         s_ui.settings_stage_timer = NULL;
         return;
@@ -658,6 +667,29 @@ static void settings_stage_timer_cb(lv_timer_t *timer)
     if (s_ui.settings_stage >= SETTINGS_STAGE_COUNT) {
         lv_timer_delete(timer);
         s_ui.settings_stage_timer = NULL;
+    }
+}
+
+static void settings_stage_async(void *user_data)
+{
+    (void)user_data;
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
+        !np_settings_build_next_card(&s_ui.settings)) {
+        return;
+    }
+
+    if (s_ui.settings_stage == 0U) {
+        np_set_visible(s_ui.settings.left_card, true);
+    } else if (s_ui.settings_stage == 1U) {
+        np_set_visible(s_ui.settings.middle_card, true);
+    } else {
+        np_set_visible(s_ui.settings.right_card, true);
+    }
+
+    s_ui.settings_stage++;
+    if (s_ui.settings_stage < SETTINGS_STAGE_COUNT &&
+        lv_async_call(settings_stage_async, NULL) != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Settings card scheduling failed");
     }
 }
 

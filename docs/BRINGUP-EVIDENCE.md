@@ -2958,3 +2958,18 @@ cortes de energia; esses gates continuam pendentes.
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home aos
   7,998 s, Wi-Fi com IP e a primeira atualização HTTPS com `ESP_OK`, sem
   panic ou WDT durante a captura. O monitor foi encerrado ao fim da captura.
+
+### 2026-09-27 — Correção do watchdog na abertura de Configurações
+
+- A captura de campo registrou `task_wdt` com `IDLE0` bloqueada e a task
+  `lvgl` em `open_settings_async`: a abertura criava os três painéis inteiros
+  no mesmo ciclo LVGL. A tela agora cria apenas a raiz, o header e o drawer no
+  ciclo de navegação; cada painel é construído e revelado em um ciclo LVGL
+  separado, espaçado em 80 ms. O fallback sem timer usa chamadas assíncronas
+  separadas e não volta a construir todos os painéis de uma vez.
+- Build ESP-IDF 5.5.4 para `esp32p4` passou: app `0x2870b0` B em slot de
+  `0x800000` B, com `0x578f50` B (68%) livres. A gravação P4 não foi repetida
+  nesta etapa porque a COM8 estava ocupada por um monitor ESP-IDF externo
+  ativo (`C:\Espressif\tools\python\v5.5.4\venv`); nenhuma sessão do
+  responsável foi encerrada. O teste físico de abrir Configurações permanece
+  pendente dessa gravação.

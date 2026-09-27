@@ -66,6 +66,8 @@ typedef struct {
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);
 np_home_view_t np_home_build(lv_obj_t *parent);
+np_settings_view_t np_settings_begin(lv_obj_t *parent);
+bool np_settings_build_next_card(np_settings_view_t *view);
 np_settings_view_t np_settings_build(lv_obj_t *parent);
 void np_settings_reset_stages(np_settings_view_t *view);
 
