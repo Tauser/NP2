@@ -54,6 +54,7 @@
 #define SETTINGS_MODAL_H            368
 
 static lv_obj_t *s_system_modal_scrim = NULL;
+static lv_obj_t *s_notifications_modal_scrim = NULL;
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -276,6 +277,48 @@ static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
     return scrim;
 }
 
+static lv_obj_t *settings_notification_switch(lv_obj_t *parent, int32_t y)
+{
+    lv_obj_t *sw = lv_switch_create(parent);
+    lv_obj_set_pos(sw, 536, y);
+    lv_obj_set_size(sw, 52, 28);
+    lv_obj_add_state(sw, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, np_c_hairline(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, np_c_accent(), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, np_c_text(), LV_PART_KNOB);
+    return sw;
+}
+
+static lv_obj_t *settings_build_notifications_modal(lv_obj_t *root,
+                                                     np_settings_view_t *view)
+{
+    lv_obj_t *scrim = np_fill(root, 0, 0, NP_SCREEN_W, NP_SCREEN_H,
+                              np_c_bg(), LV_OPA_70, 0);
+    lv_obj_t *modal = settings_panel(scrim, SETTINGS_MODAL_X, SETTINGS_MODAL_Y,
+                                     SETTINGS_MODAL_W, SETTINGS_MODAL_H);
+    np_label(modal, NP_ICON_NOTIFICATIONS, NP_FONT_ICON, np_c_text_2(),
+             24, 22, 30, LV_TEXT_ALIGN_CENTER);
+    np_label(modal, "Notificacoes", NP_FONT_LG, np_c_text(),
+             68, 18, 360, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *close = np_button(modal, SETTINGS_MODAL_W - 68, 16, 44, 44,
+                                "X", false);
+    lv_obj_add_event_cb(close, settings_modal_close_event_cb,
+                        LV_EVENT_CLICKED, scrim);
+    np_hline(modal, 24, 82, SETTINGS_MODAL_W - 48);
+    np_label(modal, "Notificacoes gerais", NP_FONT_MD, np_c_text(),
+             32, 112, 360, LV_TEXT_ALIGN_LEFT);
+    view->notifications_general_switch = settings_notification_switch(modal, 106);
+    np_hline(modal, 32, 164, SETTINGS_MODAL_W - 64);
+    np_label(modal, "Som", NP_FONT_MD, np_c_text(), 32, 190, 360, LV_TEXT_ALIGN_LEFT);
+    view->notifications_sound_switch = settings_notification_switch(modal, 184);
+    np_hline(modal, 32, 242, SETTINGS_MODAL_W - 64);
+    np_label(modal, "Alertas do sistema", NP_FONT_MD, np_c_text(),
+             32, 268, 360, LV_TEXT_ALIGN_LEFT);
+    view->notifications_system_switch = settings_notification_switch(modal, 262);
+    np_set_visible(scrim, false);
+    return scrim;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Card Geral                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -346,16 +389,20 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                               true);
 
     (void)settings_option_row(card,
-                              214,
+                              194,
                               NP_ICON_CALENDAR,
                               np_c_text_2(),
                               "Fuso horario",
                               "--",
                               true);
 
+    view->notifications_row = settings_option_row(card,
+                            284, NP_ICON_NOTIFICATIONS, np_c_text_2(),
+                            "Notificacoes", "Ativadas", true);
+    lv_obj_add_flag(view->notifications_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *system_row =
         settings_option_row(card,
-                            324,
+                            374,
                             NP_ICON_SETTINGS,
                             np_c_text_2(),
                             "Sistema",
@@ -391,6 +438,8 @@ np_settings_view_t np_settings_begin(lv_obj_t *parent)
      * Assim o toque em Sistema nao cria arvore LVGL nova.
      */
     s_system_modal_scrim = settings_build_system_modal(view.root);
+    view.notifications_modal_scrim = settings_build_notifications_modal(view.root, &view);
+    s_notifications_modal_scrim = view.notifications_modal_scrim;
 
     return view;
 }
@@ -442,6 +491,7 @@ void np_settings_reset_stages(np_settings_view_t *view)
     if (s_system_modal_scrim != NULL) {
         np_set_visible(s_system_modal_scrim, false);
     }
+    if (s_notifications_modal_scrim != NULL) np_set_visible(s_notifications_modal_scrim, false);
 }
 
 lv_obj_t *np_settings_create(lv_obj_t *parent)

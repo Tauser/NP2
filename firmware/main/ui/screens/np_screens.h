@@ -70,6 +70,11 @@ typedef struct {
     lv_obj_t *volume_value;
     lv_obj_t *volume_bubble;
     lv_obj_t *volume_bubble_value;
+    lv_obj_t *notifications_row;
+    lv_obj_t *notifications_modal_scrim;
+    lv_obj_t *notifications_general_switch;
+    lv_obj_t *notifications_sound_switch;
+    lv_obj_t *notifications_system_switch;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);

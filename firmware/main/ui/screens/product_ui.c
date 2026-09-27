@@ -13,6 +13,7 @@
 #include "offline_value_format.h"
 #include "np_screens.h"
 #include "np_feedback.h"
+#include "notification_service.h"
 #include "weather_condition.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
@@ -51,6 +52,8 @@ static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
 static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
+static void notifications_event_cb(lv_event_t *event);
+static void notification_switch_event_cb(lv_event_t *event);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -166,6 +169,37 @@ static void install_settings_control_callbacks(void)
                             settings_control_event_cb,
                             LV_EVENT_VALUE_CHANGED,
                             (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+    }
+    lv_obj_add_event_cb(s_ui.settings.notifications_row, notifications_event_cb,
+                        LV_EVENT_CLICKED, s_ui.settings.notifications_modal_scrim);
+    lv_obj_add_event_cb(s_ui.settings.notifications_general_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)0U);
+    lv_obj_add_event_cb(s_ui.settings.notifications_sound_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)1U);
+    lv_obj_add_event_cb(s_ui.settings.notifications_system_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)2U);
+}
+
+static void notifications_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_obj_t *scrim = lv_event_get_user_data(event);
+    if (scrim != NULL) { lv_obj_move_foreground(scrim); np_set_visible(scrim, true); }
+}
+
+static void notification_switch_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
+    lv_obj_t *sw = lv_event_get_target(event);
+    const bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    const uintptr_t type = (uintptr_t)lv_event_get_user_data(event);
+    esp_err_t result = type == 0U ? notification_service_set_general_enabled(enabled) :
+                       type == 1U ? notification_service_set_sound_enabled(enabled) :
+                                    notification_service_set_system_alerts_enabled(enabled);
+    if (result == ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                               enabled ? "Notificacoes ativadas" : "Notificacoes silenciadas",
+                               NULL, 2000U);
     }
 }
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
