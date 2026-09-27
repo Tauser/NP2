@@ -5,7 +5,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define NOTIFICATION_TASK_STACK_BYTES 3072U
+/* FlashCoordinator request submission carries the largest generic request
+ * envelope on the caller stack. Keep this worker sized for that fixed
+ * contract instead of allowing a preference change to overflow its stack. */
+#define NOTIFICATION_TASK_STACK_BYTES 8192U
 #define NOTIFICATION_TASK_PRIORITY 2U
 #define NOTIFICATION_PERSIST_DEBOUNCE_MS 500U
 #define NOTIFICATION_SERVICE_POLL_MS 200U
