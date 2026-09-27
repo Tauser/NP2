@@ -12,14 +12,13 @@
 #define NOTIFICATION_TASK_PRIORITY 2U
 #define NOTIFICATION_PERSIST_DEBOUNCE_MS 500U
 #define NOTIFICATION_SERVICE_POLL_MS 200U
-#define NOTIFICATION_RETRY_DELAY_MS 5000U
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task;
 static bool s_started;
 static bool s_restore_applied;
 static bool s_save_enqueued;
-static TickType_t s_next_save_attempt_tick;
+static uint32_t s_pending_flash_sequence;
 static notification_service_status_t s_status = {
     .general_enabled = true,
     .sound_enabled = true,
@@ -60,12 +59,21 @@ static void restore_preferences_if_available(void)
         s_restore_applied = true;
     }
 
-    if (s_save_enqueued && flash.notification_profile_valid &&
-        profile_matches_status(&flash.notification_profile, &s_status)) {
-        s_status.persistence_pending = false;
-        s_status.persisted_generation = flash.notification_profile_generation;
-        s_status.last_result = ESP_OK;
+    if (s_save_enqueued &&
+        flash.notification_profile_completed_sequence == s_pending_flash_sequence) {
         s_save_enqueued = false;
+        s_pending_flash_sequence = 0U;
+        s_status.persistence_pending = false;
+        if (flash.notification_profile_last_write_result == ESP_OK &&
+            flash.notification_profile_valid &&
+            profile_matches_status(&flash.notification_profile, &s_status)) {
+            s_status.persisted_generation = flash.notification_profile_generation;
+            s_status.last_result = ESP_OK;
+        } else {
+            s_status.last_result = flash.notification_profile_last_write_result == ESP_OK
+                                       ? ESP_FAIL
+                                       : flash.notification_profile_last_write_result;
+        }
     }
     portEXIT_CRITICAL(&s_lock);
 }
@@ -75,8 +83,7 @@ static void submit_pending_profile(void)
     notification_service_status_t snapshot = {0};
     bool should_submit = false;
     portENTER_CRITICAL(&s_lock);
-    should_submit = s_status.ready && s_status.persistence_pending && !s_save_enqueued &&
-                    (int32_t)(xTaskGetTickCount() - s_next_save_attempt_tick) >= 0;
+    should_submit = s_status.ready && s_status.persistence_pending && !s_save_enqueued;
     snapshot = s_status;
     portEXIT_CRITICAL(&s_lock);
     if (!should_submit) return;
@@ -86,15 +93,17 @@ static void submit_pending_profile(void)
         .sound_enabled = snapshot.sound_enabled,
         .system_alerts_enabled = snapshot.system_alerts_enabled,
     };
-    const esp_err_t result = flash_coordinator_request_notification_profile_write(&profile);
+    uint32_t sequence = 0U;
+    const esp_err_t result =
+        flash_coordinator_request_notification_profile_write(&profile, &sequence);
     portENTER_CRITICAL(&s_lock);
     if (result == ESP_OK) {
         s_save_enqueued = true;
-        s_next_save_attempt_tick = 0U;
-    } else if (result != ESP_ERR_TIMEOUT && result != ESP_ERR_INVALID_STATE) {
+        s_pending_flash_sequence = sequence;
+    } else {
+        /* Submission itself failed. A later user change is the next retry. */
+        s_status.persistence_pending = false;
         s_status.last_result = result;
-        s_next_save_attempt_tick =
-            xTaskGetTickCount() + pdMS_TO_TICKS(NOTIFICATION_RETRY_DELAY_MS);
     }
     portEXIT_CRITICAL(&s_lock);
 }
@@ -153,6 +162,7 @@ static esp_err_t set_preference(uint8_t preference, bool enabled)
         s_status.persistence_pending = true;
         s_status.last_result = ESP_OK;
         s_save_enqueued = false;
+        s_pending_flash_sequence = 0U;
     }
     const TaskHandle_t task = s_task;
     portEXIT_CRITICAL(&s_lock);

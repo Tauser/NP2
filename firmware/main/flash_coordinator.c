@@ -1870,6 +1870,12 @@ static void flash_worker_task(void *arg)
                      (unsigned int)request.kind, (unsigned long)request.sequence,
                      esp_err_to_name(result));
         }
+        if (request.kind == FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE) {
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.notification_profile_completed_sequence = request.sequence;
+            s_status.notification_profile_last_write_result = result;
+            portEXIT_CRITICAL(&s_status_lock);
+        }
         complete_request(request.sequence, result, duration_ms, batch_writes,
                          free_entries_before, free_entries_after, littlefs_writes,
                          littlefs_verified_bytes, littlefs_format,
@@ -2104,7 +2110,7 @@ esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_pr
 }
 
 esp_err_t flash_coordinator_request_notification_profile_write(
-    const notification_profile_t *profile)
+    const notification_profile_t *profile, uint32_t *out_sequence)
 {
     if (!notification_profile_is_valid(profile) || s_request_queue == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -2119,6 +2125,7 @@ esp_err_t flash_coordinator_request_notification_profile_write(
         .notification_profile = *profile,
     };
     if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    if (out_sequence != NULL) *out_sequence = request.sequence;
     set_busy(false, true);
     return ESP_OK;
 }
