@@ -16,27 +16,40 @@
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
+#define SETTINGS_STAGE_INTERVAL_MS 48U
+#define SETTINGS_STAGE_COUNT 3U
 
 typedef struct {
+    enum {
+        PRODUCT_SCREEN_BOOT = 0,
+        PRODUCT_SCREEN_HOME,
+        PRODUCT_SCREEN_SETTINGS,
+    } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
     np_boot_view_t boot;
     np_home_view_t home;
+    np_settings_view_t settings;
     lv_timer_t *refresh_timer;
+    lv_timer_t *settings_stage_timer;
     uint32_t started_at_tick;
     uint32_t rendered_revision;
-    bool home_visible;
+    uint8_t settings_stage;
+    bool navigation_pending;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
 static const char *const TAG = "product_ui";
+
+static void diagnostics_button_event_cb(lv_event_t *event);
+static void settings_home_event_cb(lv_event_t *event);
+static void settings_stage_timer_cb(lv_timer_t *timer);
 
 static np_data_state_t data_state(bool available, bool stale)
 {
     if (!available) return NP_DATA_UNAVAILABLE;
     return stale ? NP_DATA_STALE : NP_DATA_LIVE;
 }
-
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
 {
     if (projection == NULL || local == NULL ||
@@ -545,13 +558,22 @@ static void update_home(const app_ui_projection_t *projection)
             projection->storage.last_result != ESP_OK);
 }
 
-static void show_home(void)
-{
-    if (s_ui.home_visible) return;
+static void install_home_navigation_callbacks(void);
 
-    lv_obj_add_flag(s_ui.boot.root, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(s_ui.home.root, LV_OBJ_FLAG_HIDDEN);
-    s_ui.home_visible = true;
+static void show_home(const app_ui_projection_t *projection)
+{
+    if (s_ui.active_screen != PRODUCT_SCREEN_BOOT) return;
+
+    lv_obj_t *const boot_root = s_ui.boot.root;
+    s_ui.home = np_home_build(lv_screen_active());
+    install_home_navigation_callbacks();
+    update_home(projection);
+    s_ui.active_screen = PRODUCT_SCREEN_HOME;
+    s_ui.rendered_revision = projection->revision;
+
+    /* Mantemos somente a cena ativa; a tela de boot nao fica alocada. */
+    lv_obj_delete(boot_root);
+    s_ui.boot = (np_boot_view_t){0};
 
     ESP_LOGI(TAG, "Boot transition complete; Home V2 visible");
 }
@@ -563,8 +585,12 @@ static void refresh_timer_cb(lv_timer_t *timer)
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
 
-    if (projection.revision != s_ui.rendered_revision) {
+    if (projection.revision != s_ui.rendered_revision &&
+        s_ui.active_screen == PRODUCT_SCREEN_BOOT) {
         update_boot(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_HOME) {
         update_home(&projection);
         s_ui.rendered_revision = projection.revision;
     }
@@ -574,10 +600,120 @@ static void refresh_timer_cb(lv_timer_t *timer)
     if (elapsed >= BOOT_MINIMUM_MS &&
         projection.ready &&
         (projection.time_trusted || elapsed >= BOOT_MAXIMUM_MS)) {
-        show_home();
+        show_home(&projection);
     } else if (elapsed >= BOOT_MAXIMUM_MS) {
-        show_home();
+        show_home(&projection);
     }
+}
+
+static void open_settings_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.navigation_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_HOME) return;
+
+    lv_obj_t *const home_root = s_ui.home.root;
+    s_ui.settings = np_settings_build(lv_screen_active());
+    np_set_visible(s_ui.settings.root, true);
+    np_settings_reset_stages(&s_ui.settings);
+    lv_obj_add_event_cb(s_ui.settings.home_button,
+                        settings_home_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_ui.settings.header.drawer_home_button,
+                        settings_home_event_cb, LV_EVENT_CLICKED, NULL);
+    s_ui.active_screen = PRODUCT_SCREEN_SETTINGS;
+    s_ui.home = (np_home_view_t){0};
+
+    s_ui.settings_stage = 0U;
+    s_ui.settings_stage_timer = lv_timer_create(settings_stage_timer_cb,
+                                                 SETTINGS_STAGE_INTERVAL_MS,
+                                                 NULL);
+    if (s_ui.settings_stage_timer == NULL) {
+        /* Sem timer disponivel, a tela continua utilizavel. */
+        np_set_visible(s_ui.settings.left_card, true);
+        np_set_visible(s_ui.settings.middle_card, true);
+        np_set_visible(s_ui.settings.right_card, true);
+    }
+
+    /* O callback do menu ja terminou: agora e seguro liberar a Home. */
+    lv_obj_delete(home_root);
+}
+
+static void settings_stage_timer_cb(lv_timer_t *timer)
+{
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS) {
+        lv_timer_delete(timer);
+        s_ui.settings_stage_timer = NULL;
+        return;
+    }
+
+    if (s_ui.settings_stage == 0U) {
+        np_set_visible(s_ui.settings.left_card, true);
+    } else if (s_ui.settings_stage == 1U) {
+        np_set_visible(s_ui.settings.middle_card, true);
+    } else {
+        np_set_visible(s_ui.settings.right_card, true);
+    }
+
+    s_ui.settings_stage++;
+    if (s_ui.settings_stage >= SETTINGS_STAGE_COUNT) {
+        lv_timer_delete(timer);
+        s_ui.settings_stage_timer = NULL;
+    }
+}
+
+static void settings_menu_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.navigation_pending) return;
+
+    s_ui.navigation_pending = true;
+    if (lv_async_call(open_settings_async, NULL) != LV_RESULT_OK) {
+        s_ui.navigation_pending = false;
+    }
+}
+
+static void settings_home_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.navigation_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS) return;
+
+    lv_obj_t *const settings_root = s_ui.settings.root;
+    if (s_ui.settings_stage_timer != NULL) {
+        lv_timer_delete(s_ui.settings_stage_timer);
+        s_ui.settings_stage_timer = NULL;
+    }
+    s_ui.home = np_home_build(lv_screen_active());
+    install_home_navigation_callbacks();
+
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    update_home(&projection);
+    s_ui.rendered_revision = projection.revision;
+    s_ui.active_screen = PRODUCT_SCREEN_HOME;
+    s_ui.settings = (np_settings_view_t){0};
+    s_ui.settings_stage = 0U;
+
+    lv_obj_delete(settings_root);
+}
+
+static void settings_home_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.navigation_pending) return;
+
+    s_ui.navigation_pending = true;
+    if (lv_async_call(settings_home_async, NULL) != LV_RESULT_OK) {
+        s_ui.navigation_pending = false;
+    }
+}
+
+static void install_home_navigation_callbacks(void)
+{
+    lv_obj_add_event_cb(s_ui.home.header.drawer_settings_button,
+                        settings_menu_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_ui.home.header.settings_button,
+                        diagnostics_button_event_cb,
+                        LV_EVENT_CLICKED,
+                        NULL);
 }
 
 static void diagnostics_button_event_cb(lv_event_t *event)
@@ -616,14 +752,6 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_remove_style_all(screen);
 
     s_ui.boot = np_boot_build(screen);
-    s_ui.home = np_home_build(screen);
-    np_set_visible(s_ui.home.root, false);
-
-    lv_obj_add_event_cb(s_ui.home.header.settings_button,
-                        diagnostics_button_event_cb,
-                        LV_EVENT_CLICKED,
-                        NULL);
-
     s_ui.refresh_timer =
         lv_timer_create(refresh_timer_cb, UI_REFRESH_PERIOD_MS, NULL);
 

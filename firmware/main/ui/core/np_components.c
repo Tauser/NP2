@@ -522,6 +522,7 @@ typedef enum {
     DRAWER_ICON_WEATHER,
     DRAWER_ICON_MARKET,
     DRAWER_ICON_CALENDAR,
+    DRAWER_ICON_SETTINGS,
 } drawer_icon_t;
 
 static void drawer_shape(lv_obj_t *item, drawer_icon_t kind, lv_color_t color,
@@ -542,8 +543,11 @@ static void drawer_shape(lv_obj_t *item, drawer_icon_t kind, lv_color_t color,
             symbol = NP_ICON_MARKET;
             break;
         case DRAWER_ICON_CALENDAR:
-        default:
             symbol = NP_ICON_CALENDAR;
+            break;
+        case DRAWER_ICON_SETTINGS:
+        default:
+            symbol = NP_ICON_SETTINGS;
             break;
     }
 
@@ -608,10 +612,13 @@ np_header_t np_header(lv_obj_t *parent)
     lv_obj_add_flag(header.drawer, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(header.drawer, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    (void)drawer_item(header.drawer, 20,  DRAWER_ICON_HOME, true);
+    header.drawer_home_button =
+        drawer_item(header.drawer, 20, DRAWER_ICON_HOME, true);
     (void)drawer_item(header.drawer, 88,  DRAWER_ICON_WEATHER, false);
     (void)drawer_item(header.drawer, 156, DRAWER_ICON_MARKET, false);
     (void)drawer_item(header.drawer, 224, DRAWER_ICON_CALENDAR, false);
+    header.drawer_settings_button =
+        drawer_item(header.drawer, 292, DRAWER_ICON_SETTINGS, false);
 
     np_set_visible(header.drawer_scrim, false);
 
@@ -625,6 +632,20 @@ np_header_t np_header(lv_obj_t *parent)
     lv_obj_add_event_cb(header.menu_button, drawer_toggle_event_cb,
                         LV_EVENT_CLICKED, header.drawer_scrim);
     return header;
+}
+
+void np_header_set_drawer_active(np_header_t *header, bool settings_active)
+{
+    if (header == NULL) return;
+
+    np_set_bg_color(header->drawer_home_button,
+                    settings_active ? np_c_surface() : np_c_accent());
+    np_set_bg_color(header->drawer_settings_button,
+                    settings_active ? np_c_accent() : np_c_surface());
+    np_set_text_color(icon_label(header->drawer_home_button),
+                      settings_active ? np_c_text_2() : np_c_text());
+    np_set_text_color(icon_label(header->drawer_settings_button),
+                      settings_active ? np_c_text() : np_c_text_2());
 }
 
 void np_header_set_connections(np_header_t *header, bool wifi_online,

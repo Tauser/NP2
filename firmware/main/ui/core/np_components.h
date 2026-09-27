@@ -143,6 +143,8 @@ lv_obj_t *np_button(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h
 
 typedef struct {
     lv_obj_t *menu_button;
+    lv_obj_t *drawer_home_button;
+    lv_obj_t *drawer_settings_button;
     lv_obj_t *settings_button;
     lv_obj_t *wifi_button;
     lv_obj_t *bluetooth_button;
@@ -160,6 +162,7 @@ typedef struct {
 } np_header_t;
 
 np_header_t np_header(lv_obj_t *parent);
+void np_header_set_drawer_active(np_header_t *header, bool settings_active);
 void np_header_set_connections(np_header_t *header, bool wifi_online,
                                bool bluetooth_online, bool has_alert);
 

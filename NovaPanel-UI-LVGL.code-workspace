@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "NovaPanel UI (LVGL Editor)",
+      "path": "firmware/main/ui/lvgl"
+    }
+  ],
+  "settings": {
+    "files.associations": {
+      "*.xml": "xml"
+    },
+    "search.exclude": {
+      "**/generated": true
+    }
+  }
+}
