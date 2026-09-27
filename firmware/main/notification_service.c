@@ -19,6 +19,7 @@ static bool s_started;
 static bool s_restore_applied;
 static bool s_save_enqueued;
 static uint32_t s_pending_flash_sequence;
+static notification_profile_t s_submitted_profile;
 static notification_service_status_t s_status = {
     .general_enabled = true,
     .sound_enabled = true,
@@ -33,6 +34,15 @@ static bool profile_matches_status(const notification_profile_t *profile,
            profile->general_enabled == status->general_enabled &&
            profile->sound_enabled == status->sound_enabled &&
            profile->system_alerts_enabled == status->system_alerts_enabled;
+}
+
+static bool profiles_match(const notification_profile_t *left,
+                           const notification_profile_t *right)
+{
+    return left != NULL && right != NULL &&
+           left->general_enabled == right->general_enabled &&
+           left->sound_enabled == right->sound_enabled &&
+           left->system_alerts_enabled == right->system_alerts_enabled;
 }
 
 static void restore_preferences_if_available(void)
@@ -63,13 +73,18 @@ static void restore_preferences_if_available(void)
         flash.notification_profile_completed_sequence == s_pending_flash_sequence) {
         s_save_enqueued = false;
         s_pending_flash_sequence = 0U;
-        s_status.persistence_pending = false;
         if (flash.notification_profile_last_write_result == ESP_OK &&
             flash.notification_profile_valid &&
-            profile_matches_status(&flash.notification_profile, &s_status)) {
+            profiles_match(&flash.notification_profile, &s_submitted_profile)) {
             s_status.persisted_generation = flash.notification_profile_generation;
             s_status.last_result = ESP_OK;
+            /* A preference may have changed while this request was in flight.
+             * Preserve that dirty state so the worker submits the newer profile
+             * only after the confirmed write above has released the coordinator. */
+            s_status.persistence_pending = !profile_matches_status(&s_submitted_profile,
+                                                                     &s_status);
         } else {
+            s_status.persistence_pending = false;
             s_status.last_result = flash.notification_profile_last_write_result == ESP_OK
                                        ? ESP_FAIL
                                        : flash.notification_profile_last_write_result;
@@ -100,6 +115,7 @@ static void submit_pending_profile(void)
     if (result == ESP_OK) {
         s_save_enqueued = true;
         s_pending_flash_sequence = sequence;
+        s_submitted_profile = profile;
     } else {
         /* Submission itself failed. A later user change is the next retry. */
         s_status.persistence_pending = false;
@@ -161,8 +177,6 @@ static esp_err_t set_preference(uint8_t preference, bool enabled)
         ++s_status.generation;
         s_status.persistence_pending = true;
         s_status.last_result = ESP_OK;
-        s_save_enqueued = false;
-        s_pending_flash_sequence = 0U;
     }
     const TaskHandle_t task = s_task;
     portEXIT_CRITICAL(&s_lock);
