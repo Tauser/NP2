@@ -165,6 +165,7 @@ np_header_t np_header(lv_obj_t *parent);
 void np_header_set_drawer_active(np_header_t *header, bool settings_active);
 void np_header_set_connections(np_header_t *header, bool wifi_online,
                                bool bluetooth_online, bool has_alert);
+void np_header_set_notifications_enabled(np_header_t *header, bool enabled);
 
 /* ---------------- componentes existentes ---------------- */
 

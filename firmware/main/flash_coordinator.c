@@ -65,6 +65,9 @@ static const char *const UPDATE_NAMESPACE = "np2_update";
 static const char *const ONBOARDING_NAMESPACE = "np2_onboard";
 static const char *const ONBOARDING_SLOT_ZERO_KEY = "onb0";
 static const char *const ONBOARDING_SLOT_ONE_KEY = "onb1";
+static const char *const NOTIFICATION_NAMESPACE = "np2_notifications";
+static const char *const NOTIFICATION_SLOT_ZERO_KEY = "ntf0";
+static const char *const NOTIFICATION_SLOT_ONE_KEY = "ntf1";
 static const char *const CREDENTIAL_VAULT_NAMESPACE = "np2_credentials";
 static const char *const CREDENTIAL_VAULT_SLOT_ZERO_KEY = "cred0";
 static const char *const CREDENTIAL_VAULT_SLOT_ONE_KEY = "cred1";
@@ -90,6 +93,7 @@ typedef struct {
 
 typedef enum {
     FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
+    FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR,
     FLASH_REQUEST_NVS_PROBE,
@@ -118,6 +122,7 @@ typedef struct {
     uint32_t sequence;
     offline_data_snapshot_t offline_data;
     onboarding_profile_t onboarding_profile;
+    notification_profile_t notification_profile;
     credential_vault_t credential_vault;
     update_journal_record_t update_journal;
     const esp_partition_t *ota_partition;
@@ -149,6 +154,7 @@ static void refresh_cache_status(void);
 static void refresh_config_status(void);
 static void refresh_update_journal_status(void);
 static void refresh_onboarding_profile_status(void);
+static void refresh_notification_profile_status(void);
 static void refresh_credential_vault_status(void);
 
 static void secure_zero(void *buffer, size_t length)
@@ -1092,6 +1098,121 @@ static esp_err_t write_onboarding_profile(const onboarding_profile_t *profile)
 
 typedef struct {
     cache_record_header_t header;
+    notification_profile_t profile;
+} notification_profile_record_t;
+
+static bool notification_profile_is_valid(const notification_profile_t *profile)
+{
+    return profile != NULL;
+}
+
+static esp_err_t read_notification_profile_slot(const char *key,
+                                                notification_profile_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, NOTIFICATION_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+
+    notification_profile_record_t record = {0};
+    size_t record_size = sizeof(record);
+    result = nvs_get_blob(handle, key, &record, &record_size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+
+    if (record_size != sizeof(record) ||
+        !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
+        record.header.payload_size != sizeof(record.profile) ||
+        record.header.payload_crc32 != cache_record_crc32(
+                                        (const uint8_t *)&record.profile,
+                                        sizeof(record.profile)) ||
+        !notification_profile_is_valid(&record.profile)) {
+        return ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) *out_record = record;
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_notification_profile(notification_profile_record_t *out_record)
+{
+    notification_profile_record_t slot_zero = {0};
+    notification_profile_record_t slot_one = {0};
+    const esp_err_t zero_result = read_notification_profile_slot(
+        NOTIFICATION_SLOT_ZERO_KEY, &slot_zero);
+    const esp_err_t one_result = read_notification_profile_slot(
+        NOTIFICATION_SLOT_ONE_KEY, &slot_one);
+    if (zero_result != ESP_OK && one_result != ESP_OK) {
+        return zero_result == ESP_ERR_NVS_NOT_FOUND && one_result == ESP_ERR_NVS_NOT_FOUND
+                   ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_CRC;
+    }
+    if (out_record != NULL) {
+        *out_record = one_result == ESP_OK &&
+                              (zero_result != ESP_OK ||
+                               slot_one.header.generation > slot_zero.header.generation)
+                          ? slot_one
+                          : slot_zero;
+    }
+    return ESP_OK;
+}
+
+static void refresh_notification_profile_status(void)
+{
+    notification_profile_record_t selected = {0};
+    const esp_err_t result = select_latest_notification_profile(&selected);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.notification_profile_result = result;
+    s_status.notification_profile_valid = result == ESP_OK;
+    s_status.notification_profile_generation =
+        result == ESP_OK ? selected.header.generation : 0U;
+    s_status.notification_profile =
+        result == ESP_OK ? selected.profile : (notification_profile_t){0};
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static esp_err_t write_notification_profile(const notification_profile_t *profile)
+{
+    if (!notification_profile_is_valid(profile)) return ESP_ERR_INVALID_ARG;
+
+    notification_profile_record_t latest = {0};
+    const esp_err_t latest_result = select_latest_notification_profile(&latest);
+    if (latest_result == ESP_OK && latest.header.generation == UINT32_MAX) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
+    notification_profile_record_t record = {
+        .header = {.magic = NP2_CACHE_RECORD_MAGIC,
+                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .header_size = sizeof(cache_record_header_t),
+                   .generation = generation,
+                   .payload_size = sizeof(profile[0])},
+        .profile = *profile,
+    };
+    record.header.payload_crc32 = cache_record_crc32((const uint8_t *)&record.profile,
+                                                      sizeof(record.profile));
+    record.header.header_crc32 = cache_record_crc32((const uint8_t *)&record.header,
+                                                     offsetof(cache_record_header_t, header_crc32));
+
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, NOTIFICATION_NAMESPACE,
+                                                NVS_READWRITE, &handle), TAG,
+                        "Notification profile open failed");
+    const char *const target = (generation & 1U) == 0U
+                                   ? NOTIFICATION_SLOT_ZERO_KEY
+                                   : NOTIFICATION_SLOT_ONE_KEY;
+    esp_err_t result = nvs_set_blob(handle, target, &record, sizeof(record));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result == ESP_OK) {
+        refresh_notification_profile_status();
+        notification_profile_record_t selected = {0};
+        result = select_latest_notification_profile(&selected);
+        if (result == ESP_OK && selected.header.generation != generation) result = ESP_FAIL;
+    }
+    return result;
+}
+
+typedef struct {
+    cache_record_header_t header;
     credential_vault_t credentials;
 } credential_vault_record_t;
 
@@ -1583,6 +1704,7 @@ static void flash_worker_task(void *arg)
     }
     refresh_config_status();
     refresh_onboarding_profile_status();
+    refresh_notification_profile_status();
     refresh_credential_vault_status();
     refresh_update_journal_status();
     if (littlefs_init_result != ESP_OK) {
@@ -1606,6 +1728,9 @@ static void flash_worker_task(void *arg)
         switch (request.kind) {
         case FLASH_REQUEST_ONBOARDING_PROFILE_WRITE:
             result = write_onboarding_profile(&request.onboarding_profile);
+            break;
+        case FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE:
+            result = write_notification_profile(&request.notification_profile);
             break;
         case FLASH_REQUEST_CREDENTIAL_VAULT_WRITE:
             result = write_credential_vault(&request.credential_vault);
@@ -1686,6 +1811,9 @@ static void flash_worker_task(void *arg)
             s_last_success_us = esp_timer_get_time();
             if (request.kind == FLASH_REQUEST_ONBOARDING_PROFILE_WRITE) {
                 ESP_LOGI(TAG, "onboarding profile saved in %lums", (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE) {
+                ESP_LOGI(TAG, "notification preferences saved in %lums",
+                         (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_WRITE) {
                 ESP_LOGI(TAG, "credential vault credentials saved in %lums",
                          (unsigned long)duration_ms);
@@ -1969,6 +2097,26 @@ esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_pr
     const flash_request_t request = {.kind = FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
                                      .sequence = status.last_sequence + 1U,
                                      .onboarding_profile = *profile};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    set_busy(false, true);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_request_notification_profile_write(
+    const notification_profile_t *profile)
+{
+    if (!notification_profile_is_valid(profile) || s_request_queue == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) return ESP_ERR_INVALID_STATE;
+
+    const flash_request_t request = {
+        .kind = FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE,
+        .sequence = status.last_sequence + 1U,
+        .notification_profile = *profile,
+    };
     if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
     set_busy(false, true);
     return ESP_OK;

@@ -39,8 +39,11 @@ typedef struct {
     lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
     uint32_t rendered_revision;
+    uint32_t notified_persisted_generation;
     uint8_t settings_stage;
     bool navigation_pending;
+    bool notification_feedback_initialized;
+    bool syncing_notification_controls;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -54,6 +57,7 @@ static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
 static void notifications_event_cb(lv_event_t *event);
 static void notification_switch_event_cb(lv_event_t *event);
+static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -190,6 +194,7 @@ static void notifications_event_cb(lv_event_t *event)
 static void notification_switch_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
+    if (s_ui.syncing_notification_controls) return;
     lv_obj_t *sw = lv_event_get_target(event);
     const bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     const uintptr_t type = (uintptr_t)lv_event_get_user_data(event);
@@ -197,9 +202,25 @@ static void notification_switch_event_cb(lv_event_t *event)
                        type == 1U ? notification_service_set_sound_enabled(enabled) :
                                     notification_service_set_system_alerts_enabled(enabled);
     if (result == ESP_OK) {
+        const char *const title = type == 0U
+                                      ? (enabled ? "Notificacoes ativadas"
+                                                 : "Notificacoes silenciadas")
+                                      : type == 1U
+                                            ? (enabled ? "Som das notificacoes ativado"
+                                                       : "Som das notificacoes desativado")
+                                            : (enabled ? "Alertas do sistema ativados"
+                                                       : "Alertas do sistema desativados");
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
-                               enabled ? "Notificacoes ativadas" : "Notificacoes silenciadas",
-                               NULL, 2000U);
+                               title, "Salvando preferencias", 1600U);
+    } else {
+        if (enabled) {
+            lv_obj_remove_state(sw, LV_STATE_CHECKED);
+        } else {
+            lv_obj_add_state(sw, LV_STATE_CHECKED);
+        }
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Preferencia nao alterada",
+                               "Tente novamente em alguns instantes", 3500U);
     }
 }
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
@@ -708,6 +729,56 @@ static void update_home(const app_ui_projection_t *projection)
         false,
         projection->network.state == APP_NETWORK_STATE_FAILED ||
             projection->storage.last_result != ESP_OK);
+    np_header_set_notifications_enabled(&s_ui.home.header,
+                                        projection->notifications.general_enabled);
+
+    if (projection->notifications.ready) {
+        if (!s_ui.notification_feedback_initialized) {
+            s_ui.notified_persisted_generation =
+                projection->notifications.persisted_generation;
+            s_ui.notification_feedback_initialized = true;
+        } else if (!projection->notifications.persistence_pending &&
+                   projection->notifications.persisted_generation != 0U &&
+                   projection->notifications.persisted_generation !=
+                       s_ui.notified_persisted_generation) {
+            s_ui.notified_persisted_generation =
+                projection->notifications.persisted_generation;
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_SUCCESS,
+                                   "Preferencias salvas", NULL, 1800U);
+        }
+    }
+}
+
+static void set_notification_switch(lv_obj_t *sw, bool enabled)
+{
+    if (sw == NULL) return;
+    if (enabled) {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    } else {
+        lv_obj_remove_state(sw, LV_STATE_CHECKED);
+    }
+}
+
+static void update_settings(const app_ui_projection_t *projection)
+{
+    if (projection == NULL) return;
+
+    np_header_set_notifications_enabled(&s_ui.settings.header,
+                                        projection->notifications.general_enabled);
+    if (!projection->notifications.ready) return;
+
+    s_ui.syncing_notification_controls = true;
+    set_notification_switch(s_ui.settings.notifications_general_switch,
+                            projection->notifications.general_enabled);
+    set_notification_switch(s_ui.settings.notifications_sound_switch,
+                            projection->notifications.sound_enabled);
+    set_notification_switch(s_ui.settings.notifications_system_switch,
+                            projection->notifications.system_alerts_enabled);
+    s_ui.syncing_notification_controls = false;
+    np_set_text(s_ui.settings.notifications_value,
+                projection->notifications.persistence_pending
+                    ? "Atualizando..."
+                    : projection->notifications.general_enabled ? "Ativadas" : "Silenciadas");
 }
 
 static void install_home_navigation_callbacks(void);
@@ -746,6 +817,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
                s_ui.active_screen == PRODUCT_SCREEN_HOME) {
         update_home(&projection);
         s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_SETTINGS) {
+        update_settings(&projection);
+        s_ui.rendered_revision = projection.revision;
     }
 
     const uint32_t elapsed = lv_tick_elaps(s_ui.started_at_tick);
@@ -780,6 +855,10 @@ static void open_settings_async(void *user_data)
     s_ui.home = (np_home_view_t){0};
 
     s_ui.settings_stage = 0U;
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    update_settings(&projection);
+    s_ui.rendered_revision = projection.revision;
     s_ui.settings_stage_timer = lv_timer_create(settings_stage_timer_cb,
                                                  SETTINGS_STAGE_INTERVAL_MS,
                                                  NULL);
@@ -809,6 +888,9 @@ static void settings_stage_timer_cb(lv_timer_t *timer)
     }
 
     install_settings_control_callbacks();
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    update_settings(&projection);
 
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);
@@ -834,6 +916,9 @@ static void settings_stage_async(void *user_data)
     }
 
     install_settings_control_callbacks();
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    update_settings(&projection);
 
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);

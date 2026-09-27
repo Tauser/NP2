@@ -26,10 +26,9 @@ static const char *feedback_icon(np_feedback_kind_t kind)
 
 static void feedback_timer_cb(lv_timer_t *timer)
 {
-    np_feedback_t *feedback = lv_timer_get_user_data(timer);
-    if (feedback == NULL) return;
-    np_set_visible(feedback->toast, false);
-    np_set_visible(feedback->osd, false);
+    lv_obj_t *target = lv_timer_get_user_data(timer);
+    if (target != NULL) np_set_visible(target, false);
+    lv_timer_pause(timer);
 }
 
 np_feedback_t np_feedback_create(lv_obj_t *parent)
@@ -73,21 +72,22 @@ np_feedback_t np_feedback_create(lv_obj_t *parent)
     feedback.banner_text = np_label(feedback.banner, "", NP_FONT_SM,
                                     np_c_text(), 52, 15, 900,
                                     LV_TEXT_ALIGN_LEFT);
-    feedback.timer = lv_timer_create(feedback_timer_cb, 2000U, NULL);
-    lv_timer_pause(feedback.timer);
+    feedback.toast_timer = lv_timer_create(feedback_timer_cb, 2000U, feedback.toast);
+    feedback.osd_timer = lv_timer_create(feedback_timer_cb, 2000U, feedback.osd);
+    if (feedback.toast_timer != NULL) lv_timer_pause(feedback.toast_timer);
+    if (feedback.osd_timer != NULL) lv_timer_pause(feedback.osd_timer);
     np_set_visible(feedback.toast, false);
     np_set_visible(feedback.osd, false);
     np_set_visible(feedback.banner, false);
     return feedback;
 }
 
-static void feedback_schedule(np_feedback_t *feedback, uint32_t duration_ms)
+static void feedback_schedule(lv_timer_t *timer, uint32_t duration_ms)
 {
-    if (feedback->timer == NULL) return;
-    lv_timer_set_user_data(feedback->timer, feedback);
-    lv_timer_set_period(feedback->timer, duration_ms);
-    lv_timer_reset(feedback->timer);
-    lv_timer_resume(feedback->timer);
+    if (timer == NULL) return;
+    lv_timer_set_period(timer, duration_ms);
+    lv_timer_reset(timer);
+    lv_timer_resume(timer);
 }
 
 void np_feedback_show_toast(np_feedback_t *feedback, np_feedback_kind_t kind,
@@ -103,9 +103,8 @@ void np_feedback_show_toast(np_feedback_t *feedback, np_feedback_kind_t kind,
     np_set_text(feedback->toast_title, title != NULL ? title : "");
     np_set_text(feedback->toast_detail, detail != NULL ? detail : "");
     np_set_visible(feedback->toast, true);
-    np_set_visible(feedback->osd, false);
     np_feedback_bring_to_front(feedback);
-    feedback_schedule(feedback, duration);
+    feedback_schedule(feedback->toast_timer, duration);
 }
 
 void np_feedback_show_osd(np_feedback_t *feedback, const char *icon,
@@ -117,9 +116,8 @@ void np_feedback_show_osd(np_feedback_t *feedback, const char *icon,
     np_set_text(feedback->osd_title, title != NULL ? title : "");
     np_set_text(feedback->osd_value, value != NULL ? value : "");
     np_set_visible(feedback->osd, true);
-    np_set_visible(feedback->toast, false);
     np_feedback_bring_to_front(feedback);
-    feedback_schedule(feedback, duration_ms != 0U ? duration_ms : 2000U);
+    feedback_schedule(feedback->osd_timer, duration_ms != 0U ? duration_ms : 2000U);
 }
 
 void np_feedback_show_banner(np_feedback_t *feedback, np_feedback_kind_t kind,
@@ -138,6 +136,27 @@ void np_feedback_hide_banner(np_feedback_t *feedback)
     if (feedback != NULL) np_set_visible(feedback->banner, false);
 }
 
+void np_feedback_hide_toast(np_feedback_t *feedback)
+{
+    if (feedback == NULL) return;
+    np_set_visible(feedback->toast, false);
+    if (feedback->toast_timer != NULL) lv_timer_pause(feedback->toast_timer);
+}
+
+void np_feedback_hide_osd(np_feedback_t *feedback)
+{
+    if (feedback == NULL) return;
+    np_set_visible(feedback->osd, false);
+    if (feedback->osd_timer != NULL) lv_timer_pause(feedback->osd_timer);
+}
+
+void np_feedback_hide_all(np_feedback_t *feedback)
+{
+    np_feedback_hide_toast(feedback);
+    np_feedback_hide_osd(feedback);
+    np_feedback_hide_banner(feedback);
+}
+
 void np_feedback_bring_to_front(np_feedback_t *feedback)
 {
     if (feedback != NULL && feedback->root != NULL) lv_obj_move_foreground(feedback->root);
@@ -146,6 +165,7 @@ void np_feedback_bring_to_front(np_feedback_t *feedback)
 void np_feedback_destroy(np_feedback_t *feedback)
 {
     if (feedback == NULL) return;
-    if (feedback->timer != NULL) lv_timer_delete(feedback->timer);
+    if (feedback->toast_timer != NULL) lv_timer_delete(feedback->toast_timer);
+    if (feedback->osd_timer != NULL) lv_timer_delete(feedback->osd_timer);
     *feedback = (np_feedback_t){0};
 }

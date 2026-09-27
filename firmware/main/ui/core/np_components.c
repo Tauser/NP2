@@ -664,6 +664,13 @@ void np_header_set_connections(np_header_t *header, bool wifi_online,
     np_set_visible(header->alert_dot, has_alert);
 }
 
+void np_header_set_notifications_enabled(np_header_t *header, bool enabled)
+{
+    if (header == NULL || header->notifications_button == NULL) return;
+    np_set_text_color(icon_label(header->notifications_button),
+                      enabled ? np_c_text_2() : np_c_text_3());
+}
+
 /* ---------------- componentes existentes ---------------- */
 
 np_row_t np_row(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)

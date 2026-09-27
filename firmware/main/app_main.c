@@ -78,15 +78,15 @@ void app_main(void)
         ESP_LOGE(TAG, "Time service unavailable: %s", esp_err_to_name(time_service_err));
     }
 
-    const esp_err_t app_state_err = app_state_start();
-    if (app_state_err != ESP_OK) {
-        ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
-    }
-
     const esp_err_t notifications_err = notification_service_start();
     if (notifications_err != ESP_OK) {
         ESP_LOGE(TAG, "Notification service unavailable: %s",
                  esp_err_to_name(notifications_err));
+    }
+
+    const esp_err_t app_state_err = app_state_start();
+    if (app_state_err != ESP_OK) {
+        ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
     }
 
     const esp_err_t weather_assets_err = weather_asset_service_start();

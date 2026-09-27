@@ -11,6 +11,7 @@
 #include "flash_coordinator.h"
 #include "offline_data_codec.h"
 #include "onboarding_service.h"
+#include "notification_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "time_service.h"
@@ -151,6 +152,7 @@ static void refresh_projection(void)
     time_service_status_t time_status = {0};
     onboarding_service_status_t onboarding = {0};
     weather_asset_service_status_t weather_assets = {0};
+    notification_service_status_t notifications = {0};
     app_ui_projection_t candidate = {0};
 
     flash_coordinator_get_status(&storage);
@@ -158,6 +160,7 @@ static void refresh_projection(void)
     time_service_get_status(&time_status);
     onboarding_service_refresh();
     onboarding_service_get_status(&onboarding);
+    notification_service_get_status(&notifications);
 
     candidate.ready = true;
     candidate.storage = (app_storage_projection_t){
@@ -201,6 +204,16 @@ static void refresh_projection(void)
         .timezone_index = onboarding.timezone_index,
         .stage = (uint8_t)onboarding.stage,
         .last_result = onboarding.last_result,
+    };
+    candidate.notifications = (app_notification_projection_t){
+        .ready = notifications.ready,
+        .general_enabled = notifications.general_enabled,
+        .sound_enabled = notifications.sound_enabled,
+        .system_alerts_enabled = notifications.system_alerts_enabled,
+        .persistence_pending = notifications.persistence_pending,
+        .generation = notifications.generation,
+        .persisted_generation = notifications.persisted_generation,
+        .last_result = notifications.last_result,
     };
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
     candidate.time_trusted = time_status.trusted;

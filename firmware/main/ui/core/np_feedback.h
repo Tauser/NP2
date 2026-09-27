@@ -24,7 +24,8 @@ typedef struct {
     lv_obj_t *banner;
     lv_obj_t *banner_icon;
     lv_obj_t *banner_text;
-    lv_timer_t *timer;
+    lv_timer_t *toast_timer;
+    lv_timer_t *osd_timer;
 } np_feedback_t;
 
 np_feedback_t np_feedback_create(lv_obj_t *parent);
@@ -37,5 +38,8 @@ void np_feedback_show_osd(np_feedback_t *feedback, const char *icon,
 void np_feedback_show_banner(np_feedback_t *feedback, np_feedback_kind_t kind,
                              const char *text);
 void np_feedback_hide_banner(np_feedback_t *feedback);
+void np_feedback_hide_toast(np_feedback_t *feedback);
+void np_feedback_hide_osd(np_feedback_t *feedback);
+void np_feedback_hide_all(np_feedback_t *feedback);
 void np_feedback_bring_to_front(np_feedback_t *feedback);
 void np_feedback_destroy(np_feedback_t *feedback);

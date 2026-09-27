@@ -19,6 +19,15 @@ typedef struct {
     uint8_t timezone_index;
 } onboarding_profile_t;
 
+/* Non-secret product preferences. This record is deliberately independent of
+ * the offline-data schema so changing notification settings never migrates a
+ * cached provider payload. */
+typedef struct {
+    bool general_enabled;
+    bool sound_enabled;
+    bool system_alerts_enabled;
+} notification_profile_t;
+
 typedef struct {
     bool ready;
     bool busy;
@@ -55,6 +64,10 @@ typedef struct {
     uint32_t onboarding_profile_generation;
     onboarding_profile_t onboarding_profile;
     esp_err_t onboarding_profile_result;
+    bool notification_profile_valid;
+    uint32_t notification_profile_generation;
+    notification_profile_t notification_profile;
+    esp_err_t notification_profile_result;
     /* Credential-vault presence only. Credential data is never exposed here. */
     bool credential_vault_valid;
     uint32_t credential_vault_generation;
@@ -123,6 +136,10 @@ esp_err_t flash_coordinator_request_config_corrupt_newest(void);
 
 /* Persists only non-secret onboarding preferences through the flash owner. */
 esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_profile_t *profile);
+
+/* Persists notification preferences through the sole flash owner. */
+esp_err_t flash_coordinator_request_notification_profile_write(
+    const notification_profile_t *profile);
 
 /*
  * Credential-vault storage. Production requires NVS Encryption and active

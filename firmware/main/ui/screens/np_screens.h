@@ -71,6 +71,7 @@ typedef struct {
     lv_obj_t *volume_bubble;
     lv_obj_t *volume_bubble_value;
     lv_obj_t *notifications_row;
+    lv_obj_t *notifications_value;
     lv_obj_t *notifications_modal_scrim;
     lv_obj_t *notifications_general_switch;
     lv_obj_t *notifications_sound_switch;

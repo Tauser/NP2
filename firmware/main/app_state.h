@@ -87,12 +87,24 @@ typedef struct {
 } app_weather_asset_projection_t;
 
 typedef struct {
+    bool ready;
+    bool general_enabled;
+    bool sound_enabled;
+    bool system_alerts_enabled;
+    bool persistence_pending;
+    uint32_t generation;
+    uint32_t persisted_generation;
+    esp_err_t last_result;
+} app_notification_projection_t;
+
+typedef struct {
     uint32_t revision;
     bool ready;
     app_storage_projection_t storage;
     app_network_projection_t network;
     app_onboarding_projection_t onboarding;
     app_weather_asset_projection_t weather_assets;
+    app_notification_projection_t notifications;
     bool time_trusted;
     uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;

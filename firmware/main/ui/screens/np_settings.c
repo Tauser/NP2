@@ -398,7 +398,8 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
 
     view->notifications_row = settings_option_row(card,
                             284, NP_ICON_NOTIFICATIONS, np_c_text_2(),
-                            "Notificacoes", "Ativadas", true);
+                            "Notificacoes", "--", true);
+    view->notifications_value = lv_obj_get_child(view->notifications_row, 2);
     lv_obj_add_flag(view->notifications_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *system_row =
         settings_option_row(card,
