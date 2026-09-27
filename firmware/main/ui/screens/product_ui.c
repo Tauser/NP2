@@ -40,10 +40,13 @@ typedef struct {
     uint32_t started_at_tick;
     uint32_t rendered_revision;
     uint32_t notified_persisted_generation;
+    offline_data_snapshot_t rendered_home_data;
+    const void *rendered_weather_icon_source;
     uint8_t settings_stage;
     bool navigation_pending;
     bool notification_feedback_initialized;
     bool syncing_notification_controls;
+    bool home_data_rendered;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -720,10 +723,21 @@ static void update_boot(const app_ui_projection_t *projection)
 static void update_home(const app_ui_projection_t *projection)
 {
     update_clock(projection);
-    update_weather(projection);
-    update_market(projection);
-    update_exchange(projection);
-    update_ibovespa(projection);
+
+    /* The app projection changes every second with the clock and data age.
+     * Redraw the large cards only when their displayed data or icon changes. */
+    if (!s_ui.home_data_rendered ||
+        memcmp(&s_ui.rendered_home_data, &projection->offline_data,
+               sizeof(projection->offline_data)) != 0 ||
+        s_ui.rendered_weather_icon_source != projection->weather_assets.icon_source) {
+        update_weather(projection);
+        update_market(projection);
+        update_exchange(projection);
+        update_ibovespa(projection);
+        s_ui.rendered_home_data = projection->offline_data;
+        s_ui.rendered_weather_icon_source = projection->weather_assets.icon_source;
+        s_ui.home_data_rendered = true;
+    }
 
     np_header_set_connections(
         &s_ui.home.header,
@@ -791,6 +805,7 @@ static void show_home(const app_ui_projection_t *projection)
 
     lv_obj_t *const boot_root = s_ui.boot.root;
     s_ui.home = np_home_build(lv_screen_active());
+    s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     install_home_navigation_callbacks();
     update_home(projection);
@@ -963,6 +978,7 @@ static void settings_home_async(void *user_data)
         s_ui.settings_value_bubble_timer = NULL;
     }
     s_ui.home = np_home_build(lv_screen_active());
+    s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     install_home_navigation_callbacks();
 
