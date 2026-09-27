@@ -62,6 +62,10 @@ typedef struct {
     lv_obj_t *left_card;
     lv_obj_t *middle_card;
     lv_obj_t *right_card;
+    lv_obj_t *brightness_slider;
+    lv_obj_t *brightness_value;
+    lv_obj_t *volume_slider;
+    lv_obj_t *volume_value;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);

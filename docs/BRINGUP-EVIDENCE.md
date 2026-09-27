@@ -3072,3 +3072,20 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   8,042 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
+
+### 2026-09-27 — Controles de brilho e volume em Configurações
+
+- Os controles de Brilho da tela e Volume geral passaram de elementos
+  estáticos para sliders LVGL. A tela somente devolve os handles; `product_ui`
+  atualiza o percentual e encaminha a intenção à `device_control_service`.
+  Essa task coalesce alterações de toque, aplica brilho pelo BSP e inicializa
+  sob demanda o ES8311 antes de ajustar o volume. Não há I/O na task LVGL nem
+  escrita em NVS.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x296650` B
+  em partição de `0x800000` B, com `0x5699b0` B (68%) livres. SHA-256 P4:
+  `C047ABB260D3D31A287FAAD6D19104A2379A49AF8A96CC23FA75F8639DE1B13D`.
+- A tentativa de `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash`
+  não gravou a placa: a porta retornou `PermissionError(13)` por estar ocupada.
+  Nenhum processo de monitor foi interrompido e não há evidência de boot para
+  este binário até que a COM8 seja liberada.

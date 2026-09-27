@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "app_state.h"
+#include "device_control_service.h"
 #include "diagnostic_ui.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -45,11 +46,80 @@ static void diagnostics_button_event_cb(lv_event_t *event);
 static void settings_home_event_cb(lv_event_t *event);
 static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
+static void install_settings_control_callbacks(void);
+
+typedef enum {
+    SETTINGS_CONTROL_BRIGHTNESS = 0,
+    SETTINGS_CONTROL_VOLUME,
+} settings_control_t;
 
 static np_data_state_t data_state(bool available, bool stale)
 {
     if (!available) return NP_DATA_UNAVAILABLE;
     return stale ? NP_DATA_STALE : NP_DATA_LIVE;
+}
+
+static void settings_set_percent(lv_obj_t *slider, lv_obj_t *value_label,
+                                 uint8_t percent)
+{
+    if (slider != NULL) {
+        lv_slider_set_value(slider, percent, LV_ANIM_OFF);
+    }
+    if (value_label != NULL) {
+        char text[8] = {0};
+        (void)snprintf(text, sizeof(text), "%u%%", (unsigned int)percent);
+        np_set_text(value_label, text);
+    }
+}
+
+static void settings_control_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+
+    lv_obj_t *const slider = lv_event_get_target(event);
+    const uint8_t percent = (uint8_t)lv_slider_get_value(slider);
+    const settings_control_t control =
+        (settings_control_t)(uintptr_t)lv_event_get_user_data(event);
+
+    if (control == SETTINGS_CONTROL_BRIGHTNESS) {
+        settings_set_percent(NULL, s_ui.settings.brightness_value, percent);
+        if (device_control_set_brightness(percent) != ESP_OK) {
+            ESP_LOGW(TAG, "Brightness request unavailable");
+        }
+    } else {
+        settings_set_percent(NULL, s_ui.settings.volume_value, percent);
+        if (device_control_set_volume(percent) != ESP_OK) {
+            ESP_LOGW(TAG, "Volume request unavailable");
+        }
+    }
+}
+
+static void install_settings_control_callbacks(void)
+{
+    device_control_status_t controls = {0};
+    device_control_get_status(&controls);
+
+    settings_set_percent(s_ui.settings.brightness_slider,
+                         s_ui.settings.brightness_value,
+                         controls.brightness_percent);
+    settings_set_percent(s_ui.settings.volume_slider,
+                         s_ui.settings.volume_value,
+                         controls.volume_percent);
+
+    if (s_ui.settings.brightness_slider != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_VALUE_CHANGED,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+    }
+    if (s_ui.settings.volume_slider != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.volume_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_VALUE_CHANGED,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+    }
 }
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
 {
@@ -655,6 +725,8 @@ static void settings_stage_timer_cb(lv_timer_t *timer)
         return;
     }
 
+    install_settings_control_callbacks();
+
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);
     } else if (s_ui.settings_stage == 1U) {
@@ -677,6 +749,8 @@ static void settings_stage_async(void *user_data)
         !np_settings_build_next_card(&s_ui.settings)) {
         return;
     }
+
+    install_settings_control_callbacks();
 
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);

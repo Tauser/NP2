@@ -1,13 +1,25 @@
-/* NovaPanel Settings - Dark Graphite 1024x600.
+/* NovaPanel Settings - Dark Graphite 1024x600
  *
- * Layout de Configurações:
- *   Header compartilhado                          0..64
- *   Tela e som       24,76   976x286
- *   Conectividade    24,378  480x198
- *   Sistema         520,378  480x198
+ * Layout simplificado:
+ *   - Header compartilhado (drawer oculto por padrao)
+ *   - Um unico card "Geral" em duas colunas
  *
- * O drawer pertence ao np_header() e permanece oculto por padrao.
- * Esta tela nao cria rail/menu lateral permanente.
+ * Coluna A:
+ *   - Brilho da tela
+ *   - Volume geral
+ *   - Modo noturno
+ *
+ * Coluna B:
+ *   - Wi-Fi
+ *   - Fuso horario
+ *   - Sistema >  (abre modal)
+ *
+ * Tema removido.
+ * Sistema deixa de ocupar um card permanente e passa a ser modal.
+ *
+ * Mantem compatibilidade com o contrato atual de np_settings_view_t:
+ * left_card / middle_card / right_card apontam para o mesmo card Geral,
+ * evitando quebrar o fluxo staged/lazy existente no product_ui.
  */
 #include <stdio.h>
 
@@ -19,23 +31,33 @@
 #define NP_ICON_VOLUME_UP "\xEE\x81\x90" /* U+E050 volume_up */
 #endif
 
-#define SETTINGS_LEFT_X       24
-#define SETTINGS_RIGHT_X      520
-#define SETTINGS_TOP_Y        76
-#define SETTINGS_GAP          16
+#define SETTINGS_GENERAL_X          24
+#define SETTINGS_GENERAL_Y          76
+#define SETTINGS_GENERAL_W          976
+#define SETTINGS_GENERAL_H          500
 
-#define SETTINGS_LEFT_W       976
-#define SETTINGS_RIGHT_W      480
-#define SETTINGS_CONTENT_H    286
+#define SETTINGS_DIVIDER_X          560
 
-#define SETTINGS_NETWORK_H    198
-#define SETTINGS_SYSTEM_Y     (SETTINGS_TOP_Y + SETTINGS_CONTENT_H + SETTINGS_GAP)
-#define SETTINGS_SYSTEM_H     198
+#define SETTINGS_COL_A_X            28
+#define SETTINGS_COL_A_TEXT_X       84
+#define SETTINGS_COL_A_TRACK_W      414
 
-#define SETTINGS_TOP_DIVIDER_X 524
+#define SETTINGS_COL_B_X            596
+#define SETTINGS_COL_B_W            352
 
-#define SETTINGS_BRIGHTNESS   78
-#define SETTINGS_VOLUME       65
+#define SETTINGS_BRIGHTNESS         60
+#define SETTINGS_VOLUME             65
+
+#define SETTINGS_MODAL_X            192
+#define SETTINGS_MODAL_Y            116
+#define SETTINGS_MODAL_W            640
+#define SETTINGS_MODAL_H            368
+
+static lv_obj_t *s_system_modal_scrim = NULL;
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
 
 static lv_obj_t *settings_panel(lv_obj_t *parent,
                                 int32_t x, int32_t y, int32_t w, int32_t h)
@@ -43,31 +65,13 @@ static lv_obj_t *settings_panel(lv_obj_t *parent,
     return np_panel(parent, x, y, w, h);
 }
 
-static void settings_section_title(lv_obj_t *parent,
-                                   const char *icon,
-                                   const char *title,
-                                   const char *subtitle,
-                                   int32_t line_w)
-{
-    np_label(parent, icon, NP_FONT_ICON, np_c_text_2(),
-             24, 24, 28, LV_TEXT_ALIGN_CENTER);
-    np_label(parent, title, NP_FONT_LG, np_c_text(),
-             68, 20, line_w - 68, LV_TEXT_ALIGN_LEFT);
-
-    const bool has_subtitle = subtitle != NULL && subtitle[0] != '\0';
-    if (has_subtitle) {
-        np_label(parent, subtitle, NP_FONT_SM, np_c_text_2(),
-                 68, 52, line_w - 68, LV_TEXT_ALIGN_LEFT);
-    }
-
-    np_hline(parent, 24, has_subtitle ? 84 : 68, line_w - 48);
-}
-
 static void settings_toggle(lv_obj_t *parent, int32_t x, int32_t y, bool on)
 {
-    np_fill(parent, x, y, 52, 28,
-            on ? np_c_accent() : np_c_hairline(), LV_OPA_COVER, 14);
-    np_dot(parent, x + (on ? 27 : 3), y + 3, 22,
+    lv_obj_t *track = np_fill(parent, x, y, 52, 28,
+                              on ? np_c_accent() : np_c_hairline(),
+                              LV_OPA_COVER, 14);
+
+    np_dot(track, on ? 27 : 3, 3, 22,
            on ? np_c_text_on_accent() : np_c_text_2());
 }
 
@@ -75,213 +79,350 @@ static void settings_slider(lv_obj_t *parent,
                             int32_t y,
                             const char *icon,
                             const char *label,
-                            uint8_t percent)
+                            uint8_t percent,
+                            lv_obj_t **out_slider,
+                            lv_obj_t **out_value)
 {
-    const int32_t icon_x = 28;
-    const int32_t text_x = 88;
-    const int32_t track_w = 408;
-    const int32_t fill_w = (track_w * percent) / 100;
     char pct[8] = {0};
 
     np_label(parent, icon, NP_FONT_ICON, np_c_text_2(),
-             icon_x, y + 6, 28, LV_TEXT_ALIGN_CENTER);
+             SETTINGS_COL_A_X, y + 3, 30, LV_TEXT_ALIGN_CENTER);
+
     np_label(parent, label, NP_FONT_MD, np_c_text(),
-             text_x, y, 270, LV_TEXT_ALIGN_LEFT);
+             SETTINGS_COL_A_TEXT_X, y, 260, LV_TEXT_ALIGN_LEFT);
 
     (void)snprintf(pct, sizeof(pct), "%u%%", (unsigned int)percent);
-    np_label(parent, pct, NP_FONT_MD, np_c_text_2(),
-             420, y, 76, LV_TEXT_ALIGN_RIGHT);
+    lv_obj_t *value = np_label(parent, pct, NP_FONT_MD, np_c_text_2(),
+                                430, y, 68, LV_TEXT_ALIGN_RIGHT);
 
-    np_fill(parent, text_x, y + 40, track_w, 8,
-            np_c_hairline(), LV_OPA_COVER, 4);
-    np_fill(parent, text_x, y + 40, fill_w, 8,
-            np_c_accent(), LV_OPA_COVER, 4);
-    np_dot(parent, text_x + fill_w - 10, y + 34, 20, np_c_accent());
-}
+    /* Nao ha wrapper para slider no catalogo atual. A configuracao local
+     * preserva a geometria do controle estatico anterior e so cria um
+     * objeto interativo quando a Settings e aberta. */
+    lv_obj_t *slider = lv_slider_create(parent);
+    lv_obj_set_pos(slider, SETTINGS_COL_A_TEXT_X, y + 34);
+    lv_obj_set_size(slider, SETTINGS_COL_A_TRACK_W, 20);
+    lv_slider_set_range(slider, 0, 100);
+    lv_slider_set_value(slider, percent, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(slider, np_c_hairline(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(slider, 4, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, np_c_accent(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(slider, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, np_c_accent(), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_width(slider, 20, LV_PART_KNOB);
+    lv_obj_set_style_height(slider, 20, LV_PART_KNOB);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 
-static void settings_theme_button(lv_obj_t *parent,
-                                  int32_t x, int32_t w,
-                                  const char *text, bool active)
-{
-    lv_obj_t *button = np_button(parent, x, 136, w, 48, text, active);
-    lv_obj_clear_flag(button, LV_OBJ_FLAG_CLICKABLE);
-}
-
-static lv_obj_t *settings_display_card(lv_obj_t *root)
-{
-    lv_obj_t *card = settings_panel(root,
-                                    SETTINGS_LEFT_X, SETTINGS_TOP_Y,
-                                    SETTINGS_LEFT_W, SETTINGS_CONTENT_H);
-
-    np_label(card, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
-             24, 22, 28, LV_TEXT_ALIGN_CENTER);
-    np_label(card, "Tela e som", NP_FONT_LG, np_c_text(),
-             68, 20, 300, LV_TEXT_ALIGN_LEFT);
-
-    settings_slider(card, 108,
-                    NP_ICON_UV,
-                    "Brilho da tela",
-                    SETTINGS_BRIGHTNESS);
-
-    settings_slider(card, 198,
-                    NP_ICON_VOLUME_UP,
-                    "Volume geral",
-                    SETTINGS_VOLUME);
-
-    np_vline(card, SETTINGS_TOP_DIVIDER_X, 96, 166);
-    np_label(card, "Tema", NP_FONT_MD, np_c_text(),
-             570, 104, 180, LV_TEXT_ALIGN_LEFT);
-    settings_theme_button(card, 570, 118, "Grafite", true);
-    settings_theme_button(card, 700, 118, "Carvão", false);
-    settings_theme_button(card, 830, 122, "Âmbar", false);
-
-    np_hline(card, 570, 202, 382);
-    np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
-             570, 226, 220, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
-             570, 256, 180, LV_TEXT_ALIGN_LEFT);
-    settings_toggle(card, 900, 230, true);
-
-    return card;
-}
-
-static void settings_connection_row(lv_obj_t *card,
-                                    int32_t y,
-                                    const char *icon,
-                                    lv_color_t icon_color,
-                                    const char *label,
-                                    const char *value,
-                                    const char *detail)
-{
-    np_label(card, icon, NP_FONT_ICON, icon_color,
-             28, y, 28, LV_TEXT_ALIGN_CENTER);
-    np_label(card, label, NP_FONT_MD, np_c_text(),
-             88, y, 132, LV_TEXT_ALIGN_LEFT);
-    np_label(card, value, NP_FONT_MD, np_c_text(),
-             236, y, 180, LV_TEXT_ALIGN_RIGHT);
-
-    if (detail != NULL && detail[0] != '\0') {
-        np_label(card, detail, NP_FONT_SM, np_c_text_2(),
-                 236, y + 24, 180, LV_TEXT_ALIGN_RIGHT);
+    if (out_slider != NULL) {
+        *out_slider = slider;
+    }
+    if (out_value != NULL) {
+        *out_value = value;
     }
 }
 
-static lv_obj_t *settings_connectivity_card(lv_obj_t *root)
+static lv_obj_t *settings_option_row(lv_obj_t *parent,
+                                     int32_t y,
+                                     const char *icon,
+                                     lv_color_t icon_color,
+                                     const char *label,
+                                     const char *value,
+                                     bool show_chevron)
 {
-    lv_obj_t *card = settings_panel(root,
-                                    SETTINGS_RIGHT_X, SETTINGS_TOP_Y,
-                                    SETTINGS_RIGHT_W, SETTINGS_NETWORK_H);
+    lv_obj_t *row = np_fill(parent,
+                            SETTINGS_COL_B_X, y,
+                            SETTINGS_COL_B_W, 84,
+                            np_c_surface_raised(), LV_OPA_COVER,
+                            NP_RADIUS_CONTROL);
 
-    settings_section_title(card, NP_ICON_WIFI, "Conectividade", NULL,
-                           SETTINGS_RIGHT_W);
+    np_label(row, icon, NP_FONT_ICON, icon_color,
+             18, 28, 28, LV_TEXT_ALIGN_CENTER);
 
-    settings_connection_row(card, 82,
-                            NP_ICON_WIFI, np_c_text_3(),
-                            "Wi-Fi", "--", "-- dBm");
-    np_hline(card, 24, 128, SETTINGS_RIGHT_W - 48);
+    np_label(row, label, NP_FONT_MD, np_c_text(),
+             58, 18, 142, LV_TEXT_ALIGN_LEFT);
 
-    settings_connection_row(card, 136,
-                            NP_ICON_BLUETOOTH, np_c_text_3(),
-                            "Bluetooth", "--", NULL);
-    np_hline(card, 24, 158, SETTINGS_RIGHT_W - 48);
+    if (value != NULL && value[0] != '\0') {
+        np_label(row, value, NP_FONT_SM, np_c_text_2(),
+                 58, 48, show_chevron ? 230 : 262,
+                 LV_TEXT_ALIGN_LEFT);
+    }
 
-    settings_connection_row(card, 166,
-                            NP_ICON_CALENDAR, np_c_text_2(),
-                            "Fuso horário", "--", NULL);
+    if (show_chevron) {
+        np_label(row, ">", NP_FONT_LG, np_c_text_2(),
+                 306, 27, 24, LV_TEXT_ALIGN_CENTER);
+    }
 
-    return card;
+    return row;
 }
 
-static lv_obj_t *settings_system_card(lv_obj_t *root)
+/* -------------------------------------------------------------------------- */
+/* Modal Sistema                                                              */
+/* -------------------------------------------------------------------------- */
+
+static void settings_modal_close_event_cb(lv_event_t *event)
 {
-    lv_obj_t *card = settings_panel(root,
-                                    SETTINGS_RIGHT_X, SETTINGS_SYSTEM_Y,
-                                    SETTINGS_RIGHT_W, SETTINGS_SYSTEM_H);
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
 
-    settings_section_title(card, NP_ICON_SETTINGS, "Sistema", NULL,
-                           SETTINGS_RIGHT_W);
+    lv_obj_t *scrim = lv_event_get_user_data(event);
+    if (scrim != NULL) {
+        np_set_visible(scrim, false);
+    }
+}
 
-    np_label(card, "Display", NP_FONT_SM, np_c_text_2(),
-             24, 74, 192, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "1024x600 · RGB565", NP_FONT_SM, np_c_text(),
-             24, 92, 192, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Touch", NP_FONT_SM, np_c_text_2(),
-             252, 74, 204, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Capacitivo", NP_FONT_SM, np_c_text(),
-             252, 92, 204, LV_TEXT_ALIGN_LEFT);
-    np_vline(card, 240, 74, 66);
+static void settings_modal_open_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
+        return;
+    }
 
-    np_label(card, "Firmware", NP_FONT_SM, np_c_text_2(),
-             24, 110, 192, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "--", NP_FONT_SM, np_c_text_3(),
-             24, 128, 192, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Temperatura", NP_FONT_SM, np_c_text_2(),
-             252, 110, 204, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "--", NP_FONT_SM, np_c_text_3(),
-             252, 128, 204, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *scrim = lv_event_get_user_data(event);
+    if (scrim != NULL) {
+        lv_obj_move_foreground(scrim);
+        np_set_visible(scrim, true);
+    }
+}
 
-    lv_obj_t *update = np_button(card, 24, 150, 258, 44,
-                                 "Atualizar", true);
+static void settings_system_value(lv_obj_t *modal,
+                                  int32_t x,
+                                  int32_t y,
+                                  int32_t w,
+                                  const char *label,
+                                  const char *value)
+{
+    np_label(modal, label, NP_FONT_SM, np_c_text_3(),
+             x, y, w, LV_TEXT_ALIGN_LEFT);
+
+    np_label(modal, value, NP_FONT_MD, np_c_text(),
+             x, y + 24, w, LV_TEXT_ALIGN_LEFT);
+}
+
+static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
+{
+    lv_obj_t *scrim = np_fill(root,
+                              0, 0, NP_SCREEN_W, NP_SCREEN_H,
+                              np_c_bg(), LV_OPA_70, 0);
+    lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *modal = settings_panel(scrim,
+                                     SETTINGS_MODAL_X, SETTINGS_MODAL_Y,
+                                     SETTINGS_MODAL_W, SETTINGS_MODAL_H);
+
+    np_label(modal, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
+             24, 22, 30, LV_TEXT_ALIGN_CENTER);
+
+    np_label(modal, "Sistema", NP_FONT_LG, np_c_text(),
+             68, 18, 300, LV_TEXT_ALIGN_LEFT);
+
+    np_label(modal, "Informacoes do dispositivo", NP_FONT_SM, np_c_text_2(),
+             68, 48, 300, LV_TEXT_ALIGN_LEFT);
+
+    lv_obj_t *close = np_button(modal,
+                                SETTINGS_MODAL_W - 68, 16,
+                                44, 44,
+                                "X", false);
+    lv_obj_add_event_cb(close,
+                        settings_modal_close_event_cb,
+                        LV_EVENT_CLICKED,
+                        scrim);
+
+    np_hline(modal, 24, 82, SETTINGS_MODAL_W - 48);
+
+    settings_system_value(modal, 32, 110, 250,
+                          "Display", "1024x600 · RGB565");
+
+    settings_system_value(modal, 336, 110, 250,
+                          "Touch", "Capacitivo");
+
+    settings_system_value(modal, 32, 184, 250,
+                          "Firmware", "--");
+
+    settings_system_value(modal, 336, 184, 250,
+                          "Temperatura", "--");
+
+    np_vline(modal, 320, 104, 134);
+
+    lv_obj_t *update = np_button(modal,
+                                 32, 282,
+                                 276, 52,
+                                 "Atualizar sistema", true);
     lv_obj_clear_flag(update, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *restart = np_button(card, 294, 150, 162, 44,
+    lv_obj_t *restart = np_button(modal,
+                                  332, 282,
+                                  276, 52,
                                   "Reiniciar", false);
     lv_obj_clear_flag(restart, LV_OBJ_FLAG_CLICKABLE);
 
+    np_set_visible(scrim, false);
+    return scrim;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Card Geral                                                                 */
+/* -------------------------------------------------------------------------- */
+
+static lv_obj_t *settings_general_card(np_settings_view_t *view)
+{
+    lv_obj_t *card = settings_panel(view->root,
+                                    SETTINGS_GENERAL_X,
+                                    SETTINGS_GENERAL_Y,
+                                    SETTINGS_GENERAL_W,
+                                    SETTINGS_GENERAL_H);
+
+    np_label(card, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
+             24, 20, 30, LV_TEXT_ALIGN_CENTER);
+
+    np_label(card, "Geral", NP_FONT_LG, np_c_text(),
+             68, 16, 300, LV_TEXT_ALIGN_LEFT);
+
+    np_hline(card, 24, 64, SETTINGS_GENERAL_W - 48);
+
+    /* Coluna A */
+    settings_slider(card,
+                    104,
+                    NP_ICON_UV,
+                    "Brilho da tela",
+                    SETTINGS_BRIGHTNESS,
+                    &view->brightness_slider,
+                    &view->brightness_value);
+
+    settings_slider(card,
+                    214,
+                    NP_ICON_VOLUME_UP,
+                    "Volume geral",
+                    SETTINGS_VOLUME,
+                    &view->volume_slider,
+                    &view->volume_value);
+
+    np_hline(card,
+             SETTINGS_COL_A_X,
+             310,
+             470);
+
+    np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
+             SETTINGS_COL_A_TEXT_X, 352, 220, LV_TEXT_ALIGN_LEFT);
+
+    np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
+             SETTINGS_COL_A_TEXT_X, 384, 180, LV_TEXT_ALIGN_LEFT);
+
+    settings_toggle(card, 432, 354, true);
+
+    /* Separador central */
+    np_vline(card,
+             SETTINGS_DIVIDER_X,
+             88,
+             380);
+
+    /* Coluna B */
+    (void)settings_option_row(card,
+                              104,
+                              NP_ICON_WIFI,
+                              np_c_positive(),
+                              "Wi-Fi",
+                              "--",
+                              true);
+
+    (void)settings_option_row(card,
+                              214,
+                              NP_ICON_CALENDAR,
+                              np_c_text_2(),
+                              "Fuso horario",
+                              "--",
+                              true);
+
+    lv_obj_t *system_row =
+        settings_option_row(card,
+                            324,
+                            NP_ICON_SETTINGS,
+                            np_c_text_2(),
+                            "Sistema",
+                            "Informacoes e manutencao",
+                            true);
+
+    lv_obj_add_flag(system_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(system_row,
+                        settings_modal_open_event_cb,
+                        LV_EVENT_CLICKED,
+                        s_system_modal_scrim);
+
     return card;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Build / compatibilidade com staged reveal                                  */
+/* -------------------------------------------------------------------------- */
 
 np_settings_view_t np_settings_begin(lv_obj_t *parent)
 {
     np_settings_view_t view = {0};
-    view.root = np_scene(parent);
 
-    /* A tela continua criada oculta para o fluxo lazy/staged do product_ui. */
+    view.root = np_scene(parent);
     np_set_visible(view.root, false);
 
-    /* np_header() ja cria o drawer fechado. Nao forcar rail ativo aqui. */
+    /* np_header() mantem o drawer fechado por padrao. */
     view.header = np_header(view.root);
     view.home_button = NULL;
+
+    /*
+     * O modal e construido uma unica vez e nasce oculto.
+     * Assim o toque em Sistema nao cria arvore LVGL nova.
+     */
+    s_system_modal_scrim = settings_build_system_modal(view.root);
 
     return view;
 }
 
 bool np_settings_build_next_card(np_settings_view_t *view)
 {
-    if (view == NULL || view->root == NULL) return false;
+    if (view == NULL || view->root == NULL) {
+        return false;
+    }
 
     if (view->left_card == NULL) {
-        view->left_card = settings_display_card(view->root);
+        view->left_card = settings_general_card(view);
+
+        /*
+         * A nova tela tem apenas um card principal.
+         * Os handles antigos apontam para o mesmo card para preservar
+         * compatibilidade com codigo staged existente.
+         */
+        view->middle_card = view->left_card;
+        view->right_card = view->left_card;
+
         np_set_visible(view->left_card, false);
         return true;
     }
-    if (view->middle_card == NULL) {
-        view->middle_card = settings_connectivity_card(view->root);
-        np_set_visible(view->middle_card, false);
-        return true;
-    }
-    if (view->right_card == NULL) {
-        view->right_card = settings_system_card(view->root);
-        np_set_visible(view->right_card, false);
-        return true;
-    }
+
     return false;
 }
 
 np_settings_view_t np_settings_build(lv_obj_t *parent)
 {
     np_settings_view_t view = np_settings_begin(parent);
+
     while (np_settings_build_next_card(&view)) {
     }
+
     return view;
 }
 
 void np_settings_reset_stages(np_settings_view_t *view)
 {
-    if (view == NULL) return;
-    np_set_visible(view->left_card, false);
-    np_set_visible(view->middle_card, false);
-    np_set_visible(view->right_card, false);
+    if (view == NULL) {
+        return;
+    }
+
+    if (view->left_card != NULL) {
+        np_set_visible(view->left_card, false);
+    }
+
+    if (s_system_modal_scrim != NULL) {
+        np_set_visible(s_system_modal_scrim, false);
+    }
 }
 
 lv_obj_t *np_settings_create(lv_obj_t *parent)

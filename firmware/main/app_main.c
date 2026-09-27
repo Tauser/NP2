@@ -6,6 +6,7 @@
 #include "app_state.h"
 #include "board_bringup.h"
 #include "connectivity_diagnostic.h"
+#include "device_control_service.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
 #include "onboarding_service.h"
@@ -46,6 +47,12 @@ void app_main(void)
          */
         ESP_LOGE(TAG, "P4 local bring-up stopped: %s", esp_err_to_name(bringup_err));
         return;
+    }
+
+    const esp_err_t device_controls_err = device_control_service_start();
+    if (device_controls_err != ESP_OK) {
+        ESP_LOGE(TAG, "Device controls unavailable: %s",
+                 esp_err_to_name(device_controls_err));
     }
 
     const esp_err_t connectivity_err = connectivity_diagnostic_start();
