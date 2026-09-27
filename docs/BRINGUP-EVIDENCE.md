@@ -3037,3 +3037,20 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   7,993 s e Wi-Fi com IP; não houve panic nem watchdog na captura de 15 s.
+
+### 2026-09-27 — Composição principal de Configurações
+
+- A tela adotou um painel principal horizontal para Tela e som e dois painéis
+  inferiores equivalentes para Conectividade e Sistema. A composição segue a
+  referência visual recebida, preservando tema removido e Sistema restrito às
+  ações de atualizar e reiniciar. Os três painéis continuam criados em ciclos
+  LVGL separados quando a tela é aberta.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286a00` B
+  em partição de `0x800000` B, com `0x579600` B (68%) livres. SHA-256 P4:
+  `09F3136BA1D2108D8A700DE61DF1B5C57DB8271E25034C563498DFF59CDEBE9C`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  8,001 s e Wi-Fi com IP; não houve panic nem watchdog na captura de 15 s.
