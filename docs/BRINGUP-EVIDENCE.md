@@ -3020,3 +3020,20 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   7,983 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
+
+### 2026-09-27 — Revisão de UX de Configurações
+
+- Configurações foi alinhada à grade da Home V2: painel principal em
+  `24/560` e coluna auxiliar em `600/400`, com o mesmo espaçamento de 16 px,
+  superfícies chapadas compartilhadas e cabeçalhos de seção sem texto
+  redundante. Os grupos foram distribuídos por tarefa: tela e som, conexão e
+  ações do sistema. A criação gradual dos cards LVGL foi preservada.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286a00` B
+  em partição de `0x800000` B, com `0x579600` B (68%) livres. SHA-256 P4:
+  `AA27462FD99F99C5F1C2BDC967F941C2E52E4BC3E96DABE549286F846F4B60C4`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  7,993 s e Wi-Fi com IP; não houve panic nem watchdog na captura de 15 s.
