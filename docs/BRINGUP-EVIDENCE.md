@@ -3127,3 +3127,34 @@ cortes de energia; esses gates continuam pendentes.
   A observação em repouso passou de 60 s sem `task_wdt` ou panic. Não houve
   toque físico em Settings durante essa captura; o gatilho original permanece
   sem reprodução controlada. C6 e eFuses não foram escritos.
+
+### 2026-09-27 — Persistência de brilho e volume e correção do abort
+
+- Placa ESP32-P4 v1.3, flash/PSRAM de 32 MiB, EK79007, GT911 e C6 por
+  ESP-Hosted 3.0.6/RPC v2/SDIO SW_AGGR. O hash da imagem C6 instalada não foi
+  coletado; o C6 não foi regravado. Configuração efetiva: IDF 5.5.4,
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desativado, display RGB565/180°/
+  `TRIPLE_PARTIAL`/três framebuffers e Wi-Fi remoto.
+- `de8dab1` adicionou um perfil independente de dois slots com CRC em NVS
+  (`np2_controls`), escrito pelo `FlashCoordinator` após liberação dos sliders
+  e pausa de 500 ms. O serviço restaura os valores no boot; a UI apresenta
+  sucesso apenas após confirmação da escrita. A volta para Home libera a árvore
+  Settings antes de reconstruir a cena.
+- O primeiro ensaio físico reproduziu um `abort()` em `lock_acquire_generic`
+  logo após ajustar o brilho. A pilha capturada continha
+  `_lock_acquire_recursive` e `_vfprintf_r`. A causa era `ESP_LOGI` dentro
+  de `portENTER_CRITICAL` no caminho de sucesso do coordenador.
+  `6b0b692` moveu esse log para fora do lock, preservando somente a atualização
+  de estado protegida.
+- `idf.py clean build` passou para `esp32p4`; após o segundo commit,
+  `idf.py build` gerou a imagem P4 `0x2995c0` B na partição de `0x800000` B
+  (68% livres). SHA-256 P4:
+  `FEF9BA007EA4FF649F1855363D61432090EC3440A44BEC109E2D6AAE86DA7595`.
+  `idf.py -p COM8 app-flash` confirmou `Hash of data verified` e reiniciou o P4.
+- No ensaio com a imagem final, a captura serial registrou brilho em 64% e
+  100%, seguido de `display and volume preferences saved` em 11 ms e 12 ms,
+  sem novo abort nessa sequência. O responsável confirmou que os sliders,
+  o feedback e a volta para Home funcionaram. Um reboot via
+  `idf.py -p COM8 monitor` restaurou `brightness=100 volume=65` e mostrou a
+  Home aos 8,045 s. O valor alterado de volume não foi verificado em reboot
+  nesta captura; soak prolongado permanece aberto.
