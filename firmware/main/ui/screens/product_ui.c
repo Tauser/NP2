@@ -112,7 +112,8 @@ static void settings_value_bubble_timer_cb(lv_timer_t *timer)
 
 static void settings_control_event_cb(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED) {
         return;
     }
 
@@ -122,23 +123,30 @@ static void settings_control_event_cb(lv_event_t *event)
         (settings_control_t)(uintptr_t)lv_event_get_user_data(event);
 
     if (control == SETTINGS_CONTROL_BRIGHTNESS) {
+        if (code == LV_EVENT_VALUE_CHANGED &&
+            device_control_set_brightness(percent) != ESP_OK) {
+            ESP_LOGW(TAG, "Brightness request unavailable");
+        }
+    } else {
+        if (code == LV_EVENT_VALUE_CHANGED && device_control_set_volume(percent) != ESP_OK) {
+            ESP_LOGW(TAG, "Volume request unavailable");
+        }
+    }
+
+    if (code != LV_EVENT_RELEASED) return;
+
+    if (control == SETTINGS_CONTROL_BRIGHTNESS) {
         settings_set_percent(NULL, s_ui.settings.brightness_value, percent);
         settings_show_value_bubble(s_ui.settings.brightness_slider,
                                    s_ui.settings.brightness_bubble,
                                    s_ui.settings.brightness_bubble_value,
                                    percent);
-        if (device_control_set_brightness(percent) != ESP_OK) {
-            ESP_LOGW(TAG, "Brightness request unavailable");
-        }
     } else {
         settings_set_percent(NULL, s_ui.settings.volume_value, percent);
         settings_show_value_bubble(s_ui.settings.volume_slider,
                                    s_ui.settings.volume_bubble,
                                    s_ui.settings.volume_bubble_value,
                                    percent);
-        if (device_control_set_volume(percent) != ESP_OK) {
-            ESP_LOGW(TAG, "Volume request unavailable");
-        }
     }
 }
 
@@ -167,11 +175,19 @@ static void install_settings_control_callbacks(void)
                             settings_control_event_cb,
                             LV_EVENT_VALUE_CHANGED,
                             (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+        lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_RELEASED,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
     }
     if (s_ui.settings.volume_slider != NULL) {
         lv_obj_add_event_cb(s_ui.settings.volume_slider,
                             settings_control_event_cb,
                             LV_EVENT_VALUE_CHANGED,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+        lv_obj_add_event_cb(s_ui.settings.volume_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_RELEASED,
                             (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
     }
     lv_obj_add_event_cb(s_ui.settings.notifications_row, notifications_event_cb,
