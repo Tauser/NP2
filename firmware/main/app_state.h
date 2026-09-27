@@ -98,6 +98,16 @@ typedef struct {
 } app_notification_projection_t;
 
 typedef struct {
+    bool ready;
+    uint8_t brightness_percent;
+    uint8_t volume_percent;
+    bool persistence_pending;
+    uint32_t save_completion_id;
+    uint8_t save_completion_mask;
+    esp_err_t save_result;
+} app_device_control_projection_t;
+
+typedef struct {
     uint32_t revision;
     bool ready;
     app_storage_projection_t storage;
@@ -105,6 +115,7 @@ typedef struct {
     app_onboarding_projection_t onboarding;
     app_weather_asset_projection_t weather_assets;
     app_notification_projection_t notifications;
+    app_device_control_projection_t device_controls;
     bool time_trusted;
     uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;

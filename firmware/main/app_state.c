@@ -6,6 +6,7 @@
 
 #include "app_event_bus.h"
 #include "connectivity_diagnostic.h"
+#include "device_control_service.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "flash_coordinator.h"
@@ -153,6 +154,7 @@ static void refresh_projection(void)
     onboarding_service_status_t onboarding = {0};
     weather_asset_service_status_t weather_assets = {0};
     notification_service_status_t notifications = {0};
+    device_control_status_t controls = {0};
     app_ui_projection_t candidate = {0};
 
     flash_coordinator_get_status(&storage);
@@ -161,6 +163,7 @@ static void refresh_projection(void)
     onboarding_service_refresh();
     onboarding_service_get_status(&onboarding);
     notification_service_get_status(&notifications);
+    device_control_get_status(&controls);
 
     candidate.ready = true;
     candidate.storage = (app_storage_projection_t){
@@ -214,6 +217,15 @@ static void refresh_projection(void)
         .generation = notifications.generation,
         .persisted_generation = notifications.persisted_generation,
         .last_result = notifications.last_result,
+    };
+    candidate.device_controls = (app_device_control_projection_t){
+        .ready = controls.ready,
+        .brightness_percent = controls.brightness_percent,
+        .volume_percent = controls.volume_percent,
+        .persistence_pending = controls.persistence_pending,
+        .save_completion_id = controls.save_completion_id,
+        .save_completion_mask = controls.save_completion_mask,
+        .save_result = controls.save_result,
     };
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
     candidate.time_trusted = time_status.trusted;

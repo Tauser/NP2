@@ -29,6 +29,11 @@ typedef struct {
 } notification_profile_t;
 
 typedef struct {
+    uint8_t brightness_percent;
+    uint8_t volume_percent;
+} device_control_profile_t;
+
+typedef struct {
     bool ready;
     bool busy;
     bool pending;
@@ -70,6 +75,12 @@ typedef struct {
     esp_err_t notification_profile_result;
     uint32_t notification_profile_completed_sequence;
     esp_err_t notification_profile_last_write_result;
+    bool device_control_profile_valid;
+    uint32_t device_control_profile_generation;
+    device_control_profile_t device_control_profile;
+    esp_err_t device_control_profile_result;
+    uint32_t device_control_profile_completed_sequence;
+    esp_err_t device_control_profile_last_write_result;
     /* Credential-vault presence only. Credential data is never exposed here. */
     bool credential_vault_valid;
     uint32_t credential_vault_generation;
@@ -142,6 +153,9 @@ esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_pr
 /* Persists notification preferences through the sole flash owner. */
 esp_err_t flash_coordinator_request_notification_profile_write(
     const notification_profile_t *profile, uint32_t *out_sequence);
+
+esp_err_t flash_coordinator_request_device_control_profile_write(
+    const device_control_profile_t *profile, uint32_t *out_sequence);
 
 /*
  * Credential-vault storage. Production requires NVS Encryption and active

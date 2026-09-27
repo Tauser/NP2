@@ -40,6 +40,7 @@ typedef struct {
     uint32_t started_at_tick;
     uint32_t rendered_revision;
     uint32_t notified_persisted_generation;
+    uint32_t control_save_completion_id;
     offline_data_snapshot_t rendered_home_data;
     const void *rendered_weather_icon_source;
     uint8_t settings_stage;
@@ -47,6 +48,9 @@ typedef struct {
     bool notification_feedback_initialized;
     bool syncing_notification_controls;
     bool home_data_rendered;
+    bool settings_controls_initialized;
+    uint8_t projected_brightness;
+    uint8_t projected_volume;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -115,7 +119,8 @@ static void settings_value_bubble_timer_cb(lv_timer_t *timer)
 
 static void settings_control_event_cb(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_RELEASED) return;
+    if (lv_event_get_code(event) != LV_EVENT_RELEASED &&
+        lv_event_get_code(event) != LV_EVENT_PRESS_LOST) return;
 
     lv_obj_t *const slider = lv_event_get_target(event);
     const uint8_t percent = (uint8_t)lv_slider_get_value(slider);
@@ -125,10 +130,22 @@ static void settings_control_event_cb(lv_event_t *event)
     if (control == SETTINGS_CONTROL_BRIGHTNESS) {
         if (device_control_set_brightness(percent) != ESP_OK) {
             ESP_LOGW(TAG, "Brightness request unavailable");
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Brilho nao alterado", NULL, 2500U);
+            settings_set_percent(s_ui.settings.brightness_slider,
+                                 s_ui.settings.brightness_value,
+                                 s_ui.projected_brightness);
+            return;
         }
     } else {
         if (device_control_set_volume(percent) != ESP_OK) {
             ESP_LOGW(TAG, "Volume request unavailable");
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Volume nao alterado", NULL, 2500U);
+            settings_set_percent(s_ui.settings.volume_slider,
+                                 s_ui.settings.volume_value,
+                                 s_ui.projected_volume);
+            return;
         }
     }
 
@@ -149,15 +166,18 @@ static void settings_control_event_cb(lv_event_t *event)
 
 static void install_settings_control_callbacks(void)
 {
-    device_control_status_t controls = {0};
-    device_control_get_status(&controls);
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    s_ui.projected_brightness = projection.device_controls.brightness_percent;
+    s_ui.projected_volume = projection.device_controls.volume_percent;
+    s_ui.settings_controls_initialized = true;
 
     settings_set_percent(s_ui.settings.brightness_slider,
                          s_ui.settings.brightness_value,
-                         controls.brightness_percent);
+                         s_ui.projected_brightness);
     settings_set_percent(s_ui.settings.volume_slider,
                          s_ui.settings.volume_value,
-                         controls.volume_percent);
+                         s_ui.projected_volume);
 
     if (s_ui.settings_value_bubble_timer == NULL) {
         s_ui.settings_value_bubble_timer =
@@ -172,11 +192,19 @@ static void install_settings_control_callbacks(void)
                             settings_control_event_cb,
                             LV_EVENT_RELEASED,
                             (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+        lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_PRESS_LOST,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
     }
     if (s_ui.settings.volume_slider != NULL) {
         lv_obj_add_event_cb(s_ui.settings.volume_slider,
                             settings_control_event_cb,
                             LV_EVENT_RELEASED,
+                            (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+        lv_obj_add_event_cb(s_ui.settings.volume_slider,
+                            settings_control_event_cb,
+                            LV_EVENT_PRESS_LOST,
                             (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
     }
     lv_obj_add_event_cb(s_ui.settings.notifications_row, notifications_event_cb,
@@ -779,6 +807,21 @@ static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
 
+    if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
+        if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
+            s_ui.projected_brightness = projection->device_controls.brightness_percent;
+            settings_set_percent(s_ui.settings.brightness_slider,
+                                 s_ui.settings.brightness_value,
+                                 s_ui.projected_brightness);
+        }
+        if (projection->device_controls.volume_percent != s_ui.projected_volume) {
+            s_ui.projected_volume = projection->device_controls.volume_percent;
+            settings_set_percent(s_ui.settings.volume_slider,
+                                 s_ui.settings.volume_value,
+                                 s_ui.projected_volume);
+        }
+    }
+
     np_header_set_notifications_enabled(&s_ui.settings.header,
                                         projection->notifications.general_enabled);
     if (!projection->notifications.ready) return;
@@ -826,6 +869,36 @@ static void refresh_timer_cb(lv_timer_t *timer)
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
 
+    if (projection.device_controls.save_completion_id !=
+        s_ui.control_save_completion_id) {
+        s_ui.control_save_completion_id = projection.device_controls.save_completion_id;
+        const uint8_t mask = projection.device_controls.save_completion_mask;
+        const char *const title = (mask & (DEVICE_CONTROL_BRIGHTNESS_MASK |
+                                           DEVICE_CONTROL_VOLUME_MASK)) ==
+                                          (DEVICE_CONTROL_BRIGHTNESS_MASK |
+                                           DEVICE_CONTROL_VOLUME_MASK)
+                                      ? "Brilho e volume salvos"
+                                      : (mask & DEVICE_CONTROL_BRIGHTNESS_MASK) != 0U
+                                            ? "Brilho da tela salvo"
+                                            : "Volume salvo";
+        np_feedback_show_toast(&s_ui.feedback,
+                               projection.device_controls.save_result == ESP_OK
+                                   ? NP_FEEDBACK_SUCCESS : NP_FEEDBACK_ERROR,
+                               projection.device_controls.save_result == ESP_OK
+                                   ? title : "Nao foi possivel salvar",
+                               projection.device_controls.save_result == ESP_OK
+                                   ? NULL : "Verifique o dispositivo", 2500U);
+        if (projection.device_controls.save_result != ESP_OK &&
+            s_ui.active_screen == PRODUCT_SCREEN_SETTINGS) {
+            settings_set_percent(s_ui.settings.brightness_slider,
+                                 s_ui.settings.brightness_value,
+                                 projection.device_controls.brightness_percent);
+            settings_set_percent(s_ui.settings.volume_slider,
+                                 s_ui.settings.volume_value,
+                                 projection.device_controls.volume_percent);
+        }
+    }
+
     if (projection.revision != s_ui.rendered_revision &&
         s_ui.active_screen == PRODUCT_SCREEN_BOOT) {
         update_boot(&projection);
@@ -863,6 +936,7 @@ static void open_settings_async(void *user_data)
     lv_obj_delete(home_root);
     s_ui.home = (np_home_view_t){0};
     s_ui.settings = np_settings_begin(lv_screen_active());
+    s_ui.settings_controls_initialized = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     np_set_visible(s_ui.settings.root, true);
     np_settings_reset_stages(&s_ui.settings);
@@ -977,6 +1051,12 @@ static void settings_home_async(void *user_data)
         lv_timer_delete(s_ui.settings_value_bubble_timer);
         s_ui.settings_value_bubble_timer = NULL;
     }
+    /* Free Settings before constructing Home to keep one scene's draw tree
+     * active at a time on the LVGL task. */
+    lv_obj_delete(settings_root);
+    s_ui.settings = (np_settings_view_t){0};
+    s_ui.settings_controls_initialized = false;
+    s_ui.settings_stage = 0U;
     s_ui.home = np_home_build(lv_screen_active());
     s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
@@ -987,10 +1067,6 @@ static void settings_home_async(void *user_data)
     update_home(&projection);
     s_ui.rendered_revision = projection.revision;
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
-    s_ui.settings = (np_settings_view_t){0};
-    s_ui.settings_stage = 0U;
-
-    lv_obj_delete(settings_root);
 }
 
 static void settings_home_event_cb(lv_event_t *event)
