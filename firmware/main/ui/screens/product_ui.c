@@ -858,6 +858,10 @@ static void open_settings_async(void *user_data)
     if (s_ui.active_screen != PRODUCT_SCREEN_HOME) return;
 
     lv_obj_t *const home_root = s_ui.home.root;
+    /* This runs after the click callback. Release the animated Home before
+     * allocating and rendering the Settings tree on the same LVGL owner. */
+    lv_obj_delete(home_root);
+    s_ui.home = (np_home_view_t){0};
     s_ui.settings = np_settings_begin(lv_screen_active());
     np_feedback_bring_to_front(&s_ui.feedback);
     np_set_visible(s_ui.settings.root, true);
@@ -869,7 +873,6 @@ static void open_settings_async(void *user_data)
     lv_obj_add_event_cb(s_ui.settings.header.drawer_home_button,
                         settings_home_event_cb, LV_EVENT_CLICKED, NULL);
     s_ui.active_screen = PRODUCT_SCREEN_SETTINGS;
-    s_ui.home = (np_home_view_t){0};
 
     s_ui.settings_stage = 0U;
     app_ui_projection_t projection = {0};
@@ -885,9 +888,6 @@ static void open_settings_async(void *user_data)
             ESP_LOGE(TAG, "Settings cards unavailable: no LVGL work slot");
         }
     }
-
-    /* O callback do menu ja terminou: agora e seguro liberar a Home. */
-    lv_obj_delete(home_root);
 }
 
 static void settings_stage_timer_cb(lv_timer_t *timer)
