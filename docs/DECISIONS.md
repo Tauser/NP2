@@ -462,3 +462,541 @@ fica explicitamente não confiável. A UI não faz I/O nem inicia sincronizaçã
 não há polling de providers ou segunda conexão TLS. O gate físico ainda deve
 confirmar: NTP OK seguido de refresh mostra `ha 0 min`; após reboot sem hora
 válida a indicação volta corretamente para `hora nao confiavel`.
+
+## ADR-022 — Iniciar G5 por políticas portáveis e OTA P4 com C6 preservado
+
+**Estado:** adotado para o primeiro incremento em 2026-09-12; integração OTA
+e gate físico pendentes.
+
+**Contexto:** G4 foi fechado no escopo da unidade. O bootloader P4 possui
+rollback habilitado, mas a aplicação ainda não implementa confirmação de
+`PENDING_VERIFY`. A reprodução C6 com lock, patch/hash e recuperação autônoma
+também permanece uma exclusão de G0.
+
+**Decisão:** implementar primeiro `update_policy`, C portável seguindo os
+contratos já presentes neste firmware, sem IDF, LVGL, heap ou I/O. A política
+de metadados aceita somente candidato P4 para produto/placa/revisão corretos,
+imagem completa dentro do slot inativo, schema legível e a mesma security
+version. Exige app atual confirmado, transação ociosa e C6 Hosted 3.0.6,
+RPC v2, SDIO SW_AGGR. Recusa troca de C6, bootloader e partições nesta etapa.
+Identificadores numéricos ainda precisam de registro de produto; a estrutura
+em memória não define formato de manifesto e não deve ser serializada por ABI.
+
+A política de boot recomenda confirmação somente após 15 s de saúde local
+observada continuamente, com primeiro frame, display, serviços locais e
+progresso de app/UI. A janela reinicia se faltar saúde ou houver intervalo
+entre amostras maior que 500 ms. Progresso app/UI vence em 1000/500 ms;
+timestamps futuros, anteriores ao boot e fonte ainda não observada não valem.
+Em 60 s recomenda rollback se há fallback bootável, ou recuperação sem loop.
+Relógio monotônico regressivo exige recuperação. Rede não participa desse
+contrato. O adapter futuro deve iniciar o acompanhamento antes do bring-up,
+observar progresso real e validar o resultado da escrita de `otadata` pelo
+coordenador; recomendação em RAM não é confirmação persistida.
+
+**Consequências:** `UPDATE_METADATA_MATCH` prova somente comparação de
+metadados. Autenticação dos bytes exatos do manifesto, assinatura da app,
+SHA-256, inspeção do header real, matriz de fallback e journal são gates
+adicionais obrigatórios antes de qualquer ativação. Não existe verificador
+criptográfico simulado nem caminho de atualização exposto à UI neste corte.
+O roteiro de implementação e bancada está em `G5-VALIDATION.md`.
+
+**Validação/rollback:** executar `tools/run_update_policy_host_test.ps1` e
+build limpo P4. O incremento não modifica defaults, locks ou partições e não
+executa gravação OTA; o fluxo do repositório grava o P4 de desenvolvimento
+após mudanças de firmware e registra a evidência separadamente. Reverter o
+módulo e sua entrada CMake remove somente a política ainda sem consumidores;
+G5 permanece aberto até os ciclos físicos assinados.
+
+## ADR-023 — Recipe C6 fixada a partir do exemplo oficial 3.0.6
+
+**Estado:** adotado em 2026-09-13; reprodução de software em execução,
+ativação na unidade bloqueada pelo gate de recuperação C6.
+
+**Contexto:** a recipe anterior apontava para o exemplo em managed_components,
+com dependência Hosted `*` e sem lock C6. O SDK instalado já possui a mudança
+SDIO, mas não tem histórico Git disponível para identificar seu diff. O
+exemplo remoto usa dois slots de `0x1C0000`, menores que o staging P4 de 2 MiB.
+
+**Decisão:** tornar `coprocessor/` um projeto ESP-IDF mínimo e versionar somente
+bootstrap, defaults e tabela do exemplo oficial, com manifesto Hosted
+`==3.0.6`/IDF `==5.5.4` e lock próprio. Preservar a configuração funcional do
+exemplo neste corte, explicitando que não é imagem de produção. Registrar
+proveniência dos arquivos copiados; não duplicar o componente Hosted.
+Ativar `CONFIG_APP_REPRODUCIBLE_BUILD=y`, mecanismo suportado pelo IDF para
+retirar timestamps e caminhos variáveis da imagem, e exigir dois builds limpos
+em diretórios diferentes com hash de app/bootloader/tabela iguais.
+Antes do build, comparar o arquivo SDIO completo ao original da tag IDF 5.5.4,
+aceitando somente o patch oficial de uma linha, normalizando apenas CRLF/LF.
+Invocar `eh.py patch-idf` e repetir para provar idempotência; registrar hashes
+brutos, normalizados e diff. Qualquer outra diferença bloqueia a compilação.
+
+**Limites:** não habilitar rollback por Kconfig isoladamente: falta a saúde
+autônoma C6 e não está comprovado o bootloader instalado. Não ativar Secure
+Boot, assinatura exigida pelo bootloader, encryption ou anti-rollback. O
+bootstrap upstream faz erase NVS em erros de inicialização; esse comportamento
+será corrigido no caminho de produto antes de sua promoção. A reprodução não
+autoriza gravar essa imagem na unidade. C6 somente via Slave OTA por SDIO,
+após inventário e recovery; não executar o alvo `flash` do projeto C6 na COM8.
+
+**Validação:** build limpo C6, configuração efetiva, tabela gerada, tamanho da
+app, hashes, lock e relatório de recursos. SHA-256 do build local não é hash
+do rádio instalado. Gates físicos continuam abertos. Reverter esta recipe
+não altera firmware gravado no P4 ou C6.
+
+## ADR-024 — Manifesto P4 canônico e autenticação sem acesso privado ao C6
+
+**Estado:** parser canônico, verificador RSA-PSS e sessão de hash streaming
+implementados em software em 2026-09-13; keyring de produção, integração com
+HTTPS/flash e ativação OTA pendentes.
+
+**Contexto:** G5 precisa rejeitar pacotes ambíguos antes de qualquer erase ou
+seleção de slot. JSON aceitaria ordenações, espaços, escapes e duplicatas que
+complicam a definição dos bytes assinados. Ao mesmo tempo, o host Hosted 3.0.6
+em uso só retorna a versão C6 pelo descritor público, embora o C6 possua um
+RPC interno mais completo; nem uma resposta completa fornece bootloader ou
+partições instaladas.
+
+**Decisão:** usar um envelope P4-only de 104 bytes, versão 1, com endianness e
+offsets fixos, campos reservados obrigatoriamente nulos e assinatura destacada
+sobre os bytes recebidos sem reserialização. O parser não aloca memória e
+recusa ID/SHA nulos, faixas invertidas, flags desconhecidas e operações sobre
+C6, bootloader ou tabela. Não chamar headers privados do Hosted nem modificar
+o componente fixado para obter metadados adicionais do C6.
+
+**Consequências:** o verificador exige RSA-3072/PSS/SHA-256 com MGF1 SHA-256 e
+salt de 32 B sobre os bytes canônicos, usando chave pública DER injetada pelo
+adapter/keyring. Ele não contém chave privada, não persiste chaves e não
+autoriza sozinho uma imagem. A sessão de SHA-256 mantém no máximo o estado do
+digest e aceita blocos de até 4 KiB, exigindo tamanho exato e digest final
+igual ao manifesto; ela não possui transporte nem grava flash. Keyring de
+produção, rotação/revogação, registro de anti-replay e integração com a
+política de metadados/HTTPS/FlashCoordinator continuam obrigatórios. A operação
+conjunta C6 permanece bloqueada pela inspeção física de layout e recovery, sem
+USB/UART como rota alternativa. O formato v1 não é persistido nem exposto à
+UI; qualquer extensão incompatível exige nova versão.
+
+**Validação/rollback:** o teste host cobre tamanho, magic/versão, bytes
+reservados, destino, flags, ID/SHA nulos e faixas. Um vetor efêmero RSA-3072
+validado por OpenSSL cobre aceitação da assinatura e recusa após mudança de
+byte; sua chave privada é removida após a execução. Um vetor SHA-256 em blocos
+independentes confirma o digest esperado. Reverter `update_manifest.c/.h`,
+`update_signature.c/.h`, `update_image_hash.c/.h` e entradas CMake remove
+somente código sem consumidor de I/O; não altera slots, NVS, C6 ou eFuses.
+
+**Complemento em 2026-09-13:** o keyring e a admissão agora vinculam parser,
+assinatura, política, anti-replay e hash antes de abrir flash. A gravação P4
+fica em um adapter que depende apenas do componente nativo `app_update` do
+ESP-IDF 5.5.4. O `FlashCoordinator` persiste o journal em duas cópias NVS e
+atribui suas gerações; recusa corrupção, empate com dados distintos, salto de
+estado e estouro. O próprio coordenador compara o registro solicitado à cópia
+NVS antes da seleção; esta requer, cumulativamente, finalização de
+`esp_ota_end` e o registro persistido `P4_PENDING`. Nenhum desses adapters é
+acionado pela UI ou por boot normal enquanto não houver artefatos de release e
+os ensaios físicos obrigatórios. A decisão não muda os bloqueios do C6.
+
+## ADR-025 — EEZ Studio como fonte visual de Boot e Home
+
+**Estado:** substituído em 2026-09-14 pela ADR-027.
+
+**Contexto:** a UI de produto foi desenhada no EEZ Studio com LVGL 9.5, mas o
+firmware ainda criava o dashboard manualmente. Duplicar a árvore visual em C
+faria o editor e a placa divergirem e aumentaria o risco de invalidações
+desnecessárias durante atualizações de rede e dados.
+
+**Decisão:** `ui/NP2.eez-project` é a fonte de verdade da árvore visual, e o
+Build do EEZ gera arquivos somente em `firmware/main/ui_generated`. O módulo
+`eez_ui` é a ponte de runtime: ele cria Boot e Home sob o lock do adapter,
+consome apenas a projeção sanitizada de `AppState`, compara textos antes de
+alterá-los e mantém todo acesso a objetos na task LVGL. Boot abre sem animação
+e só troca para Home depois do tempo mínimo, quando a hora é confiável ou após
+10 s com estado local pronto; o limite preserva o funcionamento offline. A
+gaveta lateral usa uma animação limitada de 96 px. Os campos ainda ausentes do
+modelo, como dólar, Ibovespa, vento, sensação e UV, aparecem indisponíveis em
+vez de reutilizar valores do protótipo.
+
+**Nota de implementação:** a Home possui identificadores EEZ estáveis para
+seus bindings. A página Boot, no arquivo atualmente aberto no Studio, ainda
+não os preserva ao gerar; por isso o bridge acessa somente seus dois labels
+dinâmicos pela ordem fixa documentada dos filhos. Não mover ou inserir filhos
+em Boot sem antes nomeá-los e regenerar a tela.
+
+**Consequências:** serviços, HTTPS, NTP e persistência continuam fora da UI; o
+arquivo gerado não recebe lógica de produto. Novos dados exigem primeiro um
+contrato em `AppState` e só depois o binding visual. Regenerar o projeto EEZ é
+parte do fluxo antes do build ESP-IDF. A mudança preserva RGB565, rotação 180°,
+três framebuffers e `TRIPLE_PARTIAL`; build e flash não demonstram ausência de
+glitch, que depende de observação física com a tela atualizando.
+
+**Validação/rollback:** executar o Build do EEZ, build limpo P4, flash pela
+porta do P4 e capturar boot, transição, relógio e atualizações dos cards. Para
+rollback, restaurar `offline_dashboard_create` em `board_bringup.c`; nenhum
+estado, cache, credencial, partição ou firmware C6 é alterado.
+
+## ADR-027 — UI LVGL compartilhada entre design e firmware
+
+**Estado:** adotado em 2026-09-14.
+
+**Contexto:** a edição visual no EEZ Studio criou duas fontes de verdade, uma
+ponte extensa entre objetos gerados e o estado da aplicação e falhas recorrentes
+de geração, inicialização e manutenção das telas.
+
+**Decisão:** remover o projeto EEZ, seus arquivos gerados, imagens embutidas,
+scripts de regeneração e a ponte de runtime. As fontes LVGL geradas que contêm
+os glifos latinos e Material Symbols são preservadas em `firmware/main/ui/fonts`.
+As telas continuam como código LVGL próprio, criado e atualizado exclusivamente
+na task LVGL e alimentado pela projeção de `AppState`. Tokens, estilos,
+componentes e telas ficam em `firmware/main/ui/core` e
+`firmware/main/ui/screens`; o firmware os compila diretamente. O controlador
+`product_ui` transforma estado em conteúdo, sem repetir layout. `design/` fica
+restrito a mockups, imagens e outras referências visuais.
+
+**Consequências:** o build do firmware deixa de depender do EEZ Studio e não
+incorpora mais a imagem de fundo gerada. O dashboard LVGL direto volta a ser a
+tela ativa. As regras de concorrência, três framebuffers, `TRIPLE_PARTIAL`,
+rotação, serviços e persistência permanecem iguais.
+
+**Validação/rollback:** executar build P4, gravar pela porta do P4 e confirmar no
+boot a mensagem `Direct LVGL UI active`. O histórico das validações antigas do
+EEZ permanece em `docs/BRINGUP-EVIDENCE.md` apenas como evidência histórica.
+
+## ADR-026 — Wizard inicial com perfil sem segredo
+
+**Estado:** infraestrutura de serviço preservada; interface EEZ removida pela
+ADR-027 em 2026-09-14.
+
+**Contexto:** o primeiro uso precisa coletar rede, fuso e formato de hora antes
+da Home, sem tornar uma senha WPA2 parte do estado da aplicação ou da
+persistência normal.
+
+**Decisão:** o wizard possui etapas Wi-Fi, senha, hora e resumo. A senha
+permanece somente nos buffers internos do `provisioning_service`, é apagada
+depois do envio ao executor de conectividade e não é copiada para widgets,
+`AppState`, eventos ou logs. O `FlashCoordinator` persiste em duas gerações
+somente o perfil não secreto: conclusão, formato 24 h e índice de fuso. O
+produto pode concluir o wizard offline. Reconexão automática após reboot com
+WPA2 permanece bloqueada até existir um cofre de credenciais revisado, com
+proteção criptográfica e gate próprio.
+
+**Consequências:** a futura UI LVGL direta poderá consumir os serviços de
+onboarding. NVS continua acessada exclusivamente pelo coordenador, em uma
+requisição de fila limitada.
+
+**Validação/rollback:** os serviços permanecem cobertos pelo build P4. A UI do
+wizard deverá receber validação própria quando for reimplementada sem EEZ.
+
+## ADR-028 — Acionamento OTA P4 de laboratório e saúde antes do display
+
+**Estado:** implementado em 2026-09-15; ciclo HTTPS e bancada OTA ainda abertos.
+
+**Decisão:** `OTA_STATUS`, `OTA_PREFLIGHT` e `OTA_APPLY` passam pela janela
+USB de manutenção existente. Host, três URLs e chave pública RSA-3072 são
+imutáveis na build, por header gerado com `configure_p4_development_ota.py`;
+sem esse header a aplicação/preflight devolve `ESP_ERR_NOT_SUPPORTED`.
+Não receber URL, chave ou credencial pelo comando. O pacote de laboratório
+expõe somente imagem, manifesto e assinatura em `public/`; chave privada e
+DER ficam fora dessa raiz de publicação. Nenhuma dependência/Kconfig muda.
+
+O worker HTTPS confere novamente versão C6, revisão P4, tamanho do slot,
+security version e estado VALID da aplicação atual antes da admissão.
+RPC v2/SW_AGGR continuam sendo o perfil de bancada fixado, não uma atestação
+de hash/layout C6. A geração persistida é incorporada ao journal recalculando
+seu CRC antes da seleção. Erases P4 passam a ser incrementais pela API IDF.
+
+O coordenador e o supervisor iniciam antes do display. Um timer da própria
+task LVGL sinaliza progresso também na tela estática, mantendo o primeiro
+render como condição separada. Enfileirar confirmação não significa sucesso:
+o supervisor observa o estado real de otadata. Falha de confirmação conduz ao
+deadline; o coordenador revalida o fallback antes de invalidar o candidato.
+Se o coordenador não responde, registrar recovery bloqueado em até 65 s sem
+inventar recuperação concluída. Esse caso ainda exige implementação/ensaio
+de recuperação local antes de G5.
+
+**Limites:** o primeiro slot serial sem estado VALID precisa ser qualificado
+como fallback antes de OTA. Journal pós-corte, falha tardia após VALID,
+manutenção visual durante OTA e recuperação conjunta C6 seguem gates abertos.
+Os testes host usam falhas determinísticas; não substituem ciclos na placa.
+
+## ADR-029 — CredentialVault protegido para Wi-Fi
+
+**Estado:** implementado; ativação física de segurança e validação de reboot
+pendentes.
+
+**Contexto:** a credencial WPA2 precisa sobreviver a reboot sem virar dado de
+UI, log, evento ou armazenamento implícito do driver. Salvar em NVS comum não
+protege a senha diante de acesso físico e não atende ao produto.
+
+**Decisão:** `CredentialVault` preserva `WIFI_STORAGE_RAM` no driver e grava
+somente pela fila do `FlashCoordinator`, após 30 s contínuos com IP. O vault
+mantém duas gerações CRC no namespace `np2_credentials` e restaura apenas para
+a mailbox privada da conectividade no boot. `FORGET` remove as duas gerações;
+uma tentativa de troca rejeitada descarta só o candidato e preserva a última
+rede confirmada. Não existe getter para UI, `AppState`,
+eventos ou USB; os buffers temporários são zeroizados.
+
+Na build de produção, o vault recusa ler, gravar ou inicializar uma chave
+enquanto a imagem não foi compilada com `CONFIG_NVS_ENCRYPTION=y` e o P4 não
+reporta Flash Encryption ativa. A inicialização usa `nvs_flash_init()`,
+permitindo ao IDF carregar a chave por unidade na partição `nvs_keys` e abrir
+NVS de forma cifrada. A partição de chaves deve ter flag `encrypted` no perfil
+de produção. Para a unidade desbloqueada de desenvolvimento, a opção CMake
+explícita `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION` mantém a mesma política
+de cópia e CRC na NVS local; ela não é perfil de produção.
+
+**Ativação:** Secure Boot RSA, Flash Encryption e NVS Encryption devem ser
+ensaiados primeiro numa placa dedicada, depois de fechar os gates de OTA e
+recovery. A queima de eFuses exige autorização humana explícita e não é feita
+por esta mudança. Até essa ativação, o painel continua associando apenas na
+sessão atual, em vez de gravar uma senha sem proteção.
+O procedimento, perfil exigido e critérios de bancada estão em
+`CREDENTIAL-VAULT-PRODUCTION.md`.
+
+## ADR-030 — Sincronização automática e serializada de hora, clima e Bitcoin
+
+**Estado:** implementado em 2026-09-22; requer observação física contínua.
+
+**Contexto:** o painel já possuía `TimeService`, adapters Open-Meteo e
+CoinGecko, cache offline com duas gerações e um executor HTTPS único. Porém,
+o refresh era disparado apenas por manutenção. Com a estação WPA2 persistente
+em desenvolvimento, a Home continuava exibindo valores indisponíveis até uma
+intervenção manual, contrariando o fluxo de produto `IP → NTP → HTTPS →
+providers → cache`.
+
+**Decisão:** o `network_validation_service` agenda o refresh do snapshot ao
+receber uma estação online e a cada 30 minutos enquanto ela permanecer com IP.
+Cada rodada resolve DNS, sincroniza NTP pelo `TimeService`, consulta
+sequencialmente clima de Brasília e BTC/USD e envia o snapshot validado ao
+`FlashCoordinator`. Qualquer falha espera dois minutos antes da próxima
+tentativa; sem IP não há DNS, NTP ou HTTPS. Pedidos de diagnóstico e OTA
+continuam compartilhando o mesmo worker, portanto há no máximo um handshake
+TLS em voo. A política de escrita do cache continua limitada pelo coordenador
+a uma geração a cada 30 minutos.
+
+**Consequências:** `AppState` e a UI permanecem consumidores passivos: o
+relógio usa apenas a hora confiável, e os cards recebem somente o snapshot
+sanitizado e seu estado live/stale. URLs, respostas HTTP, JSON e credenciais
+não entram em UI, eventos ou logs de produto. Uma falha preserva o último dado
+válido como stale; não bloqueia a Home nem reinicia o P4/C6.
+
+**Validação/rollback:** build limpo P4, flash somente da app e boot em rede
+WPA2 devem confirmar NTP, os dois providers e o cache sem reinício ou perda de
+responsividade. Reverter o agendamento no `network_validation_service` volta
+ao refresh manual sem alterar a estrutura do cache, a NVS, o C6 ou eFuses.
+
+## ADR-031 — Fontes da UI pertencem ao firmware
+
+**Estado:** implementado em 2026-09-22.
+
+**Contexto:** as fontes C da interface estavam em `design/v5`, embora fossem
+compiladas pelo firmware. Isso confundia referências visuais com código de
+produção e dificultava localizar a UI que executa no painel.
+
+**Decisão:** os fontes executáveis da UI ficam em `firmware/main/ui`: tokens,
+estilos e componentes em `core/`; as telas e o controlador em `screens/`; e
+as fontes tipográficas em `fonts/`. `firmware/main/CMakeLists.txt` compila
+somente esses caminhos. `design/` contém mockups, imagens, scripts de geração
+de referência e exports visuais, sem participação no build do firmware.
+
+**Consequências:** a organização não altera o desenho das telas, o fluxo de
+`AppState` ou a regra de acesso exclusivo da task LVGL. Mudanças de UI de
+produto passam a ser feitas sob `firmware/main/ui`; arquivos em `design/`
+continuam úteis para comparação visual, mas não atualizam o painel.
+
+**Validação/rollback:** build limpo e flash P4 verificam que os novos caminhos
+de compilação preservam o boot e a Home. Reverter este commit restaura os
+caminhos anteriores sem mudar contratos, dados persistidos ou o C6.
+
+## ADR-032 — Fonte visual XML para o LVGL Editor oficial
+
+**Estado:** preparado em 2026-09-22; exportação e adoção no runtime pendentes.
+
+**Contexto:** a UI compilada do NovaPanel é escrita diretamente em C/LVGL 9.5,
+o que não permitia editar visualmente as telas no VS Code. O projeto precisa
+adotar o formato oficial XML sem introduzir outro editor ou esconder a UI em
+`design/`.
+
+**Decisão:** `firmware/main/ui/lvgl` é o projeto do LVGL Editor: `project.xml`
+fixa o display de 1024 × 600 no esquema compatível com a extensão instalada;
+`globals.xml` contém tokens e
+subjects; e `screens/` contém Boot e Home. `NovaPanel-UI-LVGL.code-workspace` abre essa
+pasta como raiz adicional no VS Code, condição requerida pela extensão
+`LVGL.lvgl-editor`. A versão C atual em `firmware/main/ui/core` e `screens`
+continua ativa até a exportação gerar C revisável.
+
+**Consequências:** editar XML no editor oficial não modifica a placa por si só.
+Após cada exportação, os arquivos gerados entram em
+`firmware/main/ui/generated`, enquanto a ponte de `AppState` fica em arquivos
+não gerados. Só então o CMake passa a compilar a exportação, seguido de build,
+flash e captura de boot. Arquivos `*_gen.c` e `*_gen.h` nunca recebem lógica
+manual porque são substituídos pelo editor.
+
+**Validação/rollback:** os XMLs devem abrir no LVGL Editor e mostrar os dois
+alvos no preview. Enquanto a exportação não estiver integrada, o firmware em
+execução não muda; remover `firmware/main/ui/lvgl` e
+`NovaPanel-UI-LVGL.code-workspace`
+desfaz somente o ambiente visual.
+
+## ADR-033 — Cadência serial por domínio para clima, dólar e Bitcoin
+
+**Estado:** implementado e validado em build/flash/boot em 2026-09-23;
+continua pendente a observação do ciclo completo de cada provider com Wi-Fi
+configurado.
+
+**Contexto:** a ADR-030 atualizava o snapshot inteiro a cada 30 minutos. Isso
+mantinha um único handshake, mas atrasava BTC/USD e consultava clima mais vezes
+do que o uso do painel exige. A Home também exibia o dólar como indisponível.
+
+**Decisão:** o worker HTTPS mantém uma agenda portável de domínios vencidos e
+executa apenas um por vez: BTC/USD a cada 5 min, clima de Brasília a cada 2 h
+e USD/BRL a cada 24 h. O dólar usa a série diária 1 (venda/PTAX) do Banco
+Central do Brasil, sem token e com URL fixa. Falhas tentam novamente de forma
+independente após 2 min (BTC), 15 min (clima) ou 1 h (dólar). Quando mais de
+um domínio vence, o agendador alterna a escolha; nenhum DNS, NTP, TLS ou corpo
+HTTP de uma atualização se sobrepõe a outro. OTA e diagnósticos permanecem no
+mesmo worker e, portanto, também são exclusivos.
+
+O snapshot v2 acrescenta USD/BRL em ten-thousandths e é publicado por evento
+sanitizado para o `app_loop`. A UI passa a ver o resultado em RAM logo após
+cada provider, enquanto a gravação do snapshot agregado em LittleFS continua
+limitada globalmente a uma vez por 30 min. O decoder aceita o cache v1 como
+snapshot v2 sem dólar, preservando seu valor de fallback até a primeira escrita
+nova.
+
+**Consequências:** a hora é sincronizada no primeiro uso e no máximo a cada
+seis horas, em vez de uma vez por cotação BTC. A data exibida para PTAX é a
+hora da obtenção confiável da última taxa publicada; finais de semana e
+feriados preservam a última taxa, com stale após 36 h. O firmware não promete
+cotação de câmbio em tempo real. O cache de 30 min é deliberadamente mais
+conservador que a atualização em RAM para reduzir risco de flash/render.
+
+**Validação/rollback:** testes host cobrem parser BCB, codec v2 e a ordem/tempo
+do agendador. Build P4, flash pela porta do P4 e bancada devem confirmar a
+ordem serial, os três valores na Home, ausência de segundo TLS e UI responsiva
+durante pelo menos um ciclo de cada domínio. Reverter os módulos de agenda,
+provider BCB e schema v2 retorna ao snapshot clima/BTC da ADR-030; não altera
+C6, credenciais, partições ou eFuses.
+
+## ADR-034 — Retenção Wi-Fi como padrão do fluxo de desenvolvimento
+
+**Decisão:** `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION` passa a ter padrão
+`ON` no CMake do repositório. Assim, builds limpos, flash e monitor executados
+pelo assistente no P4 desbloqueado preservam a credencial de laboratório sem
+depender de um cache CMake anterior. O perfil de produção deve passar
+explicitamente `-DNP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=OFF` e atender os
+gates de NVS Encryption e Flash Encryption.
+
+**Motivo:** o fluxo real desta unidade é feito pelo assistente no VS Code,
+incluindo reconfiguração e `fullclean`; o padrão anterior `OFF` podia desativar
+silenciosamente a reassociação após um build novo. O custo aceito é que esta
+árvore não deve ser usada sem a flag de produção para uma imagem de campo. Só
+credenciais descartáveis de laboratório podem existir no P4 de desenvolvimento.
+
+## ADR-035 — Background meteorológico limitado ao card da Home
+
+**Decisão:** a Home volta a usar `np_scene` neutra e concentra a ambientação
+meteorológica no `weather_card` de 500 × 462 px. O card cria uma imagem RGB565
+fixa, um overlay escuro e os widgets existentes; a source é trocada no próprio
+widget, nunca com reconstrução da Home. A classificação Open-Meteo passa por
+`weather_condition_from_code()`, compartilhada pela descrição e pelos assets.
+O fallback de período é dia das 06:00 às 17:59 e noite no restante, isolado em
+`np_home_is_day()` para futura troca por sunrise/sunset.
+
+**Motivo:** uma imagem de tela inteira aumentava a área invalidada e misturava
+o estado climático com toda a cena. Manter 20 imagens opcionais em flash
+(dia/noite × 10 condições) conserva a leitura do texto, limita a atualização à
+região do card e não reserva RAM nem executa conversão/redimensionamento. Sem
+os binários finais, a imagem fica oculta e o card escuro continua funcional.
+
+**Consequências:** os 20 `.bin` RGB565 precisam ter exatamente 500 × 462 px.
+Vento, sensação, UV e Ibovespa permanecem indisponíveis até que seus contratos
+de dados sejam adicionados; a UI não sintetiza valores. A mudança é reversível
+removendo o mapeador/asset opcional e restaurando o backdrop anterior, sem
+tocar em cache, rede, C6, credenciais ou eFuses.
+
+## ADR-036 — Backgrounds meteorológicos da Home no microSD
+
+**Estado:** implementado; uma captura inicial confirmou a coexistência de
+SDMMC, ESP-Hosted/Wi-Fi e HTTPS. O gate de estresse prolongado permanece
+pendente.
+
+**Contexto:** os vinte backgrounds RGB565 de 500 × 462 px somam 9,24 MiB e não
+caberiam na menor partição OTA de 8 MiB. Embuti-los reduziria a margem de OTA e
+subiria o consumo de flash sem melhorar a atualização visual. O hardware expõe
+um microSD em SDMMC separado, mas o plano exige provar que ele não interfere no
+Hosted/SDIO do C6 antes de torná-lo requisito de produto.
+
+**Decisão:** os arquivos ficam no cartão em `/sdcard/np2/weather/`, com os
+nomes `np_bg_day_*` e `np_bg_night_*`. `weather_asset_service` é o único dono
+da montagem e da leitura; usa o BSP da Waveshare, que mantém
+`format_if_mount_failed=false`. O `app_loop` apenas deposita na mailbox a hora
+e o `weather_code` já sanitizado. O worker resolve período e condição pelo
+catálogo comum, lê somente o arquivo selecionado em dois buffers RGB565 fixos
+em PSRAM (924.000 B) e publica um descritor para a projeção. A task LVGL não
+toca no SD: só troca a source do `lv_image` existente e invalida o card.
+Se o cache de clima e a seleção visual persistida existirem mas o NTP ainda não
+estiver confiável, o app_loop reutiliza o último período confirmado; sem essa
+seleção, preserva o card neutro. Quando a hora chega, a mesma rota troca
+somente o asset para o período real.
+O profile P4 habilita `CONFIG_FATFS_LFN_HEAP=y` com `CONFIG_FATFS_MAX_LFN=64`:
+sem LFN, o FATFS reduz esses nomes a aliases 8.3 e a seleção deixa de encontrar
+o arquivo original.
+
+**Consequências:** cartão ausente, FAT inválido, arquivo ausente ou tamanho
+divergente preservam o card escuro sem formatar, gravar ou bloquear a Home. Os
+arquivos-fonte são provisionados por `tools/copy_weather_assets_to_sd.ps1`;
+flash P4 não copia assets para o cartão. Cada mudança posterior de clima ou
+dia/noite reutiliza o worker e não recria widgets. A entrada definitiva em
+produto depende do ensaio simultâneo de Wi-Fi/HTTPS e leitura SDMMC previsto
+em `RESTART-HARDWARE-BRINGUP.md`; falha nesse ensaio exclui o visual do SD da
+release e conserva o fallback neutro.
+
+## ADR-037 — Seleção visual meteorológica persistida no cache offline
+
+**Decisão:** o snapshot offline v3 passa a guardar somente se o último visual
+meteorológico confirmado era dia ou noite. O `weather_code` permanece no mesmo
+snapshot e continua sendo a fonte para a condição. No boot sem hora confiável,
+a Home carrega essa seleção persistida; sem ela, conserva o card neutro. Depois
+de NTP, o `app_loop` calcula a seleção atual e pede somente a troca do asset.
+
+**Motivo:** usar um período diurno arbitrário no boot escondia o estado real do
+produto e podia apresentar uma cena incoerente. Persistir um enum de dois
+estados, em vez de bitmap ou segundo filesystem, preserva a experiência
+offline sem custos de RAM/flash relevantes e sem I/O da UI.
+
+**Compatibilidade e limites:** o decoder continua aceitando snapshots v1 e v2;
+eles não têm seleção visual e, sem NTP, mantêm o fallback neutro até a próxima
+atualização válida promovê-los a v3. A seleção é atualizada pelo worker de rede
+somente após hora válida e passa pelo `FlashCoordinator`; não há escrita em
+callback LVGL nem por toque.
+
+## ADR-038 — Ícones Meteocons animados no card de clima
+
+**Decisão:** os 20 SVGs fornecidos em `design/clima/` são a fonte versionável.
+Uma ferramenta local usa o mecanismo SMIL de Chrome/Edge para amostrar cada
+animação em 96 × 96 px e 8 fps. Cada ícone vira um único pacote `NPWI` v1 com
+quadros BGRA8888 e CRC32, provisionado em `/sdcard/np2/weather/icons/`.
+O worker SD existente carrega e valida somente o pacote selecionado em um dos
+dois slots de PSRAM; a task LVGL apenas alterna os descritores no `lv_animimg`.
+O mapeamento segue `weather_condition` e a seleção persistida de dia/noite.
+
+**Motivo e limites:** a placa não precisa de rede nem de interpretador SVG para
+animar, e os quadros são gerados sem edição manual. Os 20 arquivos ocupam
+aproximadamente 26 MiB no cartão; dois slots reservam até 3,4 MiB de PSRAM
+quando os pacotes estão presentes. O visual conserva fallback estático se o
+cartão, o pacote ou sua validação falhar. O uso de PSRAM e o render em 8 fps
+precisam de medição em bancada junto com SDMMC, Wi-Fi e HTTPS antes de aceite.
+
+## ADR-039 — Detalhes da Home no snapshot offline v4
+
+**Decisão:** promover o contrato offline para v4 com disponibilidade explícita
+para sensação térmica, vento, UV, máxima/mínima e volume em USD do BTC, e
+variação diária da PTAX. Open-Meteo fornece os três detalhes de clima no mesmo
+request; CoinGecko `/coins/markets` fornece o resumo de 24 h do Bitcoin; o BCB
+SGS 1 fornece as duas últimas PTAX, cuja variação é calculada em pontos-base.
+Todos permanecem no executor HTTPS único e no cache de duas gerações. A Home
+identifica o dólar como PTAX. O Ibovespa permanece indisponível a pedido do
+responsável, sem cotação sintética ou token embutido.
+
+**Compatibilidade:** o codec v4 preserva os primeiros 34 bytes do payload v3,
+aceita registros v1 a v3 e promove os campos novos como indisponíveis até uma
+resposta válida. O payload v4 tem 169 bytes fixos, com limites e CRC do cache
+existente. A migração não formata armazenamento nem escreve a partir da UI.

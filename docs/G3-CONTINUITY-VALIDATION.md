@@ -58,7 +58,7 @@ associado quando aplicável. Repetir a rodada se a instrumentação falhar.
 | C6 reiniciado | Acionar reset54 conforme procedimento da placa durante tráfego e render; repetir até o limite. | Display e P4 não reiniciam; máximo três ciclos/10 min e cooldown observado. |
 | C6 ausente/travado | Inibir resposta C6 antes do boot e durante recuperação. | Supervisor registra deadline Hosted de 30 s; UI permanece responsiva; não há WDT mascarado. |
 | Backend lento/TLS inválido | Quando existir executor HTTPS, atrasar resposta e forçar certificado/hostname inválido e corpo acima do limite. | Deadline total, uma conexão global, cache local preservado e nenhum retry de falha de autenticidade. |
-| Reboot e retenção | Só após persistência aprovada: reboot frio/quente, corte de AP e retorno. | Credencial anterior só muda após 30 s contínuos de IP e commit íntegro; recuperação automática sem vazamento. |
+| Reboot e retenção | Após ativar CredentialVault protegido, reboot frio/quente, corte de AP e retorno. | Credencial só muda após 30 s contínuos de IP e commit íntegro; recuperação automática sem vazamento e com NVS/Flash Encryption ativas. |
 
 ## Procedimento inicial sem senha
 

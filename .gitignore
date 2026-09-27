@@ -11,9 +11,11 @@ managed_components/
 .vscode/*.log
 firmware/.vscode/
 *.code-workspace
+!NovaPanel-UI-LVGL.code-workspace
 
 # Local C/C++ language-server cache
 **/.cache/
+__pycache__/
 
 # Generated compilation metadata outside the normal build directory
 compile_commands.json
@@ -34,6 +36,8 @@ build.ninja
 *.pcapng
 logs/
 artifacts/
+design/clima/generated/
+design/clima/generated-160/
 keys/
 credentials/
 secrets/

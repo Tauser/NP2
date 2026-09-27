@@ -80,6 +80,13 @@ artefatos de release e logs de dispositivo não entram no Git.
    fontes do IDF manualmente fora de patch rastreado.
 3. Faça build limpo para o target afetado. Verifique tamanho, tabela de
    partições, configuração efetiva e warnings relevantes.
+   Por preferência explícita do responsável, alterações de firmware devem
+   ser compiladas e gravadas na placa como parte da entrega, sem nova
+   confirmação a cada alteração. Capture o boot e registre o resultado.
+   Se build, porta ou gate técnico impedir o flash, registre o impedimento;
+   não declare a gravação concluída. Alterações apenas documentais não
+   exigem regravação. C6 continua exclusivamente por Slave OTA via SDIO;
+   esta preferência não autoriza eFuses nem dispensa os gates específicos.
 4. Alterações em display, flash, C6/SDIO, rede, NTP/TLS, OTA, energia ou
    segurança exigem evidência de bancada com data, placa/BOM, commit, hashes P4
    e C6, configuração efetiva, comandos e logs relevantes.

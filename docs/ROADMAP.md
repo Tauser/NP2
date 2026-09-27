@@ -34,7 +34,7 @@ Regras de execução em todas as fases:
 | 2 | G2 — render e flash | Complete — scoped close | Touch, render, NVS e LittleFS sob carga passaram na placa com XiP em PSRAM. |
 | 3 | G3 — conectividade | Complete — scoped close | Hosted/C6 recuperável, Wi-Fi, tempo e HTTPS único operaram sem interromper UI no escopo desta unidade. |
 | 4 | G4 — dados offline | Complete — scoped close | Cache, cortes, corrupção, quota e dados locais após reboot foram validados nesta unidade. |
-| 5 | G5 — OTA recuperável | Ready | Atualização P4/C6 assinada, rollback e recovery comprovados. |
+| 5 | G5 — OTA recuperável | In progress | Atualização P4/C6 assinada, rollback e recovery comprovados. |
 | 6 | G6 — qualificação | Blocked by G0–G5 | Soak, térmica, energia, falhas e desempenho em unidades de amostra. |
 | 7 | G7 — produção | Blocked by G6 | Segurança de produção, fábrica, assistência e rollout operacional. |
 
@@ -213,8 +213,11 @@ e [`G3-CONTINUITY-VALIDATION.md`](G3-CONTINUITY-VALIDATION.md).
 - Provisionamento por touch e canal USB de serviço restrito; senha por mailbox
   privada e sem logs.
 - Usar, primeiro, a bridge USB física sem senha (`OPEN <ssid>`/`FORGET`) para
-  associação, DHCP e AP-off/AP-on; o caminho WPA e qualquer retenção continuam
-  bloqueados até desenho de segredo e persistência aprovados.
+  associação, DHCP e AP-off/AP-on. WPA2 por toque permanece privado. A
+  retenção após reboot passa somente pelo `CredentialVault` protegido da
+  ADR-029; antes de NVS Encryption e Flash Encryption ativas, a senha não é
+  gravada. A ativação definitiva segue
+  `docs/CREDENTIAL-VAULT-PRODUCTION.md`.
 - NTP antes de TLS; executor global com no máximo um handshake/HTTPS em voo.
 - Diagnóstico de AP ausente, senha inválida, DHCP/DNS travados, C6 resetado e
   servidor lento.
@@ -300,6 +303,16 @@ qualificação de release: repetição multiunidade, logs brutos completos, test
 de servidor lento/excesso e fault injection pertencem à campanha G6.
 
 ## Fase 5 — Atualização recuperável
+
+**Estado:** In progress. O caminho P4 de laboratório reúne manifesto canônico,
+RSA-PSS, hash incremental, journal, download HTTPS serializado, escrita no
+slot inativo e confirmação local de boot. Ele é exposto somente por comando de
+manutenção explicitamente armado e só quando a build recebe host, URLs e chave
+pública imutáveis. Em 2026-09-15 o P4 foi compilado e gravado com esse caminho
+desabilitado por padrão; backup do slot, tabela e `otadata` foram verificados.
+Ainda faltam o ciclo HTTPS físico, rollback/cortes e toda a atualização/recovery
+do C6. O plano e a matriz de bancada estão em
+[`G5-VALIDATION.md`](G5-VALIDATION.md); decisões ADR-022 e ADR-028.
 
 **Entrada:** G2, G3 e G4 fechados. Não ativar eFuses nesta fase sem autorização
 humana separada.

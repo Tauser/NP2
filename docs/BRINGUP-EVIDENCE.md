@@ -1778,3 +1778,1183 @@ cortes de energia; esses gates continuam pendentes.
   anexado nesta interação. Ela fecha G4 com escopo limitado a esta unidade;
   qualificação multiunidade, fault injection e campanhas longas continuam em
   G6.
+
+## 2026-09-12 — G5, políticas portáveis e build P4 inicial
+
+- Base Git: `e66001982f2c9f328f7d26bd45b14133a293aa37`, mais alterações
+  locais deste incremento (`update_policy.c/.h`, entrada CMake, teste host e
+  documentação ADR-022/G5). Evidência exclusivamente de software, sem flash
+  ou nova observação física da unidade.
+- `tools/run_update_policy_host_test.ps1` passou com GCC MSYS2 15.2.0,
+  C11, `-O2 -Wall -Wextra -Werror -pedantic`. Casos: metadados
+  incompatíveis/limites, app pendente/ocupada, recusa de troca C6/bootloader/
+  partições, saúde por 15 s, falta de progresso, observação perdida,
+  timestamps inválidos, deadline 60 s e fallback ausente.
+- Build limpo em diretório novo com ESP-IDF 5.5.4, target explícito P4:
+  `idf.py -B build/g5-policy-20260912 -D SDKCONFIG=build/g5-policy-20260912/sdkconfig -D IDF_TARGET=esp32p4 build`.
+  As 2096 etapas passaram, incluindo compilação de `update_policy.c`; nenhum
+  warning de compilação foi encontrado no log. `idf.py -B
+  build/g5-policy-20260912 size` também passou.
+- App `0x175100` B, slot OTA `0x800000`, livre `0x68af00` B (82%).
+  Bootloader `0x5a50` B, livre `0x85b0` B. DIRAM estática no relatório:
+  223.394 B; isto não mede heap/pilhas em runtime. A política não possui
+  consumidor no app, portanto pode ser removida do link por garbage collection.
+- SHA-256 P4:
+  `DBCF41EA7E15B782B2A42831B93007CAA80A770838F903B5817B253D98CE2DDF`.
+  SHA-256 sdkconfig:
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+  SHA-256 tabela gerada:
+  `9AB122C32036A53AA7F0DCB9422DCF89F007C15C5DEE5467101FD3779F4406A6`.
+- Configuração efetiva preserva P4 revisão mínima 100, flash 32 MiB,
+  XiP experimental em PSRAM, três FB, TLS interno, reset C6 ativo baixo e
+  rollback habilitado. Auto-suspend, ESP_HOST_WIFI, reinício P4 por falha
+  Hosted, Secure Boot, Flash Encryption e anti-rollback permanecem desligados.
+- Logs locais ignorados: `firmware/build/g5-policy-20260912-build.log` e
+  `firmware/build/g5-policy-20260912-size.log`. C6 não foi compilado ou
+  regravado; seu binário instalado/hash permanece pendência de inventário.
+  A inspeção do exemplo C6 e os próximos passos estão em `G5-VALIDATION.md`.
+- G5 continua aberto: não há assinatura, streaming, journal, confirmação
+  real de slot ou ensaio de rollback/cortes neste incremento. Nenhum resultado
+  acima comprova OTA recuperável nem promove XiP a baseline de produção.
+
+## 2026-09-12 — G5, flash P4 e captura de boot
+
+- Por instrução explícita do responsável, build e flash passam a compor a
+  entrega de alterações de firmware, conforme `AGENTS.md`. O incremento G5
+  acima foi gravado na mesma unidade pela COM8, identificada pelo esptool
+  como ESP32-P4 revisão v1.3, aproximadamente às 23:50–23:52 (UTC−03).
+- Comando: `idf.py -B build/g5-policy-20260912 -D IDF_TARGET=esp32p4 -p COM8 flash`.
+  O comando verificou o build e gravou bootloader em `0x2000`, app em
+  `0x20000`, tabela em `0x10000` e otadata em `0x1b000`, com verificação
+  de hash de cada bloco e hard reset via RTS. Não gravou NVS, storage, C6
+  ou eFuses. Isso é flash de desenvolvimento, não ciclo aplicar/reverter OTA.
+- SHA-256 da app, confirmado antes/depois:
+  `DBCF41EA7E15B782B2A42831B93007CAA80A770838F903B5817B253D98CE2DDF`.
+  Base Git, configuração e tabela são as registradas no build anterior.
+- Monitor oficial `esp_idf_monitor` 1.10.0: COM8, 115200, target `esp32p4`,
+  ELF `build/g5-policy-20260912/np2_p4.elf`, captura limitada a 30 s, com
+  reset inicial USB/UART. O processo criado para a captura foi encerrado ao
+  final e a porta liberada.
+- Boot observado: flash 32 MiB, PSRAM 32 MiB, app `e660019-dirty`, EK79007,
+  GT911, LVGL e dashboard RGB565/180°/TRIPLE_PARTIAL/3 FB iniciados;
+  backlight a 60% em 1724 ms e app pronta em 1764 ms. Hosted confirmou
+  C6 3.0.6 pareado, RPC v2 e SW_AGGR; scan sem credenciais concluiu em
+  6084 ms. Nenhum panic/WDT observado na janela capturada.
+- Avisos preservados: adapter sem `on_frame_buf_complete`, reconhecimento
+  de gestos LVGL desabilitado e reset C6 por GPIO54 na inicialização.
+  O monitor também tentou decodificar os PCs salvos do reset com prefixo
+  default Xtensa indisponível; é erro de ferramenta de decodificação, sem
+  interrupção da captura serial. Futuras capturas devem passar explicitamente
+  o prefixo RISC-V da toolchain. Não houve inspeção visual/touch nesta captura.
+- Logs locais ignorados: `firmware/build/g5-policy-20260912-flash.log` e
+  `firmware/build/g5-policy-20260912-boot.log`. O C6 não foi regravado e seu
+  hash instalado permanece pendente. G5 continua aberto, com a política
+  portável ainda sem consumidor em runtime.
+
+## 2026-09-13 — G5, reprodução C6 e auditoria do patch SDIO
+
+- Base de software: ESP-IDF 5.5.4 e Hosted 3.0.6, hash de componente
+  `1b1c2aa8f82e0826950ec92ff16fd8f327abd2de6c8a3899301ad8cfb4747879`.
+  A recipe versionada em `coprocessor/` resolveu seu próprio lock C6 e não
+  duplicou o componente Hosted.
+- Auditoria de patch: a referência da tag oficial IDF 5.5.4 teve SHA-256
+  `32041DCBBD0E1F4DB26AF901C68A3E0804B5D01142B291314C5016CA0EA0A6AA`.
+  O SDK local tinha SHA-256 bruto
+  `1B04D1B8958BAE7B3AA9C5927CF4BD23C899A11036CE907F993F0553AAE7BF53`,
+  correspondente ao arquivo original mais a única alteração oficial da guarda
+  SDIO. `eh.py patch-idf --idf-path C:\esp\v5.5.4\esp-idf` foi chamado duas
+  vezes e não modificou o arquivo; o patch e o relatório estão em
+  `coprocessor/patches/`.
+- Dois builds limpos C6 em diretórios distintos, `c6-repro-det-a-20260913` e
+  `c6-repro-det-b-20260913`, target `esp32c6`, passaram sem warnings de
+  compilação identificados. App `eh_cp_ota_coprocessor_ota.bin`: 1.108.176 B,
+  SHA-256 `CFEDFC093A1BC28E70042E659D3C5274AA27FEFD125C429B014E5B9AC76CB136`.
+  Bootloader e tabela também tiveram hashes iguais nas duas execuções. A app
+  cabe nos slots C6 `ota_0/ota_1` de 1.835.008 B e no staging P4 de 2 MiB.
+- Configuração/tabela efetivas: Hosted/RPC v2/Wi-Fi/SDIO SW_AGGR ativos;
+  Secure Boot, Flash Encryption, anti-rollback, rollback C6, Bluetooth e
+  auto-suspend inativos. A verificação e 11 testes negativos de recipe passaram.
+- Não houve flash C6 ou alteração no rádio. A COM8 chega ao P4; `idf.py flash`
+  deste projeto não é rota autorizada. Slave OTA continua bloqueado até
+  inventário do bootloader/layout instalado, recovery autônomo e ensaio físico
+  de recuperação. Esta evidência não fecha G5 nem declara a imagem recuperável.
+
+## 2026-09-13 — G5, manifesto canônico e flash P4
+
+- `update_manifest.c/.h` adiciona parser de envelope canônico P4 de 104 B e
+  teste host. Ele aceita somente bytes exatos, campos reservados nulos, ID e
+  SHA-256 não nulos e perfil P4; recusa C6, bootloader, tabela ou flags
+  desconhecidas. Ainda não verifica RSA-PSS, hash de stream, key ID, download,
+  journal ou seleção de slot.
+- `run_update_manifest_host_test.ps1` e
+  `run_update_policy_host_test.ps1` passaram com GCC C11, `-Wall -Wextra
+  -Werror -pedantic`. O build limpo ESP-IDF 5.5.4 no diretório
+  `build/g5-manifest-20260913`, target `esp32p4`, produziu app `0x175100` B;
+  o menor slot OTA de `0x800000` B manteve `0x68af00` B livres. Bootloader:
+  `0x5a50` B, com `0x85b0` B livres. O `idf.py size` reportou DIRAM estática
+  de 223.394 B e apenas o aviso conhecido do parser de mapa.
+- SHA-256 P4: `C5D9783155FE3203134FD55CBF3FF967D9F9ECDACC48F65281E9C014AAEC099A`;
+  sdkconfig: `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`;
+  tabela: `9AB122C32036A53AA7F0DCB9422DCF89F007C15C5DEE5467101FD3779F4406A6`.
+  A configuração efetiva preservou P4, flash 32 MiB, rollback habilitado,
+  Hosted, alvo C6 e reset SDIO ativo baixo; `ESP_HOST_WIFI` e auto-suspend
+  continuaram desligados.
+- Flash em COM8 concluiu com hash verificado para bootloader (`0x2000`), app
+  (`0x20000`), tabela (`0x10000`) e OTA data (`0x1b000`); esptool identificou
+  ESP32-P4 v1.3. NVS, `storage`, staging `c6_ota`, C6 e eFuses não foram
+  gravados. A captura de boot de 30 s confirmou 32 MiB de flash/PSRAM,
+  display EK79007, GT911, dashboard RGB565/180°/TRIPLE_PARTIAL/3 FB, backlight
+  e app local prontos; o C6 negociou Hosted 3.0.6, RPC v2 e SW_AGGR, e o scan
+  sem credenciais encontrou 48 APs. Não houve panic ou WDT na janela.
+- A inspeção da API Hosted confirma que o descritor público do C6 devolve só
+  a versão 3.0.6; ele não prova SHA, bootloader ou tabela instalada. Nenhuma
+  alteração privada foi aplicada ao componente. O C6 permanece sem flash e a
+  OTA conjunta permanece bloqueada pelos gates físicos.
+
+## 2026-09-13 — G5, RSA-PSS destacada e flash P4
+
+- `update_signature.c/.h` verifica, sem I/O, assinatura destacada sobre os
+  bytes canônicos já validados: RSA-3072, PSS, SHA-256, MGF1 SHA-256 e salt de
+  32 B. O envelope contém key ID e assinatura de 384 B; a chave pública DER é
+  fornecida por um adapter futuro. Não há chave privada, keyring de produção,
+  download, hash de stream, journal ou ativação neste corte.
+- `run_update_signature_vector_test.ps1` usou vetor de chave efêmera fora do
+  repositório. OpenSSL aceitou a assinatura original e recusou o manifesto
+  alterado em um byte. A chave privada de teste foi removida após o ensaio.
+  Os testes host existentes de manifesto e política também passaram.
+- Build limpo ESP-IDF 5.5.4, target `esp32p4`, diretório
+  `build/g5-signature-20260913`: 2.098 etapas, app `0x175100` B, menor slot
+  OTA livre `0x68af00` B (82%), bootloader livre `0x85b0` B. SHA-256 P4:
+  `41AED97DB17C7C825C209A2B8B0819C6B124330F8AA8536350DE31BC287B2862`;
+  sdkconfig e tabela permaneceram respectivamente
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A` e
+  `9AB122C32036A53AA7F0DCB9422DCF89F007C15C5DEE5467101FD3779F4406A6`.
+- Flash COM8 gravou e verificou hash de bootloader, app, tabela e OTA data;
+  esptool identificou P4 v1.3. NVS, `storage`, `c6_ota`, C6 e eFuses ficaram
+  intocados. Na captura de 30 s, o display/touch e o dashboard ficaram prontos
+  em 1.764 ms; C6 negociou Hosted 3.0.6, RPC v2 e SW_AGGR em 3.184 ms, e o
+  scan sem credenciais encontrou 32 APs em 6.084 ms. Nenhum panic/WDT ocorreu.
+
+## 2026-09-13 — G5, hash streaming da imagem e flash P4
+
+- `update_image_hash.c/.h` introduz a sessão SHA-256 incremental de imagem:
+  estado de digest apenas, blocos de no máximo 4 KiB, contagem exata do tamanho
+  assinado e comparação final do digest. Não possui rede, escrita de slot,
+  journal ou ativação.
+- `run_update_image_hash_vector_test.ps1` passou para o payload fixo dividido
+  em blocos de 7 B, com SHA-256
+  `2f283ef73d59a91a41236708b6764fe0058e6c18c8cb4bff48165650ba0e28e7`.
+  Os vetores de assinatura, manifesto e política também passaram. O teste de
+  hash é independente; a sessão de firmware foi compilada para P4 e ainda não
+  recebe um stream de produção.
+- Build ESP-IDF 5.5.4, target `esp32p4`, diretório
+  `build/g5-image-hash-20260913`: app `0x175100` B. SHA-256 P4:
+  `8E6545B56737440CF00EA694F8F9C9A56FE2931228809A86559ABE27E9632CCE`;
+  sdkconfig: `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`;
+  tabela: `9AB122C32036A53AA7F0DCB9422DCF89F007C15C5DEE5467101FD3779F4406A6`.
+- O comando de flash P4 pela COM8 terminou antes da captura. O boot posterior
+  identificou ESP32-P4 v1.3 e a app compilada às 08:06:50; em 1.764 ms o
+  display EK79007, GT911 e dashboard RGB565/180°/TRIPLE_PARTIAL/3 FB ficaram
+  prontos. Em 3.184 ms o C6 negociou Hosted 3.0.6, RPC v2 e SW_AGGR; o scan
+  sem credenciais encontrou 50 APs. Não houve panic ou WDT na captura de 30 s.
+  C6, NVS, `storage`, `c6_ota` e eFuses não foram gravados.
+
+## 2026-09-13 — G5, journal OTA e anti-replay persistíveis
+
+- `update_journal.c/.h` adiciona registro versionado com CRC, identidade do
+  manifesto e estados P4. O `FlashCoordinator` é o único escritor: alterna
+  `np2_update/ota0` e `ota1`, escolhe a maior geração válida e publica seu
+  resultado no status após o boot. Apenas o estado `ACCEPTED` vira registro
+  anti-replay.
+- Os testes host de journal e anti-replay passaram. Build/flash P4 foram
+  repetidos; a última app gravada tem SHA-256
+  `6AE309B352FA24D34CE328C1944C8F1B0B4EF6D0635213F20411C8B31CC7596A`.
+  Esptool verificou bootloader, app, tabela e OTA data. Não houve acionamento
+  do journal neste flash e portanto NVS, `storage`, C6 e eFuses ficaram sem
+  escrita de produto.
+- Não há release assinada, chave pública de produção ou origem HTTPS OTA no
+  repositório. Esta evidência não comprova staging, seleção de slot, rollback
+  nem recuperação OTA; C6 continua bloqueado pelos gates físicos.
+
+## 2026-09-13 — G5, writer P4 e journal sequencial
+
+- O writer P4 só abre o slot OTA inativo, escreve bytes que participam do
+  hash SHA-256 streaming e termina por `esp_ota_end`. A seleção do slot exige
+  writer concluído e journal CRC-válido em `P4_PENDING` com geração persistida;
+  download parcial, hash divergente e journal inválido não podem selecioná-lo.
+  `FlashCoordinator` alterna `np2_update/ota0` e `ota1`, rejeita corrupção,
+  ambiguidade de geração e transições fora da sequência.
+- Todos os vetores host G5 passaram, incluindo o percurso
+  `P4_STAGED → P4_PENDING → ACCEPTED → IDLE` e uma nova release após `IDLE`.
+  O teste de assinatura registra uma rejeição OpenSSL para manifesto alterado,
+  que é o caso negativo esperado.
+- Build ESP-IDF 5.5.4 para `esp32p4`, diretório
+  `build/g5-keyring-20260913`: app `0x175770` B, menor slot livre
+  `0x68a890` B (82%); bootloader `0x5a50` B, livre `0x85b0` B. SHA-256 P4:
+  `E4A66C99E0C2E7A45999A17D0D8F93B32ADAC92B4389402E4D3B5BDC36E3FE22`.
+  Flash COM8 verificou cada bloco e identificou ESP32-P4 v1.3. O boot posterior
+  confirmou 32 MiB flash/PSRAM, EK79007, GT911, dashboard
+  RGB565/180°/TRIPLE_PARTIAL/3 FB e Hosted 3.0.6/RPC v2/SW_AGGR em 3.184 ms;
+  não houve panic/WDT na janela observada. C6, NVS de produto, `storage`,
+  `c6_ota` e eFuses não receberam escrita de produto.
+- Não havia release assinada na unidade. Nenhum slot OTA foi selecionado pelo
+  writer, e esta evidência não declara download, rollback ou recovery OTA
+  concluídos. C6 permanece bloqueado pelos gates físicos.
+
+## 2026-09-13 — G5, ativação P4 sob o FlashCoordinator
+
+- `esp_ota_set_boot_partition` saiu do writer. Somente o `FlashCoordinator`
+  enfileira a seleção e, na sua task serializada, confere que a partição é
+  `ota_0`/`ota_1` e que o journal recebido é idêntico à cópia NVS mais nova,
+  selada e em `P4_PENDING`. Não há ativação quando a cópia é ausente,
+  corrompida, divergente ou fora de sequência.
+- O build/flash ESP-IDF 5.5.4 em COM8 passou com app `0x1771c0` B, livre
+  `0x688e40` B no menor slot (82%) e SHA-256
+  `02753B3F92D47BDEABA8C984EA2B2286793815110566DE68D351D5B66F56F1EA`.
+  Esptool verificou bootloader, app, tabela e `otadata`. O boot posterior
+  confirmou P4 v1.3, 32 MiB flash/PSRAM, display/touch, dashboard e Hosted
+  C6 3.0.6 com RPC v2 e SW_AGGR; não houve panic/WDT observado. Não houve
+  transação OTA, escrita NVS de produto, gravação C6 ou ação sobre eFuses.
+
+## 2026-09-13 — G5, supervisor de confirmação P4
+
+- O supervisor inicia somente para `PENDING_VERIFY`; requer frame renderizado,
+  heartbeat do `app_loop` e coordenador de flash prontos por 15 s contínuos.
+  A confirmação e o rollback passam pela fila do `FlashCoordinator`; rollback
+  exige outro slot em estado `VALID`, e ausência de fallback entra em recovery
+  sem loop. O dashboard atualiza em 250 ms para fornecer o heartbeat de UI.
+- Teste host da política passou. Build/flash P4 ESP-IDF 5.5.4: app `0x178030` B,
+  livre `0x687fd0` B no menor slot OTA (82%), SHA-256
+  `D7145967C7B1407F9818E951E3D101F19EC98F0EFDC6A7DBBE86CF8DF9F39D59`.
+  Esptool verificou todos os blocos gravados. O boot posterior confirmou P4
+  v1.3, 32 MiB flash/PSRAM, display/touch, dashboard e C6 Hosted 3.0.6/RPC
+  v2/SW_AGGR; não houve panic/WDT. A imagem atual não estava pendente e não
+  exercitou confirmação, rollback nem alteração OTA; C6 e eFuses permaneceram
+  intocados.
+
+## 2026-09-13 — G5, preflight HTTPS OTA P4 de desenvolvimento
+
+- O pedido de preflight usa a task HTTPS já existente, mantendo no máximo uma
+  conexão TLS em voo. A política rejeita URL não-HTTPS, host não autorizado,
+  porta, query, fragmento, credenciais ou endpoints repetidos. Com DNS e NTP
+  válidos, baixa somente manifesto de 104 B e assinatura destacada de 388 B,
+  ambos com tamanho exato e orçamento total de 20 s. A URL da imagem é somente
+  validada; download, assinatura, admission, journal e escrita OTA continuam
+  desligados até uma configuração de desenvolvimento os fornecer de modo unido.
+- Todos os testes host G5 passaram; no teste de assinatura, a mensagem OpenSSL
+  para o manifesto adulterado é a rejeição negativa esperada. Build/flash
+  ESP-IDF 5.5.4 em COM8: app `0x1780b0` B, menor slot livre `0x687f50` B (82%),
+  SHA-256 `A0AE6D2CB566183F5234EF7EF6FD5D675A52D4C6D5E94246E98EDA72521A3120`.
+  Esptool verificou bootloader, app, tabela e `otadata`.
+- O boot posterior identificou P4 v1.3, 32 MiB flash/PSRAM, EK79007, GT911 e
+  dashboard RGB565/180°/TRIPLE_PARTIAL/3 FB. O C6 negociou Hosted 3.0.6, RPC v2
+  e SW_AGGR; o scan sem credenciais encontrou 45 APs. Não houve panic/WDT na
+  janela observada. NVS de produto, `storage`, `c6_ota`, C6 e eFuses não foram
+  escritos.
+
+## 2026-09-13 — UI, caracteres especiais em português
+
+- A fonte padrão anterior possuía ASCII, grau, marcador e ícones, mas não a
+  faixa Latin-1. Foi incluída uma fonte estática Montserrat 14 com ASCII,
+  Latin-1 e a pontuação usada pela interface, aplicada às telas de painel e
+  diagnóstico. Ela mantém fallback para a fonte padrão para símbolos LVGL e
+  não introduz carregamento ou rasterização dinâmica no caminho de render.
+- Build/flash ESP-IDF 5.5.4 em COM8: app `0x17b980` B, menor slot livre
+  `0x684680` B (81%), SHA-256
+  `E02B3591363B6C7A6FE157483A60B6237A5AF68B20701A635DA3FC80B0F23B60`.
+  Esptool verificou bootloader, app, tabela e `otadata`.
+- O boot posterior confirmou P4 v1.3, 32 MiB flash/PSRAM, display EK79007,
+  touch GT911 e dashboard. O C6 negociou Hosted 3.0.6, RPC v2 e SW_AGGR. Não
+  houve panic ou WDT na janela observada; C6 e eFuses não foram escritos.
+
+## 2026-09-13 — G5, executor OTA P4 de desenvolvimento
+
+- O executor HTTPS único agora une manifesto, assinatura destacada, keyring
+  público, admission, SHA-256 streaming, journal e escrita do slot inativo.
+  `update_p4_writer` não chama `esp_ota_*`; begin/write/end/abort/seleção
+  pertencem à task serializada do `FlashCoordinator`. A imagem só é selecionada
+  após hash, tamanho, `Content-Length` e journal `P4_PENDING` conferirem.
+- Os vetores host de manifesto, assinatura, hash, keyring, replay, journal,
+  recovery, política e endpoints HTTPS passaram. O build ESP-IDF 5.5.4 para
+  P4, `build/g5-keyring-20260913`, gerou app `0x17e740` B e SHA-256
+  `DE3612A2C215F45E1B82DD29D688B6D1549C2086455779B957733FE16B1EAF3D`.
+- O flash obrigatório em COM8 foi tentado duas vezes depois do build e falhou
+  antes de gravar por `PermissionError(13): Acesso negado`; a porta está
+  ocupada. Portanto não houve boot nem validação física desta revisão. Não
+  foram gravados NVS de produto, storage, C6, `c6_ota` ou eFuses.
+
+## 2026-09-13 — Integração EEZ Boot/Home
+
+- Placa/BOM observada: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3,
+  flash 32 MiB, PSRAM 32 MiB, EK79007 e GT911. Commit base
+  `e66001982f2c9f328f7d26bd45b14133a293aa37`, com árvore de trabalho suja
+  contendo as mudanças em validação. Projeto EEZ SHA-256
+  `0D2AA6B15EF9FDF08EE24AC73D425F0F9A117EAF63142CA6AB6CAECE2E0837C6`;
+  `sdkconfig` efetivo SHA-256
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+- O Build do EEZ gerou 23 arquivos em `firmware/main/ui_generated`. O build P4
+  foi executado com ESP-IDF 5.5.4 por `idf.py build`; app `0x271720` B, menor
+  slot livre `0x58e8e0` B (69%), SHA-256
+  `8A5FC2FD5C2B6B90099D783D1C68D386E074B2A6F25BE54BCC54188B53D8D606`.
+  Configuração efetiva confirmou target `esp32p4`, flash 32 MiB, RGB565 e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND=n`.
+- A primeira gravação válida revelou um abort reproduzível depois de iniciar a
+  UI: `setenv()` tentava adquirir o lock de Newlib dentro da seção crítica de
+  `time_service_start`. O backtrace apontou `lock_acquire_generic` e
+  `time_service.c:47`. A configuração de fuso foi movida para fora do lock,
+  seguida de novo build e flash; a falha deixou de ocorrer.
+- Flash final em COM8 por `idf.py -p COM8 flash`: bootloader, app, tabela e
+  `otadata` tiveram hash verificado e o P4 foi reiniciado por RTS. O boot
+  corrigido confirmou PSRAM a 200 MHz, teste de memória OK, display, touch e
+  `EEZ Boot/Home UI active: RGB565, rotation=180, triple-partial, 3 FBs`.
+  `app_main` retornou normalmente. Depois, o C6 negociou Hosted 3.0.6, RPC v2 e
+  SDIO SW_AGGR; o scan final sem credenciais encontrou 42 APs. Não houve panic/WDT
+  durante a janela serial observada, que atravessou o timeout de 10 s da Home.
+- O C6 não foi gravado. O log fornece versão/capacidades do firmware instalado,
+  mas não seu hash de imagem; esse hash permanece indisponível nesta unidade.
+  NVS de credenciais, `storage`, `c6_ota` e eFuses não foram escritos por esta
+  integração. A continuidade sem glitch, o conteúdo visual exato e o gesto da
+  gaveta ainda exigem observação do operador na tela física; o log serial não
+  encerra esse gate visual.
+- O EEZ Studio em execução salvou uma cópia anterior da página Boot e removeu
+  seus identificadores de geração. A Home continua totalmente ligada por IDs
+  nomeados; no Boot, somente status e detalhe usam a posição fixa dos filhos
+  3 e 4, preservada no projeto atual. A compilação e o flash finais foram feitos
+  contra essa mesma árvore gerada, portanto uma nova alteração estrutural em
+  Boot exige nomear os widgets no Studio antes de executar novo Build.
+
+## 2026-09-14 — Sincronização do Build EEZ
+
+- O EEZ Studio gerou novamente os 23 arquivos declarados em
+  `firmware/main/ui_generated`; nenhum arquivo do manifesto ficou ausente.
+  Os 27 objetos referenciados por `eez_ui` existem em `screens.h`, inclusive os
+  dois labels posicionais da página Boot e os bindings nomeados da Home.
+- Build e flash P4 com ESP-IDF 5.5.4 em COM8: app `0x271720` B, menor slot
+  livre `0x58e8e0` B (69%), SHA-256 pós-flash
+  `8A5FC2FD5C2B6B90099D783D1C68D386E074B2A6F25BE54BCC54188B53D8D606`.
+  Projeto EEZ SHA-256
+  `0D2AA6B15EF9FDF08EE24AC73D425F0F9A117EAF63142CA6AB6CAECE2E0837C6`;
+  `sdkconfig` SHA-256
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+  Esptool verificou bootloader, aplicação, tabela de partições e `otadata`.
+- O boot confirmou P4 v1.3, PSRAM 32 MiB a 200 MHz, display EK79007, touch
+  GT911, `EEZ Boot/Home UI active`, C6 Hosted 3.0.6, RPC v2 e SDIO SW_AGGR.
+  O scan sem credenciais encontrou 48 APs. Não houve panic ou WDT na janela
+  serial observada. C6, NVS de credenciais, `storage`, `c6_ota` e eFuses não
+  foram escritos.
+
+## 2026-09-14 — Organização da UI e limpeza de fontes
+
+- Removidas as fontes estáticas Montserrat 20, 24, 32 e 48 que não tinham
+  consumidor no firmware. A Montserrat 14 foi preservada porque ainda é usada
+  apenas pelo dashboard e diagnóstico legados. As fontes da Home continuam
+  pertencendo à saída do EEZ e não foram duplicadas.
+- A saída do Studio em `firmware/main/ui_generated` permaneceu intacta, plana
+  e regenerável. O bridge manual foi movido para `firmware/main/ui/bridge` e o
+  dashboard/diagnóstico legado, inclusive sua fonte, para
+  `firmware/main/ui/legacy`. O snapshot visual inativo foi para `ui/archive`.
+  `ui/README.md` registra a separação e o que pode ou não ser alterado
+  manualmente.
+- Build e flash P4 com ESP-IDF 5.5.4 em COM8: app `0x271720` B, menor slot
+  livre `0x58e8e0` B (69%), SHA-256 pós-flash
+  `7AA5117AF866FE15EA150F1033B7C91E8203A2AF6AF15621FB55EB185F2341C6`.
+  `sdkconfig` SHA-256
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+  Esptool verificou bootloader, aplicação, tabela de partições e `otadata`.
+- O boot posterior confirmou P4 v1.3, PSRAM 32 MiB a 200 MHz com teste OK,
+  EK79007, GT911 e `EEZ Boot/Home UI active: RGB565, rotation=180,
+  triple-partial, 3 FBs`. O C6 negociou Hosted 3.0.6, RPC v2 e SDIO SW_AGGR;
+  o scan sem credenciais encontrou 38 APs. Não houve panic ou WDT na janela
+  serial observada. C6, NVS de credenciais, `storage`, `c6_ota` e eFuses não
+  foram escritos.
+
+## 2026-09-14 — Home EEZ com componentes reutilizáveis e fundo RGB565
+
+- A regeneração do EEZ passou a materializar `NP_Header` e `NP_SideDrawer`
+  como instâncias. A ponte de runtime foi alinhada aos identificadores gerados
+  dessas instâncias, e `ui_image_bg.c` foi incluído explicitamente no componente
+  P4. O fundo 1639×960, originalmente ARGB8888, foi exportado como RGB565;
+  isso preserva a composição visual estática e reduz o recurso de 6.293.760 B
+  para 3.146.880 B. O projeto EEZ registra o bitmap em 16 bpp.
+- Compilação P4 com ESP-IDF 5.5.4 em árvore de build recriada para `esp32p4`.
+  A tentativa de `fullclean` não removeu `managed_components` porque um
+  subdiretório do LVGL estava aberto, mas `firmware/build` estava vazio antes
+  da compilação e as dependências fixadas foram reutilizadas. O binário final
+  mede `0x571e30` B; o menor slot de 8 MiB manteve `0x28e1d0` B livres (32%).
+  SHA-256 da app: `2CD89873E706578DF6DF31A83C14DF5F7319B820D6945B68F2F0528CF69131D4`.
+- Flash P4 pela USB-JTAG COM8: esptool identificou ESP32-P4 v1.3 e verificou
+  por hash bootloader, app, tabela e `otadata`, seguido de reset por RTS. O
+  C6 não foi gravado. Os hashes do bootloader e da tabela foram,
+  respectivamente, `56210F8B9C9C585D3F60CA7DDC3357234244413E344A031B43C235F28FA00092`
+  e `9AB122C32036A53AA7F0DCB9422DCF89F007C15C5DEE5467101FD3779F4406A6`.
+- O boot posterior confirmou flash 32 MiB, PSRAM 32 MiB a 200 MHz com teste
+  aprovado, EK79007, GT911, `EEZ Boot/Home UI active: RGB565, rotation=180,
+  triple-partial, 3 FBs` e retorno normal de `app_main`. O C6 já instalado
+  negociou Hosted 3.0.6, RPC v2 e SDIO SW_AGGR; o scan RAM-only encontrou 21
+  APs. Não houve panic ou WDT na janela serial observada. NVS de credenciais,
+  `storage`, `c6_ota` e eFuses não foram escritos. A ausência de glitch e a
+  interação da gaveta seguem dependendo de observação física da tela.
+
+## 2026-09-14 — Correção do fundo para a resolução nativa do painel
+
+- Após a observação de que o fundo não aparecia na tela, o recurso foi
+  reexportado de 1639×960 para 1024×600, exatamente a resolução do EK79007.
+  Continua RGB565/16 bpp, passa a ocupar 1.228.800 B e também foi substituído
+  no bitmap embutido de `ui/NP2.eez-project`; uma nova geração pelo EEZ mantém
+  o mesmo tamanho de origem. Isso evita depender de escala ou crop do fundo
+  pelo LVGL.
+- Build ESP-IDF 5.5.4 para `esp32p4` passou: app `0x39d9b0` B, menor slot livre
+  `0x462650` B (55%), SHA-256
+  `B0E4CE7390779FA6F333D7FE2F88A9516C96ADA8A5C6CE371FB7E15CE3514CB2`.
+  Flash em COM8 verificou por hash bootloader, app, tabela e `otadata`, e
+  reiniciou o P4 por RTS. O C6 não foi gravado.
+- O boot confirmou P4 v1.3, flash 32 MiB, PSRAM 32 MiB a 200 MHz, EK79007,
+  GT911 e `EEZ Boot/Home UI active: RGB565, rotation=180, triple-partial,
+  3 FBs`; `app_main` retornou normalmente. O C6 instalado negociou Hosted
+  3.0.6, RPC v2 e SW_AGGR, e o scan RAM-only encontrou 28 APs. Não houve
+  panic ou WDT na janela observada. A confirmação visual do novo fundo e a
+  inspeção de glitch continuam sendo observações físicas de tela.
+
+## 2026-09-14 — Correção de inicialização EEZ e fundo RGB565
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash 32 MiB e PSRAM 32 MiB; P4 gravado pela USB em COM8. O C6 não foi alterado.
+- Correção: a árvore EEZ é criada sob o mutex LVGL antes de iniciar a task do adapter. A ordem anterior podia bloquear app_main no primeiro esp_lv_adapter_lock(-1), deixando no painel o frame de boot anterior.
+- Bitmap de fundo: BG configurado para RGB565/16 bpp; 1024x600 consome 1.228.800 bytes na imagem de firmware, em vez de 2.457.600 bytes em ARGB8888.
+- Evidência de boot: EEZ Boot/Home UI active: RGB565, rotation=180, triple-partial, 3 FBs; P4 local bring-up ready; C6 negociou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR; scan concluiu com 34 APs.
+- Artefato P4: np2_p4.bin, 3791280 bytes, SHA-256 B27A4F64F6F28CB52091DDD696D471A6AC54CBE7691D52E39583B0D4815FAA3B.
+- Limite: esta observação confirma boot, display, UI e enlace de rede; não substitui o gate de render/soak.
+
+## 2026-09-14 — Remoção da UI EEZ e retorno ao LVGL direto
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 revisão v1.3, porta COM8,
+  MAC P4 `e8:f6:0a:e0:8f:42`; estado Git base `0418744` com alterações locais.
+- Removidos o projeto EEZ, saída `ui_generated`, imagem RGB565, ponte de
+  runtime, teclado auxiliar e scripts de regeneração. As fontes foram
+  preservadas em `firmware/main/ui/fonts`; a tela ativa passou a ser a UI
+  LVGL direta, hoje organizada em `firmware/main/ui/screens/product_ui.c`.
+- Build: ESP-IDF 5.5.4, target `esp32p4`, BSP 3.0.1, LVGL 9.5.0 e
+  `esp_lvgl_adapter` 0.6.4. `np2_p4.bin` possui `0x185110` bytes; SHA-256
+  `CC103C8D6578D2F4891F3080F11955D0E601D6BEED48220085F3D8183DEC0024`.
+  `sdkconfig` efetivo SHA-256
+  `078934494FB1C145BE140A22B96A3B3D00A32B76BDBCDA6FC5D14B1D3463C78A`.
+- Flash P4 concluído por `idf.py -p COM8 flash`, com verificação de hash e
+  hard reset. A imagem C6 não foi alterada; o artefato de referência
+  `eh_cp_ota_coprocessor_ota.bin` tem SHA-256
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Boot capturado: PSRAM 32 MiB, EK79007 inicializado, GT911 identificado,
+  `Direct LVGL UI active: RGB565, rotation=180, triple-partial, 3 FBs`, C6
+  ESP-Hosted 3.0.6 compatível, RPC v2, SDIO SW_AGGR e scan de 37 APs.
+- A captura confirma inicialização sem crash. Ausência de glitch durante uso
+  prolongado continua dependendo de observação física em bancada.
+
+## 2026-09-14 — Boot e Home LVGL baseadas no design v5
+
+- Referência visual: `design/v5/screens/np_boot.c`, `np_home.c` e seus mockups.
+  Tokens, estilos e componentes foram portados para `firmware/main/ui/core`;
+  nenhum arquivo de `design/v5` entra diretamente no binário.
+- Boot e Home são construídas uma única vez. Atualizações usam handles fixos e
+  escrita guardada; a troca de tela apenas alterna `LV_OBJ_FLAG_HIDDEN`.
+- A Boot tem duração mínima de 1,2 s e limite absoluto de 6 s. A Home abre com
+  estado indisponível quando rede, NTP ou providers não concluem, evitando uma
+  tela de inicialização permanente.
+- Home recebe hora corrente, conexão, clima e BTC somente pela projeção do
+  `AppState`. Campos sem contrato real permanecem explicitamente indisponíveis.
+- Build ESP-IDF 5.5.4 para `esp32p4` aprovado. `np2_p4.bin` possui `0x270f20`
+  bytes, 69% livres na menor partição de aplicação, SHA-256
+  `82A77698C3C03CE599E7EEF4C4263B25ABF809F2FEA3E675FCAA5B5A00824381`.
+- Flash pela COM8 concluído com verificação de hash. O boot confirmou EK79007,
+  GT911, 32 MiB de PSRAM, `TRIPLE_PARTIAL` com três framebuffers, C6
+  ESP-Hosted 3.0.6/RPC v2/SDIO SW_AGGR, scan de 19 APs e a mensagem
+  `product_ui: Boot transition complete; Home visible` aos 7,9 s.
+
+## 2026-09-14 — UI compartilhada design v5 / firmware
+
+- O P4 passou a compilar diretamente `design/v5/core/np_styles.c`,
+  `np_components.c`, `screens/np_boot.c` e `np_home.c`. O controlador em
+  `firmware/main/ui/screens/product_ui.c` só aplica a projeção de `AppState`.
+- A atualização de widgets é condicionada à revisão de `AppState`; nenhum
+  label ou card é reescrito no timer quando a projeção não mudou. Boot e Home
+  permanecem criadas uma única vez e alternam apenas `LV_OBJ_FLAG_HIDDEN`.
+- Header recebeu drawer persistente, aberto pelo ícone de menu sem animação
+  contínua. O ícone de configurações mantém o acesso à tela técnica.
+- Build limpo: ESP-IDF 5.5.4, target `esp32p4`, LVGL 9.5.0, BSP 3.0.1 e
+  `esp_lvgl_adapter` 0.6.4. `np2_p4.bin` mede `0x271260` bytes, com 69% livres
+  na menor partição; SHA-256
+  `92942722EBA175968C1D60D86DD941AA2D23B9D56F418E18FF76510219DC855B`.
+- Flash P4 via `idf.py -p COM8 flash` terminou com hash verificado. O boot
+  capturado confirmou EK79007, GT911, PSRAM 32 MiB, três framebuffers,
+  `TRIPLE_PARTIAL`, C6 ESP-Hosted 3.0.6/RPC v2/SDIO SW_AGGR, scan de 31 APs e
+  `product_ui: Boot transition complete; Home visible` aos 7,9 s.
+
+## 2026-09-22 — Perfil P4 de desenvolvimento com retenção Wi-Fi
+
+- Placa-alvo: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG COM8.
+- Build limpa: `firmware/build/wifi-retention-dev-20260922`, IDF 5.5.4, target `esp32p4`, com `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1` explícito na linha de compilação.
+- App `0x27c120` B, com `0x583ee0` B livres no menor slot OTA. SHA-256 P4: `884109F12D7E45977778C80E9728EF5D97EA02CECE7EDD34B7D7689A98F8DC94`.
+- `idf.py app-flash` escreveu e verificou somente `np2_p4.bin` em `0x20000` (`0x20000` a `0x29cfff`); bootloader, tabela de partições, `otadata`, NVS, storage, C6 e eFuses não foram escritos.
+- O esptool executou hard reset após a verificação. Uma abertura posterior da janela USB de manutenção não teve resposta imediata, portanto este registro não afirma boot observado, associação WPA2, retenção, reboot ou segurança de produção.
+- Próximo ensaio: provisionar WPA2 pelo painel uma vez, manter IP por pelo menos 30 s, reiniciar P4 e confirmar reassociação; não registrar SSID ou senha.
+
+## 2026-09-22 — Correção da primeira gravação no CredentialVault de desenvolvimento
+
+- A análise do ensaio anterior encontrou a causa da ausência de retenção: quando
+  os dois slots `cred0` e `cred1` ainda não existiam, o seletor devolvia
+  `ESP_ERR_NVS_NOT_FOUND`; o escritor aceita `ESP_ERR_NOT_FOUND` para criar a
+  geração 1. A normalização do estado vazio permite a primeira chamada chegar
+  a `nvs_set_blob()` e `nvs_commit()`. Não houve leitura nem exportação da NVS.
+- Build limpa: `firmware/build/wifi-retention-dev-fix-20260922`, ESP-IDF
+  5.5.4, target `esp32p4`, com
+  `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1`. A app mede `0x27c120` B,
+  deixando `0x583ee0` B (69%) no menor slot OTA. SHA-256 P4:
+  `CCE8265E4683D1C4CA807667FF9512422F6BEA584C9225EF425D9DD499FCA7D9`.
+- `idf.py app-flash` escreveu somente a app em `0x20000` e apagou o intervalo
+  `0x20000` a `0x29cfff`; esptool confirmou a escrita e fez hard reset.
+  Bootloader, tabela de partições, `otadata`, NVS, storage, C6 e eFuses não
+  foram escritos.
+- O boot capturado confirmou P4 v1.3, flash 32 MiB, PSRAM 32 MiB a 200 MHz
+  com teste aprovado, EK79007, GT911, RGB565/rotação 180°/`TRIPLE_PARTIAL`/
+  três framebuffers e retorno de `app_main`. O C6 instalado negociou
+  ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR; o scan sem credenciais encontrou
+  17 APs. Não houve panic ou WDT na janela observada.
+- A retenção ainda aguarda o ensaio dinâmico: provisionar WPA2 uma vez nesta
+  build, manter IP por 30 s e reiniciar para observar a reassociação. SSID e
+  senha continuam fora deste registro.
+
+## 2026-09-22 — Retenção Wi-Fi de desenvolvimento: ensaio de reboot e correção de reassociação
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG COM8.
+  O P4 recebeu somente a app; a NVS que contém o cofre de credenciais não foi
+  apagada ou exportada durante os ensaios.
+- O ensaio dinâmico confirmou que, após o provisionamento WPA2 e mais de 30 s
+  com IP estável, o cofre privado foi salvo. Em reboots posteriores a aplicação
+  restaurou o registro diretamente para a mailbox privada, sem exibir ou
+  registrar SSID, senha ou endereço de rede nesta evidência.
+- A primeira implementação reiniciava a tela de configuração enquanto o evento
+  LVGL ainda era processado e também iniciava uma desconexão assíncrona mesmo
+  sem configuração de estação anterior. A tela agora é removida de forma
+  assíncrona; a primeira associação não emite desconexão e uma troca de rede
+  só agenda a reassociação depois de receber o evento de desconexão anterior.
+- Build limpa final: `firmware/build/wifi-retention-dev-reconnect-20260922`,
+  ESP-IDF 5.5.4, target `esp32p4`, com
+  `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1`. A app mede `0x27c220` B,
+  com `0x583de0` B (69%) livres na menor partição. SHA-256 P4:
+  `D94B4420C7FABAD30A26CE2DE3B75968EA9B60E569EF7E4EC2FDFB26D8D9318F`.
+- `idf.py app-flash` gravou e verificou a app em `0x20000` (intervalo
+  apagado `0x20000` a `0x29cfff`) e realizou hard reset. Bootloader, tabela de
+  partições, `otadata`, NVS, storage, C6 e eFuses permaneceram intactos.
+- Boot de validação: P4 v1.3, flash 32 MiB, PSRAM 32 MiB/200 MHz, EK79007,
+  GT911, RGB565/rotação 180°/`TRIPLE_PARTIAL`/três framebuffers e C6
+  ESP-Hosted 3.0.6/RPC v2/SDIO SW_AGGR. A restauração do cofre foi seguida por
+  associação e IP em aproximadamente 10 s, sem panic, WDT ou a desconexão
+  artificial da versão anterior.
+- Este perfil é exclusivamente de desenvolvimento: para produção, a mesma
+  retenção exige NVS encryption e flash encryption ativas.
+
+## 2026-09-22 — Sincronização automática de relógio, clima e Bitcoin
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG COM8.
+  Build limpa em `firmware/build/product-sync-20260922`, ESP-IDF 5.5.4,
+  target `esp32p4`, com `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1`.
+- A app `np2_p4.bin` mede `0x27c2e0` B e deixa `0x583d20` B (69%) livres na
+  menor partição de aplicação. SHA-256 P4:
+  `9081E9E5D72E8A2FAC0D738732499AE66D35FB5A881B405A28875D5872E0C955`.
+  `idf.py app-flash` escreveu e verificou somente o intervalo de app
+  `0x20000` a `0x29cfff`; NVS, tabela de partições, storage, C6 e eFuses não
+  foram escritos.
+- No boot, o P4 confirmou PSRAM 32 MiB/200 MHz, EK79007, GT911,
+  RGB565/rotação 180°/`TRIPLE_PARTIAL`/três framebuffers; o C6 negociou
+  ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR. A credencial persistida reassociou
+  e recebeu IP sem registrar os dados da rede neste documento.
+- A primeira rodada automática iniciou após o IP e concluiu DNS, NTP e as
+  consultas HTTPS fixas de clima de Brasília e BTC/USD com certificados
+  validados. Resultado: DNS=`ESP_OK`, NTP=`ESP_OK`, HTTPS=`ESP_OK` em 8.163 ms;
+  o FlashCoordinator verificou e publicou a nova geração de cache em 28 ms.
+  Não houve panic, WDT ou segundo handshake TLS concorrente na captura.
+- Política ativa: primeira sincronização após cada associação com IP; depois,
+  a cada 30 minutos. Falha de DNS, NTP ou provider conserva o último snapshot
+  como stale e tenta novamente após dois minutos; sem IP não há I/O externo.
+
+## 2026-09-22 — Reversão da tentativa de editor local
+
+- A tentativa de editor local, seus overrides e todas as referências no build
+  foram removidos. As telas Boot e Home voltaram a usar diretamente a composição
+  LVGL existente, com os mesmos tokens, posições e textos estáticos anteriores.
+- Build limpa: `firmware/build/editor-removed-20260922`, ESP-IDF 5.5.4,
+  target `esp32p4`, com `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1`. A app
+  `np2_p4.bin` mede `0x27c2e0` B, com `0x583d20` B (69%) livres na menor
+  partição OTA. SHA-256 P4:
+  `78A8508D82A843D1BD21F9A5412F816FEC9D3571457A022D851D9C30D5EE0964`.
+- `idf.py app-flash` escreveu e verificou somente a app em `0x20000`; NVS,
+  tabela de partições, `otadata`, storage, C6 e eFuses permaneceram intactos.
+  O boot confirmou P4 v1.3, PSRAM 32 MiB/200 MHz, EK79007, GT911, RGB565,
+  rotação 180°, `TRIPLE_PARTIAL`, três framebuffers e a transição de Boot para
+  Home, sem panic ou WDT. O C6 negociou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR.
+
+## 2026-09-22 — Reorganização das fontes da UI no firmware
+
+- As fontes C executáveis foram movidas de `design/v5` para
+  `firmware/main/ui`: `core/` contém tokens, estilos e componentes; `screens/`
+  contém Boot, Home e o controlador `product_ui`; `fonts/` permanece no mesmo
+  diretório de UI. O CMake do componente passou a compilar somente esses
+  caminhos. `design/v5` agora contém apenas mockups, imagens e seu gerador.
+- Build limpa: `firmware/build/ui-source-relocation-20260922`, ESP-IDF 5.5.4,
+  target `esp32p4`, com `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1`. A app
+  mede `0x27c2e0` B, com `0x583d20` B (69%) livres na menor partição. SHA-256
+  P4: `67E17106057F4EB3480289306957E0C596B0249068049D136FA3CE6C4E0ADA26`.
+- `idf.py app-flash` escreveu e verificou somente a app em `0x20000`; NVS,
+  tabela de partições, `otadata`, storage, C6 e eFuses permaneceram intactos.
+  O boot confirmou P4 v1.3, PSRAM 32 MiB/200 MHz, EK79007, GT911, RGB565,
+  rotação 180°, `TRIPLE_PARTIAL`, três framebuffers e a transição de Boot para
+  Home, sem panic ou WDT. O C6 negociou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR.
+- Após receber IP, a sincronização automática concluiu DNS, NTP e HTTPS e
+  publicou uma nova geração do cache offline. A captura não registrou
+  credenciais, nomes de rede ou endereço IP.
+
+## 2026-09-23 — Retenção Wi-Fi de desenvolvimento e reconexão após AUTH_EXPIRE
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG COM8.
+  O cache CMake ativo havia sido reconfigurado com
+  `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=OFF`; por isso a imagem fazia
+  somente o scan sem credenciais no boot. As tarefas padrão de build e build
+  limpo do VS Code agora passam explicitamente
+  `-DNP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=ON`.
+- A aplicação foi recompilada com o opt-in ativo. Binário P4:
+  `0x39f070` B; SHA-256
+  `95D82D3E5FD02154FBC50E28DDF526465467EB04A49D44020EFC5F1B0830CF76`.
+  `idf.py -DNP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=ON -p COM8 app-flash`
+  escreveu somente a aplicação em `0x20000`; NVS, tabela de partições,
+  storage, C6 e eFuses não foram escritos.
+- A política de desconexão foi corrigida: `AUTH_EXPIRE` e timeouts de
+  handshake entram no backoff de reconexão; uma rejeição definitiva preserva
+  o cofre. Somente a ação explícita `FORGET` remove a credencial durável.
+- Em boot observado, o cofre restaurou a credencial para a mailbox privada;
+  duas tentativas ocorreram com backoff de 2,454 s e 4,311 s, e o P4 recebeu
+  IP aos 26,940 s. Nenhuma credencial, nome de rede ou endereço IP foi
+  incluído nesta evidência.
+
+## 2026-09-23 — Orquestração serial de clima, dólar e Bitcoin
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build incremental em `firmware/build/data-orchestration-20260923`,
+  ESP-IDF 5.5.4, target `esp32p4`. A app `np2_p4.bin` mede `0x39fdc0` B e
+  deixa `0x460240` B (55%) livres na menor partição de aplicação. SHA-256 P4:
+  `DF1B383A11C1C2DC96C3FFEE561572452C24A435EB6FCCED20E92F540A1B5255`.
+- `idf.py -B build/data-orchestration-20260923 -p COM8 flash` identificou o
+  alvo como ESP32-P4 v1.3, escreveu bootloader, aplicação, tabela de partição
+  e `otadata`, e terminou sem erro. O C6 não foi gravado; não houve alteração
+  de eFuses ou inclusão de credenciais.
+- O monitor posterior confirmou boot da imagem na `ota_0`, flash de 32 MiB,
+  PSRAM de 32 MiB/200 MHz, EK79007, GT911, LVGL, RGB565/rotação 180°,
+  `TRIPLE_PARTIAL` e três framebuffers. O C6 existente negociou ESP-Hosted
+  3.0.6, RPC v2 e SDIO SW_AGGR. Não ocorreu panic, WDT ou reboot durante a
+  captura até a Home ficar visível.
+- A validação local cobriu codec cache v1/v2, parser BCB e a agenda serial:
+  BTC/USD a cada 5 min, clima de Brasília a cada 2 h e USD/BRL PTAX a cada
+  24 h; o agendador libera só um domínio por vez e alterna os vencidos. Este
+  boot estava sem rede configurada, portanto o ciclo HTTPS completo e a
+  confirmação visual dos três valores continuam pendentes de uma sessão Wi-Fi
+  de bancada.
+
+## 2026-09-23 — Retenção Wi-Fi padrão para o fluxo do assistente
+
+- A opção CMake `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION` passou a ter
+  padrão `ON` para o P4 desbloqueado de desenvolvimento. O perfil de produção
+  continua obrigado a passá-la explicitamente como `OFF` e a usar a proteção
+  de NVS/flash definida no procedimento de produção.
+- A imagem P4 de `build/data-orchestration-20260923` foi reconfigurada com a
+  opção efetiva `ON`, gravada pela COM8 e verificada por hash para bootloader,
+  aplicação, tabela de partição e `otadata`. NVS, C6 e eFuses não foram
+  escritos.
+- O boot confirmou que o cofre restaurou a credencial de laboratório para a
+  mailbox privada; nenhuma credencial ou identificador de rede é registrado
+  nesta evidência. A associação seguinte não se completou e entrou no backoff
+  normal de reconexão, portanto a continuidade da rede e o ciclo HTTPS ainda
+  requerem nova sessão de bancada.
+
+## 2026-09-23 — Home com card meteorológico e fundo neutro
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build limpa inicial e rebuild final em
+  `firmware/build/home-weather-card-20260923`, ESP-IDF 5.5.4, target
+  `esp32p4`, com `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=1` e
+  `NP2_WEATHER_BACKGROUNDS_EMBEDDED=0`. A app final mede `0x2740a0` B e deixa
+  `0x58bf60` B (69%) livres na menor partição de aplicação. SHA-256 P4:
+  `ED23BC9FF588265F3680C6CF03C6B8C233D20B0DB5A4BC10816059747E06E370`.
+- `idf.py -B build/home-weather-card-20260923 -p COM8 flash` escreveu e
+  verificou bootloader, aplicação, tabela de partições e `otadata`. NVS,
+  storage, C6 e eFuses não foram escritos. A opção de assets ficou desligada
+  porque os 20 RGB565 finais ainda não foram fornecidos; a Home usa o fallback
+  de card escuro neutro.
+- O primeiro boot detectou que ativar `clip_corner` em todos os cards prendia a
+  task LVGL no renderer e acionava o watchdog. A correção limita esse clip ao
+  card meteorológico enquanto uma imagem real estiver visível. Após rebuild e
+  reflash, o monitor confirmou boot completo, Home visível, PSRAM 32 MiB/200
+  MHz, EK79007, GT911, RGB565/rotação 180°, `TRIPLE_PARTIAL`, três
+  framebuffers, ESP-Hosted 3.0.6/RPC v2/SDIO SW_AGGR e os três refreshes HTTPS
+  seriados concluídos, sem novo WDT, panic ou reboot na captura.
+
+## 2026-09-23 — Assets meteorológicos da Home no microSD
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build em `firmware/build/home-weather-card-20260923`, ESP-IDF 5.5.4,
+  target `esp32p4`, com retenção Wi-Fi de desenvolvimento ativa. A aplicação
+  mede `0x27c650` B e deixa `0x5839b0` B (69%) livres na menor partição OTA.
+  SHA-256 P4:
+  `547FA80FC71821FC05BF5F02FA91A2F99848C261FABEABC35E778D74461B0947`.
+- Os testes host do mapeador `weather_code`/dia-noite e do catálogo de nomes
+  passaram. O instalador `tools/copy_weather_assets_to_sd.ps1` também foi
+  executado em diretório temporário: 20 arquivos e 9.240.000 B, todos com
+  462.000 B.
+- `idf.py -B build/home-weather-card-20260923 -p COM8 app-flash` escreveu e
+  verificou somente a aplicação em `0x20000`; NVS, tabela de partições,
+  storage, C6 e eFuses não foram escritos.
+- No boot observado, o microSD montou em `/sdcard` antes do Hosted. A validação
+  deliberadamente não formatou o cartão e reportou ausência de
+  `/sdcard/np2/weather/np_bg_day_clear.bin`; a Home preservou o card escuro.
+  Em seguida, o C6 negociou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR, e a Home
+  abriu sem panic, WDT ou reboot. A cópia dos 20 assets para o cartão e a prova
+  visual após NTP/clima continuam pendentes; o ensaio simultâneo SDMMC + Wi-Fi
+  deve ser repetido após esse provisionamento.
+
+## 2026-09-23 — Correção FATFS LFN e renderização dos assets meteorológicos
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build final em `firmware/build/home-weather-card-20260923`, ESP-IDF
+  5.5.4, target `esp32p4`, com `CONFIG_FATFS_LFN_HEAP=y` e
+  `CONFIG_FATFS_MAX_LFN=64`. A app mede `0x27d840` B e deixa `0x5827c0` B
+  (69%) livres na menor partição OTA. SHA-256 P4:
+  `0C4B5A29185264A33539A110646852D2F64B35BE18E1E45595B61290DB631B27`.
+- A causa da primeira falha de catálogo foi configuracional: sem LFN, o
+  FATFS expunha somente aliases 8.3, e não os nomes `np_bg_day_*` e
+  `np_bg_night_*`. Depois do perfil LFN, o boot montou `/sdcard` e validou os
+  20 arquivos em `/sdcard/np2/weather/`, cada um com 462.000 B.
+- Na captura com rede disponível, NTP e as três consultas HTTPS seriadas
+  concluíram; o worker de SD carregou e publicou
+  `np_bg_night_partly_cloudy.bin`. A task LVGL apenas trocou a source da
+  imagem já existente. O recorte de cantos foi movido do container para a
+  própria imagem e o overlay, removendo a layer temporária que antes acionava
+  o watchdog. A solicitação do worker também passou a coalescer o intervalo de
+  carregamento, evitando uma segunda leitura para a mesma condição.
+- A última imagem foi recompilada, gravada e verificada com
+  `idf.py -B build/home-weather-card-20260923 -p COM8 app-flash`; somente o
+  intervalo de aplicação `0x20000` foi escrito. NVS, tabela de partições,
+  storage, C6 e eFuses não foram alterados. O boot posterior confirmou o
+  catálogo e a Home sem novo WDT no intervalo previamente afetado; nessa
+  tentativa a associação Wi-Fi não concluiu antes do fim da captura.
+- Os testes host de mapeamento `weather_code`/dia-noite e do catálogo dos 20
+  nomes passaram novamente. Esta é uma captura de integração funcional; não
+  substitui o gate de estresse prolongado de SDMMC e Wi-Fi.
+- A correção provisória que escolhia dia sem NTP foi substituída pelo snapshot
+  offline v3 descrito na evidência seguinte; ela não é o comportamento atual.
+
+## 2026-09-23 — Home: restauração offline do último fundo meteorológico
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build final em `firmware/build/home-weather-card-20260923`, ESP-IDF
+  5.5.4, target `esp32p4`. A aplicação mede `0x27d8c0` B e deixa `0x582740` B
+  (69%) livres na menor partição OTA. SHA-256 P4:
+  `44F8CE33160C4A8DEFDF2569D7E6CAAA4137EE05E602F94C46427F6B4828EC9B`.
+- Os testes host do codec offline v3/migração v1-v2, do mapeador
+  `weather_code`/dia-noite e do catálogo dos 20 assets passaram. O decoder
+  conserva snapshots v1/v2 legíveis, mas sem uma seleção visual eles mantêm o
+  card neutro até o primeiro refresh válido promover o cache a v3.
+- `idf.py -B build/home-weather-card-20260923 -p COM8 app-flash` escreveu e
+  verificou somente a aplicação em `0x20000`; NVS, tabela de partições, C6 e
+  eFuses não foram gravados pelo flash. Durante o refresh normal posterior, o
+  `FlashCoordinator` publicou a geração de cache 194 com o novo campo visual.
+- No primeiro boot com hora confiável, o worker selecionou e leu
+  `np_bg_night_partly_cloudy.bin`. Após um reset sem novo flash, o segundo boot
+  montou o cartão e carregou o mesmo asset aos 3,763 s, antes da tentativa de
+  associação Wi-Fi e antes de NTP. A associação dessa segunda captura não se
+  completou, o que confirma que a imagem veio do cache local, não da rede. Não
+  houve panic, WDT ou reboot na captura.
+
+## 2026-09-23 — Home: aplicação LVGL do fundo meteorológico no card
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, USB Serial/JTAG
+  COM8. Build ESP-IDF 5.5.4 para `esp32p4` em
+  `firmware/build/home-weather-card-20260923`; a app mede `0x27da50` B e deixa
+  `0x5825b0` B (69%) livres na menor partição OTA. SHA-256 P4:
+  `9274A38CF01A85B547EE7094A252CCD91FD7DCE37B9681953F73B0D8FB0C7EFA`.
+- Diagnóstico: o cartão e o worker já liam corretamente o bitmap RGB565, mas
+  a primeira exposição da Home dependia da invalidação implícita após a troca
+  de source. A correção explicita a opacidade, mantém a imagem como primeiro
+  filho do card, invalida o card somente quando a source muda e reduz o overlay
+  escuro de 50% para 30%. Assim, a foto é perceptível sem comprometer a leitura
+  do texto; atualizações do relógio não redesenham a região de 500 x 462 px.
+- `idf.py -B build/home-weather-card-20260923 build app-flash -p COM8`
+  recompilou e gravou somente `0x20000`. Nenhuma partição NVS/storage, C6 ou
+  eFuse foi gravada pelo flash. No boot, o catálogo validou os 20 arquivos; o
+  worker carregou `np_bg_night_partly_cloudy.bin` aos 3,744 s e a task LVGL
+  confirmou a aplicação de `500x462 RGB565` aos 4,244 s. A Home ficou visível
+  aos 7,994 s, sem panic ou WDT na captura.
+
+## 2026-09-24 — Recuperação do boot após contrato offline v4 proposto
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash e PSRAM de
+  32 MiB, USB Serial/JTAG COM8. Código em `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+  C6 não foi gravado; o boot reportou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR.
+  O hash da imagem atualmente no C6 não foi extraído nesta sessão.
+- Falha relatada antes da correção: após `Direct LVGL UI active` aos 1,873 s,
+  `Instruction access fault` com `MEPC=0`, `RA=0` e referências a
+  `sdmmc_host_init`/`sdmmc_host_get_clk_dividers` na pilha. O log original foi
+  fornecido pelo responsável; o ELF correspondente não estava disponível para
+  uma decodificação completa. O responsável confirmou que o panic começou
+  somente após alterar `offline_data_model.h`. Os endereços SDMMC na pilha
+  não identificam por si só a causa do salto para endereço zero.
+- O cabeçalho ativo anunciava schema offline 4, mas o codec/cache continuava
+  com payload v3 de 34 B e o snapshot em RAM havia crescido. O contrato v4
+  foi preservado em
+  `design/offline_data_model_v4_proposal.h`; o firmware voltou a anunciar v3
+  com os campos efetivamente suportados pelo codec. A ordem original dos
+  serviços em `app_main.c` e o worker de SD permaneceram inalterados na imagem
+  final. O schema v4 exige codec, migração e orçamento de memória/pilha antes
+  de voltar ao firmware ativo.
+- Build limpo: ESP-IDF 5.5.4, target `esp32p4`,
+  `idf.py -B build/boot-recovery-20260924 -D SDKCONFIG=build/boot-recovery-20260924/sdkconfig -D IDF_TARGET=esp32p4 build`.
+  Após restaurar a ordem original, o rebuild final gerou app `0x1d6670` B;
+  menor partição `0x800000` B, `0x629990` B livres (77%). SHA-256 final P4:
+  `55D03F4579B5D8B956000EC16E2A9FE2BE6BA297F6C2E1A5BEE780BCCA270A5F`.
+  SHA-256 do `sdkconfig` efetivo:
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` permaneceu desligado e
+  `CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3`.
+- `idf.py -B build/boot-recovery-20260924 -p COM8 app-flash` gravou e
+  verificou por hash somente `0x20000` a `0x1f6fff`. Bootloader, tabela,
+  `otadata`, NVS, storage, C6 e eFuses não foram escritos. O teste host do
+  codec v3 e `git diff --check` passaram.
+- A primeira imagem de teste também serializou a montagem do SD; passou em
+  dois boots, mas não permitia atribuir a recuperação ao cabeçalho. Essa
+  mudança de ordem foi então removida e a imagem final foi recompilada e
+  gravada. Com a sequência original, dois boots consecutivos montaram o SD,
+  carregaram o visual offline, negociaram C6 3.0.6/RPC v2/SW_AGGR e exibiram
+  a Home aos 7,874 s, sem panic no intervalo observado. No primeiro ciclo,
+  Wi-Fi, NTP/TLS e três consultas HTTPS também concluíram; o cache avançou
+  para a geração 248. O segundo ciclo foi observado até 17,9 s.
+- Este A/B confirma que a mudança do cabeçalho é o gatilho observado e que a
+  ordem original de SDMMC pode permanecer. Ainda não separa qual alteração do
+  cabeçalho causou o acesso inválido nem valida o contrato v4 proposto.
+
+## 2026-09-24 — Ícones Material Symbols na Home
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR e PSRAM de
+  32 MiB, USB Serial/JTAG COM8. Base do código:
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`. O C6 não foi gravado;
+  o boot reportou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR. O hash da imagem
+  executada no C6 não foi extraído nesta sessão.
+- A Home usa agora a fonte Material Symbols Rounded para os quatro indicadores
+  meteorológicos, localização, Bitcoin, dólar, mercado e itens do painel
+  lateral. O botão de menu de quatro quadrados permaneceu intacto. Foram
+  adicionados ao subset de 18/24 px `place`, `device_thermostat` e
+  `attach_money`, e ao de 48 px `currency_bitcoin`, `attach_money` e
+  `finance_mode`. Fontes regeneradas com `lv_font_conv@1.5.3` a partir do
+  Material Symbols Rounded local.
+- Build limpo: ESP-IDF 5.5.4, target efetivo `esp32p4`, LVGL 9.5.0,
+  `idf.py -B build/home-icons-20260924 build`. App `0x26e630` B; menor
+  partição de app `0x800000` B, `0x5919d0` B livres (70%). SHA-256 P4:
+  `1271F91065A7888D7CFF80E5B0A1C30572A4AB8C3BBB17FE584490DFFFEF8755`.
+  SHA-256 do `firmware/sdkconfig` efetivo:
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+  `CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3` e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desligado. `git diff --check` passou.
+- `idf.py -B build/home-icons-20260924 -p COM8 app-flash` gravou apenas o app
+  em `0x20000`; esptool confirmou `Hash of data verified`. A primeira
+  tentativa encontrou a COM8 ocupada pelo monitor; após o responsável fechar
+  o monitor, a gravação completou. Bootloader, partições de dados, C6 e eFuses
+  não foram escritos.
+- `idf.py -B build/home-icons-20260924 -p COM8 monitor`: o P4 iniciou o
+  display RGB565 em rotação 180°, `triple-partial`, 3 framebuffers aos 1,991 s;
+  microSD montado aos 2,261 s; C6 3.0.6/RPC v2/SW_AGGR negociado aos 3,381 s;
+  `Home V2 visible` aos 7,971 s. Wi-Fi, NTP e HTTPS concluíram sem erro até
+  14,201 s, sem panic no intervalo observado. Os glifos individuais não foram
+  inspecionados por foto nesta sessão.
+
+## 2026-09-24 — Header compacto e relógio ampliado
+
+- Placa: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR e PSRAM de
+  32 MiB, USB Serial/JTAG COM8. Base do código:
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`. C6 não gravado nesta
+  sessão; o boot reportou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR. O hash da
+  imagem executada no C6 não foi extraído.
+- A data foi removida apenas do header; a data do card de clima segue ativa.
+  O relógio usa a fonte de 48 px e ocupa 153 px da faixa disponível de 156 px
+  à direita do divisor. Header reduzido de 72 para 64 px; os cards principais
+  sobem de `y=88` para `y=76` e os strips inferiores de `y=480` para `y=468`.
+  O botão de menu de quatro quadrados não foi alterado.
+- Build limpo: ESP-IDF 5.5.4, target explícito `esp32p4`, LVGL 9.5.0,
+  `idf.py -B build/header-compact-20260924 -D IDF_TARGET=esp32p4 build`, sem
+  warnings de compilação. App `0x2841c0` B; menor partição de app `0x800000` B,
+  `0x57be40` B livres (69%). SHA-256 P4:
+  `7D7BEF5DC4D28DCC0B188902DB42E05AC1503B89022C5AC63863426BF8EA7E8E`.
+  SHA-256 do `firmware/sdkconfig` efetivo:
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+  `CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3`, flash de 32 MiB e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desligado.
+- `idf.py -B build/header-compact-20260924 -p COM8 app-flash` gravou apenas
+  a partição de app em `0x20000` e confirmou `Hash of data verified`; dados,
+  bootloader, C6 e eFuses não foram escritos.
+- `idf.py -B build/header-compact-20260924 -p COM8 monitor`: display RGB565
+  rotação 180°, `triple-partial`, 3 framebuffers aos 2,020 s; microSD montado
+  aos 2,290 s; C6 3.0.6/RPC v2/SW_AGGR negociado aos 3,400 s; `Home V2 visible`
+  aos 8,000 s. Consultas HTTPS concluíram até 16,520 s sem panic no intervalo
+  observado. A geometria visual do relógio não foi conferida por foto.
+
+### 2026-09-24 — Ícones animados Meteocons e alinhamento do card de clima
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 com flash/PSRAM de
+  32 MiB, C6 pareado por SDIO. Base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+  O C6 não foi gravado nesta atividade; o boot negociou firmware 3.0.6,
+  RPC v2 e SDIO SW_AGGR. Hash da imagem C6 executada não extraído.
+- `tools/build_weather_icons.py` gerou 20 pacotes NPWI a partir dos 20 SVGs
+  fornecidos em `design/clima/`. Validação local: todos os nomes casam com o
+  catálogo de condições, 20 cabeçalhos/tamanhos/CRC32 íntegros,
+  27.427.296 B totais, quadros distintos e prévia visual conferida.
+  `tools/copy_weather_icons_to_sd.ps1` copiou e validou os 20 pacotes em um
+  diretório de teste local; ainda não foram copiados ao microSD da placa.
+- Build limpo: ESP-IDF 5.5.4, `esp32p4`, BSP 3.0.1, LVGL 9.5.0,
+  `esp_lvgl_adapter` 0.6.4; comando
+  `idf.py -B build/weather-icons -D IDF_TARGET=esp32p4 build`. Aplicação
+  `0x284b40` B, partição mínima `0x800000` B, 69% livre. SHA-256 P4
+  `54F76744E63BC1BFDB49CC7C6DECEFEF071BC6B23AED5AEC3F7E12664E358A36`.
+  SHA-256 do `firmware/sdkconfig` efetivo
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`;
+  `CONFIG_LV_USE_ANIMIMG=y`, três framebuffers e auto-suspend desligado.
+- `idf.py -B build/weather-icons -p COM8 app-flash` gravou apenas a aplicação
+  P4 em `0x20000` e confirmou `Hash of data verified`.
+  `idf.py -B build/weather-icons -p COM8 monitor`: RGB565, rotação 180°,
+  triple-partial, três FBs aos 2,052 s; microSD e 20 backgrounds validados
+  aos 2,332 s; C6 3.0.6/RPC v2/SW_AGGR aos 3,402 s; `Home V2 visible`
+  aos 8,032 s; HTTPS de clima/mercado concluído até 14,952 s, sem panic
+  no período observado. A animação e o posicionamento em tela precisam de
+  verificação física após provisionar os pacotes no microSD.
+- Ajuste subsequente da Home: descrição e data do clima em `x=132`, alinhadas
+  com a temperatura; descrição em `y=174` e data em `y=208`, abaixo da linha
+  da fonte hero (111 px a partir de `y=58`). O novo build no mesmo diretório
+  recompilou `np_home.c`, gerou aplicação de `0x284b40` B e SHA-256 P4
+  `308F8E05F2142D7EA4141FE2F44B5CAFC1183013FCDA5BAA47881FF62D95F228`.
+  `idf.py -B build/weather-icons -p COM8 app-flash` confirmou `Hash of data
+  verified`. O monitor confirmou `Home V2 visible` aos 7,972 s e HTTPS
+  de clima/mercado até 13,992 s, sem panic no intervalo observado.
+
+### 2026-09-24 — Card de clima sólido e ícones independentes dos backgrounds
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 com 32 MiB de flash e
+  PSRAM; C6 pareado por SDIO. Base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+- O card da Home usa a superfície sólida `#111820`. A UI deixou de criar a
+  imagem RGB565 e o overlay. O worker do microSD carrega apenas o pacote
+  animado NPWI; os backgrounds existentes no cartão não foram removidos.
+- Build limpo: ESP-IDF 5.5.4, `esp32p4`, em
+  `firmware/build/weather-solid-20260924`, comando
+  `idf.py -B build/weather-solid-20260924 -D IDF_TARGET=esp32p4 build`.
+  Aplicação `0x2840e0` B; partição `0x800000` B, 69% livre. SHA-256 P4
+  `7F906927F6FA3451DDFF13FE1123698DF08D9C6C5FE97BD80B6D6D23606D6032`.
+  SHA-256 do `firmware/sdkconfig` efetivo
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`;
+  `CONFIG_LV_USE_ANIMIMG=y`, `CONFIG_SPI_FLASH_AUTO_SUSPEND` desligado e
+  formatação automática do SD desligada.
+- `idf.py -B build/weather-solid-20260924 -p COM8 app-flash` gravou somente a
+  aplicação P4 em `0x20000` e confirmou `Hash of data verified`.
+  `idf.py -B build/weather-solid-20260924 -p COM8 monitor` mostrou RGB565,
+  rotação 180°, triple-partial e três FBs aos 2,041 s; microSD montado e
+  ícones prontos aos 2,101 s; C6 com ESP-Hosted 3.0.6, RPC v2 e SW_AGGR aos
+  3,401 s; pacote de 24 quadros carregado aos 4,791 s; Home visível aos
+  8,021 s; HTTPS de clima/mercado concluído até 18,721 s e outro pacote de
+  24 quadros aos 18,961 s. Sem panic nesse intervalo. Imagem C6 não foi
+  alterada; hash do C6 em execução não extraído. O responsável confirmou na
+  placa que o card ficou com fundo sólido escuro e o ícone segue animando.
+
+### 2026-09-24 — Contraste dos quatro cards de métricas do clima
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 com flash/PSRAM de
+  32 MiB e C6 pareado por SDIO; base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+- Fundo do card de clima mantido em `#111820`. Os quatro cards de vento,
+  umidade, sensação e UV passaram de `#151D26` para `#23313F`, com borda de
+  1 px `#34495C`, sem sombra.
+- Build limpo ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/weather-tiles-20260924 -D IDF_TARGET=esp32p4 build`.
+  Aplicação `0x284160` B em partição de `0x800000` B, 69% livre;
+  SHA-256 P4 `3E280E368ABDDD1A0C94B9AF8AACBF927AF1B0E51CA3ED259BD919AEFAE05FF5`.
+  Configuração efetiva do P4 como na seção anterior; C6 não alterado e hash
+  de sua imagem em execução não extraído.
+- `idf.py -B build/weather-tiles-20260924 -p COM8 app-flash` gravou só a
+  aplicação P4 e confirmou `Hash of data verified`. No monitor, display
+  RGB565, rotação 180°, triple-partial e três FBs aos 2,050 s; microSD
+  montado e ícones prontos aos 2,110 s; C6 3.0.6/RPC v2/SW_AGGR aos 3,400 s;
+  ícone animado de 24 quadros aos 4,800 s; Home visível aos 8,030 s;
+  HTTPS dos três domínios concluído até 14,310 s, sem panic no intervalo.
+  O responsável confirmou visualmente que os quatro cards ficaram destacados
+  e legíveis na placa.
+
+### 2026-09-24 — Ícone animado de clima ampliado na Home
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 32 MiB flash/PSRAM,
+  C6 pareado por SDIO; base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+- O widget animado passou a ocupar `160 x 160` px, em `x=24`, `y=62` dentro
+  do card de clima. Temperatura, condição e data começam em `x=200`; as
+  métricas continuam em `y=250`. O LVGL amplia os quadros NPWI de `96 x 96`
+  px na renderização. O conteúdo do microSD não foi alterado.
+- Build limpo ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/weather-icon-large-20260924 -D IDF_TARGET=esp32p4 build`.
+  Aplicação `0x2841e0` B; partição de `0x800000` B, 69% livre. SHA-256 P4
+  `6973E1E37660756883CAECB7765F52BA446910AAA5A0600FC493316FCAE35FFB`.
+  Configuração efetiva do P4 como nas seções anteriores; C6 não alterado e
+  hash de sua imagem em execução não extraído.
+- `idf.py -B build/weather-icon-large-20260924 -p COM8 app-flash` gravou só a
+  aplicação P4 em `0x20000` e confirmou `Hash of data verified`. No monitor,
+  display RGB565, rotação 180°, triple-partial e três FBs aos 1,981 s;
+  microSD montado e ícones prontos aos 2,041 s; C6 3.0.6/RPC v2/SW_AGGR
+  aos 3,401 s; pacote de 24 quadros aos 4,701 s; Home visível aos 7,971 s;
+  HTTPS dos três domínios concluído até 18,281 s e novo pacote animado aos
+  19,031 s, sem panic no intervalo. O responsável confirmou que o ícone
+  ampliado anima, ocupa a altura desejada e não encosta nos textos ou cards.
+
+### 2026-09-24 — Pacotes Meteocons nativos de 160 px preparados
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 32 MiB flash/PSRAM,
+  C6 pareado por SDIO; base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+- `tools/build_weather_icons.py` gerou 20 pacotes NPWI de `160 x 160` px em
+  `design/clima/generated-160/`, a partir dos SVGs locais. Total
+  76.186.080 bytes; todos os cabeçalhos, tamanhos e CRC32 íntegros, com
+  quadros distintos. O gerador preservou os pacotes antigos de 96 px.
+- O carregador P4 aceita pacotes de 96 e 160 px, lê o tamanho no cabeçalho e
+  reserva dois buffers PSRAM para o limite de 48 quadros nativos. A Home
+  desenha 160 px; com pacotes nativos passa a 1:1. O instalador do SD valida
+  os 20 arquivos, copia para staging, compara SHA-256 e preserva a pasta
+  antiga como backup antes de ativar a nova.
+- Build limpo: ESP-IDF 5.5.4, `esp32p4`, comando
+  `idf.py -B build/weather-icon-native-20260924 -D IDF_TARGET=esp32p4 build`.
+  Aplicação `0x2841e0` B; partição `0x800000` B, 69% livre. SHA-256 P4
+  `22760721C42AA8E3CAB4B7600BAE89DF7C674A8D92B41AA84D1F9A79B4160DB5`.
+  SHA-256 do `firmware/sdkconfig` efetivo
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+- `idf.py -B build/weather-icon-native-20260924 -p COM8 app-flash` gravou só
+  a aplicação P4 em `0x20000` e confirmou `Hash of data verified`. No monitor,
+  display RGB565, rotação 180°, triple-partial e três FBs aos 1,990 s;
+  microSD montado e ícones prontos aos 2,050 s; C6 3.0.6/RPC v2/SW_AGGR
+  aos 3,400 s; pacote antigo de 24 quadros `96x96` carregado aos 4,700 s e
+  novamente aos 17,290 s; Home visível aos 7,980 s; HTTPS dos três domínios
+  concluído até 16,210 s, sem panic no intervalo. C6 não alterado; hash de
+  sua imagem em execução não extraído.
+- O responsável optou por copiar os novos pacotes ao microSD depois. A
+  renderização nativa de 160 px na placa ainda não foi verificada; a Home
+  continua usando os arquivos antigos ampliados até essa cópia.
+
+### 2026-09-24 — Confirmação dos pacotes de 160 px no microSD
+
+- Após a substituição dos pacotes pelo responsável, o monitor registrou
+  `loaded animated weather icon: 24 frames, 160x160`; a Home apareceu sem
+  panic e o responsável confirmou melhora visual. O monitor foi encerrado.
+
+### 2026-09-24 — Detalhes de clima, BTC e PTAX na Home
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 com 32 MiB flash e
+  PSRAM; C6 3.0.6 por SDIO. Base Git
+  `04187448b9891ee173dcf98d80e969534628f642-dirty`.
+- Contrato/codec offline v4 de 169 B, leitura compatível com cache v1-v3;
+  Open-Meteo fornece vento, sensação e UV; CoinGecko `/coins/markets` fornece
+  máxima, mínima e volume USD de 24 h; BCB SGS 1 fornece as duas últimas PTAX
+  para a variação em pontos-base. Ibovespa ficou indisponível por escolha do
+  responsável. Os testes host do codec e dos parsers passaram.
+- GETs de validação dos endpoints públicos retornaram HTTP 200 com respostas
+  de 556 B (Open-Meteo), 757 B (CoinGecko) e 79 B (BCB), abaixo dos limites
+  de 768, 3072 e 192 B. Nenhum corpo HTTP entra no estado ou nos logs.
+- Build limpo: ESP-IDF 5.5.4, target `esp32p4`, comando
+  `idf.py -B build/home-details-20260924 -D IDF_TARGET=esp32p4 build`.
+  Após ajuste do rótulo para “Dólar PTAX”, rebuild terminou com app
+  `0x2856c0` B em partição `0x800000` B, 68% livres. SHA-256 final P4
+  `1109194E72CE07CF64FC753813AF80610994487512A43292C9D36C5373173C29`;
+  SHA-256 do `firmware/sdkconfig` efetivo
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+- `idf.py -B build/home-details-20260924 -p COM8 app-flash` gravou somente
+  a aplicação P4 em `0x20000` e confirmou `Hash of data verified`. No boot
+  final, display RGB565/180°/triple-partial/3 FBs, microSD montado, C6
+  3.0.6/RPC v2/SW_AGGR, pacote animado `160x160` aos 7,711 s e Home
+  visível aos 7,971 s. BTC, clima e PTAX concluíram HTTPS+parse com
+  `ESP_OK` até 17,121 s; geração 275 do cache terminou. Sem panic no período
+  observado. C6 não foi alterado e o hash de sua imagem em execução não foi
+  extraído; a aparência dos campos novos depende de confirmação visual.
+
+### 2026-09-27 — Navegação com ciclo de vida sob demanda
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, P4 com 32 MiB de flash e
+  PSRAM; C6 permaneceu na imagem 3.0.6/RPC v2/SW_AGGR por SDIO. Base Git
+  `174d66c-dirty`.
+- O controlador agora mantém uma única cena de produto em memória: Boot é
+  destruída ao criar a Home; Configurações só é criada pelo toque no novo item
+  do drawer; e, ao voltar pela Home da própria tela, Configurações é destruída
+  antes de recriar a Home. A projeção de AppState é atualizada apenas quando a
+  Home está ativa. As trocas usam `lv_async_call`, para nunca apagar a árvore
+  que está despachando o toque.
+- Build limpo ESP-IDF 5.5.4, target `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 -DIDF_TARGET=esp32p4 build`.
+  Aplicação `0x2867c0` B em partição de `0x800000` B, com `0x579840` B (68%)
+  livres. SHA-256 P4
+  `85EACC667E015310EB458A5D02A938994F7184F17762CD6108D03D728CF83534`.
+  SHA-256 do `firmware/sdkconfig` efetivo
+  `DDC89CA7B33FD0A25AD4647A1F83BBF15881D6359507A563CE7488E77078BEFA`.
+- A primeira gravação da build validou o ciclo de vida e o monitor confirmou
+  P4 v1.3, PSRAM 32 MiB, EK79007, GT911, RGB565, rotação 180°,
+  triple-partial com três framebuffers, C6 3.0.6/RPC v2/SW_AGGR e Home visível
+  aos 7,982 s. Wi-Fi recebeu IP e as três atualizações HTTPS concluíram com
+  `ESP_OK`; não houve panic ou WDT na captura.
+- Após acrescentar a recuperação de falha de agendamento LVGL, o rebuild
+  incremental produziu o SHA-256 final acima e
+  `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou somente
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. A abertura de
+  Configurações e a volta para Home continuam pendentes de observação direta
+  pelo touch.
+
+### 2026-09-27 — Revelação gradual dos cards de Configurações
+
+- A árvore de Configurações continua sendo criada somente após o toque no
+  item do drawer. A raiz é exibida primeiro e os cards de conectividade, tela
+  e som, e sistema são revelados em três ciclos LVGL de 48 ms. O timer é
+  cancelado ao voltar para Home; se a alocação dele falhar, os três cards são
+  exibidos de uma vez para que a tela permaneça utilizável.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286940` B
+  em partição de `0x800000` B, com `0x5796c0` B (68%) livres. SHA-256 P4
+  `0073F885D20646E0B6F9042C7C7703E6C8B13C354CC4F16A422C8B9CBD11D098`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`. O boot posterior confirmou P4 v1.3, PSRAM de
+  32 MiB, EK79007, GT911, RGB565/180°/triple-partial/3 FBs, C6
+  3.0.6/RPC v2/SW_AGGR, Home aos 8,031 s, Wi-Fi com IP e as três atualizações
+  HTTPS com `ESP_OK`; não houve panic ou WDT na captura. A abertura pelo
+  touch e a sequência visual dos cards ainda requerem observação direta.
+
+### 2026-09-27 — Remoção da navegação duplicada em Configurações
+
+- A barra lateral própria de Configurações foi removida. A tela usa somente o
+  drawer do cabeçalho, igual à Home: o item Configurações fica destacado nela
+  e o item Home retorna à Home. Os três cards foram redistribuídos na largura
+  livre entre `x=24` e `x=1000`.
+- Build ESP-IDF 5.5.4 para `esp32p4` passou com app `0x286940` B e
+  `0x5796c0` B (68%) livres no slot de `0x800000` B. SHA-256 P4:
+  `280185A57C15C220D8BEBC96EDC0DC649DD141551A483762C8A2ABC9330A97A4`.
+- A imagem foi gravada somente no P4, em `0x20000`, via COM8. O boot final
+  confirmou P4 v1.3, PSRAM 32 MiB, display EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home aos
+  7,981 s e Wi-Fi com IP. Não houve panic ou WDT na captura; o monitor foi
+  encerrado e a COM8 liberada. A aparência da navegação no touch ainda requer
+  confirmação visual na placa.
+
+### 2026-09-27 — Layout de Configurações alinhado à referência visual
+
+- A referência recebida redefine a intenção da barra lateral: ela é a
+  navegação persistente da tela, não uma duplicação acidental. Configurações
+  volta a exibir os cinco ícones na rail, com Configurações ativa e Home como
+  retorno. Os painéis reproduzem a composição de perfil/rede, tela/som e
+  sistema da referência. A cena ainda só é construída após o toque no menu.
+- Build ESP-IDF 5.5.4 para `esp32p4`: app `0x290690` B em slot de
+  `0x800000` B, com `0x56f970` B (68%) livres. A gravação da aplicação P4 em
+  `0x20000` pela COM8 concluiu com `Hash of data verified`. SHA-256 P4:
+  `F5F166FD45971011A401055B00AD7EF21B2359E9463767BECFB9C7C1EE67B82D`.
+- O monitor posterior confirmou P4 v1.3, PSRAM 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home aos
+  7,998 s, Wi-Fi com IP e a primeira atualização HTTPS com `ESP_OK`, sem
+  panic ou WDT durante a captura. O monitor foi encerrado ao fim da captura.

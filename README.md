@@ -4,14 +4,19 @@ Firmware do smart panel premium baseado na Waveshare
 ESP32-P4-WIFI6-Touch-LCD-7B. O ESP32-P4 executa a aplicação; o ESP32-C6 opera
 como coprocessador Wi-Fi por ESP-Hosted sobre SDIO.
 
-O projeto ainda está na fase de base reproduzível. O firmware mínimo criado
-nesta etapa só prova a ferramenta e o target no host: ele não inicializa LCD,
-touch, PSRAM, C6, Wi-Fi ou persistência.
+O projeto iniciou a Fase 5 — atualização recuperável. As fases 0–4 têm
+fechamentos com escopo e exclusões registrados no roadmap; o firmware possui
+display/touch, conectividade e dados offline. G5 já inclui o caminho P4 de
+laboratório para manifesto assinado, hash incremental, journal, slot inativo e
+saúde local de boot; o ciclo HTTPS físico e a recuperação conjunta P4/C6 ainda
+estão em validação.
 
 ## Referências do projeto
 
 - [Bring-up e restrições de hardware](docs/RESTART-HARDWARE-BRINGUP.md)
 - [Plano de arquitetura e gates](docs/PLANO-FIRMWARE-PREMIUM.md)
+- [Roadmap e estado das fases](docs/ROADMAP.md)
+- [Execução e validação G5](docs/G5-VALIDATION.md)
 - [Configuração de desenvolvimento](docs/DEVELOPMENT.md)
 - [Instruções para colaboradores e agentes](AGENTS.md)
 
