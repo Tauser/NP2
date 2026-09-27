@@ -2973,3 +2973,18 @@ cortes de energia; esses gates continuam pendentes.
   ativo (`C:\Espressif\tools\python\v5.5.4\venv`); nenhuma sessão do
   responsável foi encerrada. O teste físico de abrir Configurações permanece
   pendente dessa gravação.
+
+### 2026-09-27 — Retorno ao layout anterior de Configurações
+
+- O layout ampliado foi revertido por preferência visual. Configurações voltou
+  à composição anterior, preservando a criação escalonada dos cards em ciclos
+  LVGL separados para não bloquear `IDLE0`.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x2870b0` B
+  em partição de `0x800000` B, com `0x578f50` B (68%) livres. SHA-256 P4:
+  `B60BD6ED90D5D8DC58DDBF53F6D14CD40443042C3F395CF3442D804D592E6AFD`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  8,023 s e Wi-Fi com IP. A captura de 15 s não registrou panic nem watchdog.
