@@ -30,7 +30,7 @@
 
 #define SETTINGS_NETWORK_H    174
 #define SETTINGS_SYSTEM_Y     (SETTINGS_TOP_Y + SETTINGS_NETWORK_H + SETTINGS_GAP)
-#define SETTINGS_SYSTEM_H     184
+#define SETTINGS_SYSTEM_H     310
 
 #define SETTINGS_BRIGHTNESS   78
 #define SETTINGS_VOLUME       65
@@ -132,10 +132,10 @@ static lv_obj_t *settings_display_card(lv_obj_t *root)
     np_hline(card, 24, 310, SETTINGS_LEFT_W - 48);
 
     np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
-             68, 336, 220, LV_TEXT_ALIGN_LEFT);
+             68, 380, 220, LV_TEXT_ALIGN_LEFT);
     np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
-             68, 366, 180, LV_TEXT_ALIGN_LEFT);
-    settings_toggle(card, 460, 332, true);
+             68, 411, 180, LV_TEXT_ALIGN_LEFT);
+    settings_toggle(card, 460, 376, true);
 
     return card;
 }
@@ -204,11 +204,16 @@ static lv_obj_t *settings_system_card(lv_obj_t *root)
              68, 46, 300, LV_TEXT_ALIGN_LEFT);
     np_hline(card, 24, 72, SETTINGS_RIGHT_W - 48);
 
-    lv_obj_t *update = np_button(card, 24, 88, SETTINGS_RIGHT_W - 48, 40,
+    np_label(card, "Atualização", NP_FONT_MD, np_c_text(),
+             24, 98, 180, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *update = np_button(card, 24, 128, SETTINGS_RIGHT_W - 48, 52,
                                  "Atualizar sistema", true);
     lv_obj_clear_flag(update, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *restart = np_button(card, 24, 136, SETTINGS_RIGHT_W - 48, 30,
+    np_hline(card, 24, 204, SETTINGS_RIGHT_W - 48);
+    np_label(card, "Energia", NP_FONT_MD, np_c_text(),
+             24, 224, 180, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *restart = np_button(card, 24, 254, SETTINGS_RIGHT_W - 48, 44,
                                   "Reiniciar dispositivo", false);
     lv_obj_clear_flag(restart, LV_OBJ_FLAG_CLICKABLE);
 

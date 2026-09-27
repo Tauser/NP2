@@ -3004,3 +3004,19 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   8,033 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
+
+### 2026-09-27 — Espaçamentos de Configurações
+
+- O espaço liberado foi redistribuído sem restaurar os dados removidos: Modo
+  noturno foi centralizado na área inferior de Tela e som; Sistema voltou à
+  altura total disponível, com ações maiores de atualização e reinício
+  separadas por seções.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286cf0` B
+  em partição de `0x800000` B, com `0x579310` B (68%) livres. SHA-256 P4:
+  `7D67BD9EB38BDFD5BEFD85F7D8D23E7142709FA35EDF50287CE5706D489CFEBE`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  7,983 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
