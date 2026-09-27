@@ -65,7 +65,8 @@ static const char *const UPDATE_NAMESPACE = "np2_update";
 static const char *const ONBOARDING_NAMESPACE = "np2_onboard";
 static const char *const ONBOARDING_SLOT_ZERO_KEY = "onb0";
 static const char *const ONBOARDING_SLOT_ONE_KEY = "onb1";
-static const char *const NOTIFICATION_NAMESPACE = "np2_notifications";
+/* NVS namespaces are limited to 15 characters. */
+static const char *const NOTIFICATION_NAMESPACE = "np2_notif";
 static const char *const NOTIFICATION_SLOT_ZERO_KEY = "ntf0";
 static const char *const NOTIFICATION_SLOT_ONE_KEY = "ntf1";
 static const char *const CREDENTIAL_VAULT_NAMESPACE = "np2_credentials";
