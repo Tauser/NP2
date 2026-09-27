@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 2,
+  "origin": "cache",
+  "weather": { "available": false, "stale": false },
+  "market": { "available": true, "stale": true, "bitcoinUsdCents": 6718734, "change24hBasisPoints": 364, "observedAtUnixS": 1789176000 },
+  "exchange": { "available": false, "stale": false }
+}

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 2,
+  "origin": "live",
+  "weather": {
+    "available": true,
+    "stale": false,
+    "temperatureDeciC": 247,
+    "relativeHumidityPercent": 61,
+    "weatherCode": 3,
+    "observedAtUnixS": 1789176000
+  },
+  "market": {
+    "available": true,
+    "stale": false,
+    "bitcoinUsdCents": 6718734,
+    "change24hBasisPoints": 364,
+    "observedAtUnixS": 1789176000
+  },
+  "exchange": {
+    "available": true,
+    "stale": false,
+    "usdBrlTenThousandths": 51161,
+    "observedAtUnixS": 1789176000
+  }
+}

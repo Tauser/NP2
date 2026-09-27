@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NP2 Offline Snapshot v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "origin", "weather", "market", "exchange"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "origin": { "enum": ["cache", "live"] },
+    "weather": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "temperatureDeciC": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+        "relativeHumidityPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "weatherCode": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "market": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "bitcoinUsdCents": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "change24hBasisPoints": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "exchange": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "usdBrlTenThousandths": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

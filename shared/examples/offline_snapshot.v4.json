@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 4,
+  "origin": "live",
+  "weather": {
+    "available": true, "stale": false, "temperatureDeciC": 214,
+    "relativeHumidityPercent": 68, "weatherCode": 3,
+    "apparentTemperatureAvailable": true, "apparentTemperatureDeciC": 230,
+    "windSpeedAvailable": true, "windSpeedDeciKmh": 20,
+    "uvIndexAvailable": true, "uvIndexDeci": 0,
+    "observedAtUnixS": 1790294400
+  },
+  "weatherVisual": { "available": true, "isDay": false },
+  "market": {
+    "available": true, "stale": false, "bitcoinUsdCents": 8466300,
+    "change24hBasisPoints": 61,
+    "high24hAvailable": true, "high24hUsdCents": 8484300,
+    "low24hAvailable": true, "low24hUsdCents": 8294100,
+    "volume24hAvailable": true, "volume24hUsdCents": 3777883853400,
+    "historyUsdCents": [], "observedAtUnixS": 1790294400
+  },
+  "exchange": {
+    "available": true, "stale": false, "usdBrlTenThousandths": 51795,
+    "changeAvailable": true, "changeBasisPoints": 74,
+    "observedAtUnixS": 1790294400
+  },
+  "ibovespa": { "available": false, "stale": false }
+}

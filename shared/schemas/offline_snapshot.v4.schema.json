@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NP2 Offline Snapshot v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "origin", "weather", "weatherVisual", "market", "exchange", "ibovespa"],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "origin": { "enum": ["cache", "live"] },
+    "weather": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "temperatureDeciC": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+        "relativeHumidityPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "weatherCode": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "apparentTemperatureAvailable": { "type": "boolean" },
+        "apparentTemperatureDeciC": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+        "windSpeedAvailable": { "type": "boolean" },
+        "windSpeedDeciKmh": { "type": "integer", "minimum": 0, "maximum": 2000 },
+        "uvIndexAvailable": { "type": "boolean" },
+        "uvIndexDeci": { "type": "integer", "minimum": 0, "maximum": 250 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "weatherVisual": {
+      "type": "object", "additionalProperties": false, "required": ["available"],
+      "properties": { "available": { "type": "boolean" }, "isDay": { "type": "boolean" } }
+    },
+    "market": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "bitcoinUsdCents": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "change24hBasisPoints": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "high24hAvailable": { "type": "boolean" },
+        "high24hUsdCents": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "low24hAvailable": { "type": "boolean" },
+        "low24hUsdCents": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "volume24hAvailable": { "type": "boolean" },
+        "volume24hUsdCents": { "type": "integer", "minimum": 0 },
+        "historyUsdCents": {
+          "type": "array", "maxItems": 24,
+          "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+        },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "exchange": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "usdBrlTenThousandths": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "changeAvailable": { "type": "boolean" },
+        "changeBasisPoints": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ibovespa": {
+      "type": "object", "additionalProperties": false, "required": ["available", "stale"],
+      "properties": {
+        "available": { "type": "boolean" }, "stale": { "type": "boolean" },
+        "valueCentiPoints": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "changeAvailable": { "type": "boolean" },
+        "changeBasisPoints": { "type": "integer", "minimum": -32768, "maximum": 32767 },
+        "observedAtUnixS": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
