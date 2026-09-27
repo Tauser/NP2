@@ -1,5 +1,6 @@
 #include "notification_service.h"
 
+#include "device_control_service.h"
 #include "flash_coordinator.h"
 
 #include "freertos/FreeRTOS.h"
@@ -198,6 +199,15 @@ esp_err_t notification_service_set_sound_enabled(bool enabled)
 esp_err_t notification_service_set_system_alerts_enabled(bool enabled)
 {
     return set_preference(2U, enabled);
+}
+
+esp_err_t notification_service_request_alert_sound(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    const bool allowed = s_started && s_status.ready &&
+                         s_status.general_enabled && s_status.sound_enabled;
+    portEXIT_CRITICAL(&s_lock);
+    return allowed ? device_control_play_notification_tone() : ESP_ERR_INVALID_STATE;
 }
 
 void notification_service_get_status(notification_service_status_t *out_status)

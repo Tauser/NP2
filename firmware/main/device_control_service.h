@@ -33,6 +33,8 @@ esp_err_t device_control_service_start(void);
 /* Coalesced, non-blocking requests safe to issue from the LVGL task. */
 esp_err_t device_control_set_brightness(uint8_t percent);
 esp_err_t device_control_set_volume(uint8_t percent);
+/* Queues one short PCM chime on the device-control task at the saved volume. */
+esp_err_t device_control_play_notification_tone(void);
 
 void device_control_get_status(device_control_status_t *out_status);
 

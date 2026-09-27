@@ -76,6 +76,7 @@ typedef struct {
     lv_obj_t *notifications_general_switch;
     lv_obj_t *notifications_sound_switch;
     lv_obj_t *notifications_system_switch;
+    lv_obj_t *notifications_test_button;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);

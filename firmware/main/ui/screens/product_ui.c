@@ -64,6 +64,7 @@ static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
 static void notifications_event_cb(lv_event_t *event);
 static void notification_switch_event_cb(lv_event_t *event);
+static void notifications_test_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
@@ -147,6 +148,10 @@ static void settings_control_event_cb(lv_event_t *event)
                                  s_ui.projected_volume);
             return;
         }
+        /* The control worker applies this queued volume before the chime.
+         * This is a local control preview, independent of notification
+         * delivery preferences, and never runs audio from the LVGL task. */
+        (void)device_control_play_notification_tone();
     }
 
     if (control == SETTINGS_CONTROL_BRIGHTNESS) {
@@ -215,6 +220,11 @@ static void install_settings_control_callbacks(void)
                         LV_EVENT_VALUE_CHANGED, (void *)1U);
     lv_obj_add_event_cb(s_ui.settings.notifications_system_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)2U);
+    if (s_ui.settings.notifications_test_button != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.notifications_test_button,
+                            notifications_test_event_cb,
+                            LV_EVENT_CLICKED, NULL);
+    }
 }
 
 static void notifications_event_cb(lv_event_t *event)
@@ -254,6 +264,21 @@ static void notification_switch_event_cb(lv_event_t *event)
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Preferencia nao alterada",
                                "Tente novamente em alguns instantes", 3500U);
+    }
+}
+
+static void notifications_test_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+
+    if (notification_service_request_alert_sound() == ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                               "Som de notificacao",
+                               "Reproduzindo no volume atual", 1800U);
+    } else {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Som indisponivel",
+                               "Ative notificacoes, som e o volume", 2800U);
     }
 }
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
@@ -358,12 +383,40 @@ static void format_volume_short(uint64_t cents, char *out, size_t out_size)
 /* Header                                                              */
 /* ------------------------------------------------------------------ */
 
+static void update_header(np_header_t *header,
+                          const app_ui_projection_t *projection,
+                          bool settings_active)
+{
+    if (header == NULL || projection == NULL) return;
+
+    np_header_set_drawer_active(header, settings_active);
+    np_header_set_connections(
+        header,
+        projection->network.online,
+        false,
+        projection->network.state == APP_NETWORK_STATE_FAILED ||
+            projection->storage.last_result != ESP_OK);
+    np_header_set_notifications_enabled(header,
+                                        projection->notifications.general_enabled);
+
+    struct tm local = {0};
+    if (!projection_local_time(projection, &local)) {
+        np_clock_set(&header->clock, "--:--");
+        return;
+    }
+
+    char clock[6] = {0};
+    (void)snprintf(clock, sizeof(clock), "%02d:%02d",
+                   local.tm_hour, local.tm_min);
+    np_clock_set(&header->clock, clock);
+}
+
 static void update_clock(const app_ui_projection_t *projection)
 {
     struct tm local = {0};
+    update_header(&s_ui.home.header, projection, false);
 
     if (!projection_local_time(projection, &local)) {
-        np_clock_set(&s_ui.home.header.clock, "--:--");
         np_set_text(s_ui.home.weather_date, "Data indisponível");
         return;
     }
@@ -377,16 +430,11 @@ static void update_clock(const app_ui_projection_t *projection)
         "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
     };
 
-    char clock[6] = {0};
     char weather_date[64] = {0};
-
-    (void)snprintf(clock, sizeof(clock), "%02d:%02d",
-                   local.tm_hour, local.tm_min);
     (void)snprintf(weather_date, sizeof(weather_date), "%s, %d de %s",
                    weekdays_long[local.tm_wday], local.tm_mday,
                    months[local.tm_mon]);
 
-    np_clock_set(&s_ui.home.header.clock, clock);
     np_set_text(s_ui.home.weather_date, weather_date);
 }
 
@@ -767,15 +815,6 @@ static void update_home(const app_ui_projection_t *projection)
         s_ui.home_data_rendered = true;
     }
 
-    np_header_set_connections(
-        &s_ui.home.header,
-        projection->network.online,
-        false,
-        projection->network.state == APP_NETWORK_STATE_FAILED ||
-            projection->storage.last_result != ESP_OK);
-    np_header_set_notifications_enabled(&s_ui.home.header,
-                                        projection->notifications.general_enabled);
-
     if (projection->notifications.ready) {
         if (!s_ui.notification_feedback_initialized) {
             s_ui.notified_persisted_generation =
@@ -807,6 +846,8 @@ static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
 
+    update_header(&s_ui.settings.header, projection, true);
+
     if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
         if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
             s_ui.projected_brightness = projection->device_controls.brightness_percent;
@@ -822,8 +863,6 @@ static void update_settings(const app_ui_projection_t *projection)
         }
     }
 
-    np_header_set_notifications_enabled(&s_ui.settings.header,
-                                        projection->notifications.general_enabled);
     if (!projection->notifications.ready) return;
 
     s_ui.syncing_notification_controls = true;

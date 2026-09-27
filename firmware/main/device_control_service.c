@@ -16,6 +16,8 @@
 #define DEVICE_CONTROL_PRIORITY           2U
 #define DEVICE_CONTROL_POLL_MS            100U
 #define DEVICE_CONTROL_SAVE_DELAY_MS      500U
+#define DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES 768U
+#define DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS 350U
 
 static const char *const TAG = "device_controls";
 
@@ -25,6 +27,7 @@ static esp_codec_dev_handle_t s_speaker;
 static bool s_started;
 static bool s_brightness_pending;
 static bool s_volume_pending;
+static bool s_notification_tone_pending;
 static uint8_t s_requested_brightness;
 static uint8_t s_requested_volume;
 static uint8_t s_dirty_mask;
@@ -33,6 +36,7 @@ static uint32_t s_pending_flash_sequence;
 static uint8_t s_submitted_mask;
 static device_control_profile_t s_submitted_profile;
 static TickType_t s_last_change_tick;
+static TickType_t s_last_notification_tone_tick;
 static device_control_status_t s_status = {
     .brightness_percent = DEVICE_CONTROL_DEFAULT_BRIGHTNESS,
     .volume_percent = DEVICE_CONTROL_DEFAULT_VOLUME,
@@ -166,6 +170,42 @@ static void apply_pending_controls(void)
     }
 }
 
+static void fill_notification_tone(int16_t *samples, uint8_t phase_step)
+{
+    uint8_t phase = 0U;
+    for (uint32_t i = 0U; i < DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES; ++i) {
+        const int32_t triangle =
+            ((phase < 50U ? (int32_t)phase : 100 - (int32_t)phase) * 2) - 50;
+        const uint32_t remaining = DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES - 1U - i;
+        const int32_t envelope = i < 40U ? (int32_t)i :
+                                 remaining < 40U ? (int32_t)remaining : 40;
+        samples[i] = (int16_t)((triangle * 360 * envelope) / 40);
+        phase = (uint8_t)((phase + phase_step) % 100U);
+    }
+}
+
+static void play_pending_notification_tone(void)
+{
+    bool pending = false;
+    portENTER_CRITICAL(&s_lock);
+    pending = s_notification_tone_pending;
+    s_notification_tone_pending = false;
+    portEXIT_CRITICAL(&s_lock);
+    if (!pending || s_speaker == NULL) return;
+
+    int16_t samples[DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES];
+    const uint8_t phase_steps[] = {3U, 4U};
+    for (uint32_t i = 0U; i < sizeof(phase_steps) / sizeof(phase_steps[0]); ++i) {
+        fill_notification_tone(samples, phase_steps[i]);
+        const esp_err_t result = codec_result(esp_codec_dev_write(
+            s_speaker, (void *)samples, sizeof(samples)));
+        if (result != ESP_OK) {
+            ESP_LOGW(TAG, "Notification tone unavailable: %s", esp_err_to_name(result));
+            return;
+        }
+    }
+}
+
 static void finish_save_if_complete(void)
 {
     if (!s_save_enqueued) return;
@@ -264,6 +304,7 @@ static void device_control_task(void *arg)
             }
         } else {
             apply_pending_controls();
+            play_pending_notification_tone();
             finish_save_if_complete();
             submit_dirty_profile();
         }
@@ -330,6 +371,28 @@ esp_err_t device_control_set_brightness(uint8_t percent)
 esp_err_t device_control_set_volume(uint8_t percent)
 {
     return request_update(percent, false);
+}
+
+esp_err_t device_control_play_notification_tone(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    const TickType_t now = xTaskGetTickCount();
+    const uint8_t effective_volume =
+        s_volume_pending ? s_requested_volume : s_status.volume_percent;
+    if (!s_started || !s_status.ready || !s_status.audio_ready || s_task == NULL ||
+        effective_volume == 0U ||
+        now - s_last_notification_tone_tick <
+            pdMS_TO_TICKS(DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS)) {
+        portEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_notification_tone_pending = true;
+    s_last_notification_tone_tick = now;
+    const TaskHandle_t task = s_task;
+    portEXIT_CRITICAL(&s_lock);
+
+    xTaskNotifyGive(task);
+    return ESP_OK;
 }
 
 void device_control_get_status(device_control_status_t *out_status)

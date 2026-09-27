@@ -49,6 +49,19 @@ notificações gerais.
 ocultar cada elemento e todos os elementos. Ele só apresenta feedback; não
 contém regra de entrega de notificação.
 
+## Feedback sonoro
+
+O botão `Testar som` da Settings passa pela política do
+`notification_service`: notificações gerais e som precisam estar ativos. O
+serviço entrega a solicitação ao `device_control_service`, que reproduz um
+chime PCM curto em sua própria task, usando o volume persistido do dispositivo.
+Há limitação de uma solicitação a cada 350 ms para evitar sobreposição.
+
+O preview ao soltar o slider de volume também é executado pela task de controle
+de dispositivo, depois que o novo ganho foi aplicado. Ele não depende das
+preferências de entrega de notificações, pois confirma uma alteração local do
+controle de áudio. Com volume em zero, não há tom.
+
 ## Próximos incrementos
 
 - Definir eventos de domínio, prioridade, categoria, deduplicação, TTL e

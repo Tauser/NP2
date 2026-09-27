@@ -48,10 +48,15 @@
 #define SETTINGS_BRIGHTNESS         60
 #define SETTINGS_VOLUME             65
 
-#define SETTINGS_MODAL_X            192
-#define SETTINGS_MODAL_Y            116
-#define SETTINGS_MODAL_W            640
-#define SETTINGS_MODAL_H            368
+#define SETTINGS_SYSTEM_MODAL_X     192
+#define SETTINGS_SYSTEM_MODAL_Y     116
+#define SETTINGS_SYSTEM_MODAL_W     640
+#define SETTINGS_SYSTEM_MODAL_H     368
+
+#define SETTINGS_NOTIFICATIONS_MODAL_X 172
+#define SETTINGS_NOTIFICATIONS_MODAL_Y 84
+#define SETTINGS_NOTIFICATIONS_MODAL_W 680
+#define SETTINGS_NOTIFICATIONS_MODAL_H 432
 
 static lv_obj_t *s_system_modal_scrim = NULL;
 static lv_obj_t *s_notifications_modal_scrim = NULL;
@@ -224,8 +229,8 @@ static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
     lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *modal = settings_panel(scrim,
-                                     SETTINGS_MODAL_X, SETTINGS_MODAL_Y,
-                                     SETTINGS_MODAL_W, SETTINGS_MODAL_H);
+                                     SETTINGS_SYSTEM_MODAL_X, SETTINGS_SYSTEM_MODAL_Y,
+                                     SETTINGS_SYSTEM_MODAL_W, SETTINGS_SYSTEM_MODAL_H);
 
     np_label(modal, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
              24, 22, 30, LV_TEXT_ALIGN_CENTER);
@@ -236,16 +241,15 @@ static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
     np_label(modal, "Informacoes do dispositivo", NP_FONT_SM, np_c_text_2(),
              68, 48, 300, LV_TEXT_ALIGN_LEFT);
 
-    lv_obj_t *close = np_button(modal,
-                                SETTINGS_MODAL_W - 68, 16,
-                                44, 44,
-                                "X", false);
+    lv_obj_t *close = np_icon_button(modal,
+                                     SETTINGS_SYSTEM_MODAL_W - 68, 16,
+                                     44, NP_ICON_CLOSE);
     lv_obj_add_event_cb(close,
                         settings_modal_close_event_cb,
                         LV_EVENT_CLICKED,
                         scrim);
 
-    np_hline(modal, 24, 82, SETTINGS_MODAL_W - 48);
+    np_hline(modal, 24, 82, SETTINGS_SYSTEM_MODAL_W - 48);
 
     settings_system_value(modal, 32, 110, 250,
                           "Display", "1024x600 · RGB565");
@@ -277,10 +281,11 @@ static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
     return scrim;
 }
 
-static lv_obj_t *settings_notification_switch(lv_obj_t *parent, int32_t y)
+static lv_obj_t *settings_notification_switch(lv_obj_t *parent,
+                                              int32_t x, int32_t y)
 {
     lv_obj_t *sw = lv_switch_create(parent);
-    lv_obj_set_pos(sw, 536, y);
+    lv_obj_set_pos(sw, x, y);
     lv_obj_set_size(sw, 52, 28);
     lv_obj_add_state(sw, LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(sw, np_c_hairline(), LV_PART_MAIN);
@@ -289,32 +294,80 @@ static lv_obj_t *settings_notification_switch(lv_obj_t *parent, int32_t y)
     return sw;
 }
 
+static lv_obj_t *settings_notification_item(lv_obj_t *modal,
+                                            int32_t y,
+                                            const char *icon,
+                                            lv_color_t icon_color,
+                                            const char *title,
+                                            const char *detail)
+{
+    const int32_t row_width = SETTINGS_NOTIFICATIONS_MODAL_W - 48;
+    lv_obj_t *row = np_fill(modal, 24, y, row_width, 68,
+                            np_c_surface_raised(), LV_OPA_COVER,
+                            NP_RADIUS_CONTROL);
+    lv_obj_t *icon_tile = np_fill(row, 14, 13, 42, 42,
+                                  np_c_surface(), LV_OPA_COVER,
+                                  NP_RADIUS_CONTROL);
+    np_label(icon_tile, icon, NP_FONT_ICON, icon_color,
+             0, 9, 42, LV_TEXT_ALIGN_CENTER);
+    np_label(row, title, NP_FONT_MD, np_c_text(),
+             72, 9, 350, LV_TEXT_ALIGN_LEFT);
+    np_label(row, detail, NP_FONT_SM, np_c_text_2(),
+             72, 37, 410, LV_TEXT_ALIGN_LEFT);
+    return row;
+}
+
 static lv_obj_t *settings_build_notifications_modal(lv_obj_t *root,
                                                      np_settings_view_t *view)
 {
     lv_obj_t *scrim = np_fill(root, 0, 0, NP_SCREEN_W, NP_SCREEN_H,
                               np_c_bg(), LV_OPA_70, 0);
-    lv_obj_t *modal = settings_panel(scrim, SETTINGS_MODAL_X, SETTINGS_MODAL_Y,
-                                     SETTINGS_MODAL_W, SETTINGS_MODAL_H);
-    np_label(modal, NP_ICON_NOTIFICATIONS, NP_FONT_ICON, np_c_text_2(),
-             24, 22, 30, LV_TEXT_ALIGN_CENTER);
+    lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *modal = settings_panel(scrim,
+                                     SETTINGS_NOTIFICATIONS_MODAL_X,
+                                     SETTINGS_NOTIFICATIONS_MODAL_Y,
+                                     SETTINGS_NOTIFICATIONS_MODAL_W,
+                                     SETTINGS_NOTIFICATIONS_MODAL_H);
+    lv_obj_t *icon_tile = np_fill(modal, 24, 17, 44, 44,
+                                  np_c_accent_bg(), LV_OPA_COVER,
+                                  NP_RADIUS_CONTROL);
+    np_label(icon_tile, NP_ICON_NOTIFICATIONS, NP_FONT_ICON, np_c_accent(),
+             0, 10, 44, LV_TEXT_ALIGN_CENTER);
     np_label(modal, "Notificacoes", NP_FONT_LG, np_c_text(),
-             68, 18, 360, LV_TEXT_ALIGN_LEFT);
-    lv_obj_t *close = np_button(modal, SETTINGS_MODAL_W - 68, 16, 44, 44,
-                                "X", false);
+             84, 16, 360, LV_TEXT_ALIGN_LEFT);
+    np_label(modal, "Alertas e som do painel", NP_FONT_SM, np_c_text_2(),
+             84, 45, 360, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *close = np_icon_button(modal,
+                                     SETTINGS_NOTIFICATIONS_MODAL_W - 68, 16,
+                                     44, NP_ICON_CLOSE);
     lv_obj_add_event_cb(close, settings_modal_close_event_cb,
                         LV_EVENT_CLICKED, scrim);
-    np_hline(modal, 24, 82, SETTINGS_MODAL_W - 48);
-    np_label(modal, "Notificacoes gerais", NP_FONT_MD, np_c_text(),
-             32, 112, 360, LV_TEXT_ALIGN_LEFT);
-    view->notifications_general_switch = settings_notification_switch(modal, 106);
-    np_hline(modal, 32, 164, SETTINGS_MODAL_W - 64);
-    np_label(modal, "Som", NP_FONT_MD, np_c_text(), 32, 190, 360, LV_TEXT_ALIGN_LEFT);
-    view->notifications_sound_switch = settings_notification_switch(modal, 184);
-    np_hline(modal, 32, 242, SETTINGS_MODAL_W - 64);
-    np_label(modal, "Alertas do sistema", NP_FONT_MD, np_c_text(),
-             32, 268, 360, LV_TEXT_ALIGN_LEFT);
-    view->notifications_system_switch = settings_notification_switch(modal, 262);
+    np_hline(modal, 24, 78, SETTINGS_NOTIFICATIONS_MODAL_W - 48);
+
+    lv_obj_t *general = settings_notification_item(
+        modal, 96, NP_ICON_NOTIFICATIONS, np_c_accent(),
+        "Notificacoes gerais", "Exibe alertas nao criticos");
+    view->notifications_general_switch =
+        settings_notification_switch(general, 552, 20);
+
+    lv_obj_t *sound = settings_notification_item(
+        modal, 172, NP_ICON_VOLUME_UP, np_c_positive(),
+        "Som das notificacoes", "Usa o volume geral configurado");
+    view->notifications_sound_switch =
+        settings_notification_switch(sound, 552, 20);
+
+    lv_obj_t *system = settings_notification_item(
+        modal, 248, NP_ICON_WARNING, np_c_warning(),
+        "Alertas do sistema", "Rede, armazenamento e atualizacoes");
+    view->notifications_system_switch =
+        settings_notification_switch(system, 552, 20);
+
+    np_label(modal, "Teste no volume atual", NP_FONT_SM, np_c_text_3(),
+             24, 350, 280, LV_TEXT_ALIGN_LEFT);
+    view->notifications_test_button = np_button(modal,
+                                                442, 338,
+                                                214, 52,
+                                                "Testar som", true);
     np_set_visible(scrim, false);
     return scrim;
 }

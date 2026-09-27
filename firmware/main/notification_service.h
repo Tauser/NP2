@@ -22,4 +22,8 @@ esp_err_t notification_service_start(void);
 esp_err_t notification_service_set_general_enabled(bool enabled);
 esp_err_t notification_service_set_sound_enabled(bool enabled);
 esp_err_t notification_service_set_system_alerts_enabled(bool enabled);
+/* Queues the short notification chime when both notification and sound
+ * preferences allow it. Notification producers and the Settings preview use
+ * this API; neither accesses audio hardware directly. */
+esp_err_t notification_service_request_alert_sound(void);
 void notification_service_get_status(notification_service_status_t *out_status);
