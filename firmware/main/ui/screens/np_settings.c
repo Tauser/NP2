@@ -30,7 +30,7 @@
 
 #define SETTINGS_NETWORK_H    174
 #define SETTINGS_SYSTEM_Y     (SETTINGS_TOP_Y + SETTINGS_NETWORK_H + SETTINGS_GAP)
-#define SETTINGS_SYSTEM_H     310
+#define SETTINGS_SYSTEM_H     184
 
 #define SETTINGS_BRIGHTNESS   78
 #define SETTINGS_VOLUME       65
@@ -105,24 +105,6 @@ static void settings_slider(lv_obj_t *parent,
     }
 }
 
-static void settings_theme_button(lv_obj_t *parent,
-                                  int32_t x, int32_t y, int32_t w,
-                                  const char *text, bool active)
-{
-    lv_obj_t *button = np_fill(parent, x, y, w, 48,
-                               active ? np_c_accent() : np_c_surface_raised(),
-                               LV_OPA_COVER, NP_RADIUS_CONTROL);
-
-    if (!active) {
-        lv_obj_set_style_border_width(button, 1, 0);
-        lv_obj_set_style_border_color(button, np_c_hairline(), 0);
-    }
-
-    np_label(button, text, NP_FONT_MD,
-             active ? np_c_text_on_accent() : np_c_text_2(),
-             0, 13, w, LV_TEXT_ALIGN_CENTER);
-}
-
 static lv_obj_t *settings_display_card(lv_obj_t *root)
 {
     lv_obj_t *card = settings_panel(root,
@@ -149,22 +131,11 @@ static lv_obj_t *settings_display_card(lv_obj_t *root)
 
     np_hline(card, 24, 310, SETTINGS_LEFT_W - 48);
 
-    np_label(card, "Tema", NP_FONT_MD, np_c_text(),
-             68, 330, 160, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Escolha o tema visual da interface.", NP_FONT_SM, np_c_text_2(),
-             68, 360, 350, LV_TEXT_ALIGN_LEFT);
-
-    settings_theme_button(card, 68, 392, 136, "Grafite", true);
-    settings_theme_button(card, 216, 392, 136, "Carvão", false);
-    settings_theme_button(card, 364, 392, 136, "Âmbar", false);
-
-    np_hline(card, 24, 454, SETTINGS_LEFT_W - 48);
-
     np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
-             68, 468, 220, LV_TEXT_ALIGN_LEFT);
+             68, 336, 220, LV_TEXT_ALIGN_LEFT);
     np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
-             290, 471, 150, LV_TEXT_ALIGN_LEFT);
-    settings_toggle(card, 460, 464, true);
+             68, 366, 180, LV_TEXT_ALIGN_LEFT);
+    settings_toggle(card, 460, 332, true);
 
     return card;
 }
@@ -219,17 +190,6 @@ static lv_obj_t *settings_connectivity_card(lv_obj_t *root)
     return card;
 }
 
-static void settings_system_row(lv_obj_t *card,
-                                int32_t y,
-                                const char *label,
-                                const char *value)
-{
-    np_label(card, label, NP_FONT_SM, np_c_text_2(),
-             24, y, 118, LV_TEXT_ALIGN_LEFT);
-    np_label(card, value, NP_FONT_SM, np_c_text(),
-             144, y, 246, LV_TEXT_ALIGN_RIGHT);
-}
-
 static lv_obj_t *settings_system_card(lv_obj_t *root)
 {
     lv_obj_t *card = settings_panel(root,
@@ -240,23 +200,15 @@ static lv_obj_t *settings_system_card(lv_obj_t *root)
              24, 18, 28, LV_TEXT_ALIGN_CENTER);
     np_label(card, "Sistema", NP_FONT_LG, np_c_text(),
              68, 14, 180, LV_TEXT_ALIGN_LEFT);
-    np_label(card, "Informações do dispositivo e manutenção.", NP_FONT_SM, np_c_text_2(),
+    np_label(card, "Atualização e reinício.", NP_FONT_SM, np_c_text_2(),
              68, 46, 300, LV_TEXT_ALIGN_LEFT);
     np_hline(card, 24, 72, SETTINGS_RIGHT_W - 48);
 
-    settings_system_row(card, 84,  "Display",      "1024x600 · RGB565");
-    settings_system_row(card, 112, "Touch",        "Capacitivo · OK");
-    settings_system_row(card, 140, "Firmware",     "NovaOS v1.3");
-    settings_system_row(card, 168, "Ativo há",     "14 d 06 h 22 min");
-    settings_system_row(card, 196, "Temperatura",  "48 °C");
-
-    np_hline(card, 24, 220, SETTINGS_RIGHT_W - 48);
-
-    lv_obj_t *update = np_button(card, 24, 230, SETTINGS_RIGHT_W - 48, 40,
+    lv_obj_t *update = np_button(card, 24, 88, SETTINGS_RIGHT_W - 48, 40,
                                  "Atualizar sistema", true);
     lv_obj_clear_flag(update, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *restart = np_button(card, 24, 278, SETTINGS_RIGHT_W - 48, 30,
+    lv_obj_t *restart = np_button(card, 24, 136, SETTINGS_RIGHT_W - 48, 30,
                                   "Reiniciar dispositivo", false);
     lv_obj_clear_flag(restart, LV_OBJ_FLAG_CLICKABLE);
 

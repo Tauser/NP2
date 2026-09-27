@@ -2988,3 +2988,19 @@ cortes de energia; esses gates continuam pendentes.
   confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
   RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
   8,023 s e Wi-Fi com IP. A captura de 15 s não registrou panic nem watchdog.
+
+### 2026-09-27 — Simplificação de Configurações
+
+- O seletor de tema foi removido. O painel Sistema deixou de exibir dados
+  técnicos de display, touch, firmware, atividade e temperatura; permanece
+  somente com as ações de atualização e reinício. A criação escalonada dos
+  cards LVGL continua inalterada.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/lazy-navigation-20260926 build`. Aplicação `0x286c50` B
+  em partição de `0x800000` B, com `0x5793b0` B (68%) livres. SHA-256 P4:
+  `1B629BA323F6C6D421AB961D2656AD26E8AD23401F79A4777BCD880A65749106`.
+- `idf.py -B build/lazy-navigation-20260926 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR, Home visível aos
+  8,033 s, Wi-Fi com IP e HTTPS com `ESP_OK`; não houve panic nem watchdog.
