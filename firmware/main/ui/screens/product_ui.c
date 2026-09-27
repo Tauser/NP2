@@ -35,6 +35,7 @@ typedef struct {
     np_feedback_t feedback;
     lv_timer_t *refresh_timer;
     lv_timer_t *settings_stage_timer;
+    lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
     uint32_t rendered_revision;
     uint8_t settings_stage;
@@ -49,6 +50,7 @@ static void settings_home_event_cb(lv_event_t *event);
 static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
 static void install_settings_control_callbacks(void);
+static void settings_value_bubble_timer_cb(lv_timer_t *timer);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -74,6 +76,33 @@ static void settings_set_percent(lv_obj_t *slider, lv_obj_t *value_label,
     }
 }
 
+static void settings_show_value_bubble(lv_obj_t *slider, lv_obj_t *bubble,
+                                       lv_obj_t *bubble_value, uint8_t percent)
+{
+    if (slider == NULL || bubble == NULL || bubble_value == NULL) return;
+    char text[8] = {0};
+    (void)snprintf(text, sizeof(text), "%u%%", (unsigned int)percent);
+    np_set_text(bubble_value, text);
+    int32_t x = lv_obj_get_x(slider) +
+                ((lv_obj_get_width(slider) - 20) * percent) / 100 - 18;
+    if (x < 84) x = 84;
+    if (x > 442) x = 442;
+    lv_obj_set_pos(bubble, x, lv_obj_get_y(slider) - 34);
+    np_set_visible(bubble, true);
+    if (s_ui.settings_value_bubble_timer != NULL) {
+        lv_timer_reset(s_ui.settings_value_bubble_timer);
+        lv_timer_resume(s_ui.settings_value_bubble_timer);
+    }
+}
+
+static void settings_value_bubble_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    np_set_visible(s_ui.settings.brightness_bubble, false);
+    np_set_visible(s_ui.settings.volume_bubble, false);
+    lv_timer_pause(s_ui.settings_value_bubble_timer);
+}
+
 static void settings_control_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
@@ -87,11 +116,19 @@ static void settings_control_event_cb(lv_event_t *event)
 
     if (control == SETTINGS_CONTROL_BRIGHTNESS) {
         settings_set_percent(NULL, s_ui.settings.brightness_value, percent);
+        settings_show_value_bubble(s_ui.settings.brightness_slider,
+                                   s_ui.settings.brightness_bubble,
+                                   s_ui.settings.brightness_bubble_value,
+                                   percent);
         if (device_control_set_brightness(percent) != ESP_OK) {
             ESP_LOGW(TAG, "Brightness request unavailable");
         }
     } else {
         settings_set_percent(NULL, s_ui.settings.volume_value, percent);
+        settings_show_value_bubble(s_ui.settings.volume_slider,
+                                   s_ui.settings.volume_bubble,
+                                   s_ui.settings.volume_bubble_value,
+                                   percent);
         if (device_control_set_volume(percent) != ESP_OK) {
             ESP_LOGW(TAG, "Volume request unavailable");
         }
@@ -109,6 +146,14 @@ static void install_settings_control_callbacks(void)
     settings_set_percent(s_ui.settings.volume_slider,
                          s_ui.settings.volume_value,
                          controls.volume_percent);
+
+    if (s_ui.settings_value_bubble_timer == NULL) {
+        s_ui.settings_value_bubble_timer =
+            lv_timer_create(settings_value_bubble_timer_cb, 1000U, NULL);
+        if (s_ui.settings_value_bubble_timer != NULL) {
+            lv_timer_pause(s_ui.settings_value_bubble_timer);
+        }
+    }
 
     if (s_ui.settings.brightness_slider != NULL) {
         lv_obj_add_event_cb(s_ui.settings.brightness_slider,
@@ -791,6 +836,10 @@ static void settings_home_async(void *user_data)
     if (s_ui.settings_stage_timer != NULL) {
         lv_timer_delete(s_ui.settings_stage_timer);
         s_ui.settings_stage_timer = NULL;
+    }
+    if (s_ui.settings_value_bubble_timer != NULL) {
+        lv_timer_delete(s_ui.settings_value_bubble_timer);
+        s_ui.settings_value_bubble_timer = NULL;
     }
     s_ui.home = np_home_build(lv_screen_active());
     np_feedback_bring_to_front(&s_ui.feedback);

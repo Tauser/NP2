@@ -81,7 +81,9 @@ static void settings_slider(lv_obj_t *parent,
                             const char *label,
                             uint8_t percent,
                             lv_obj_t **out_slider,
-                            lv_obj_t **out_value)
+                            lv_obj_t **out_value,
+                            lv_obj_t **out_bubble,
+                            lv_obj_t **out_bubble_value)
 {
     char pct[8] = {0};
 
@@ -115,11 +117,24 @@ static void settings_slider(lv_obj_t *parent,
     lv_obj_set_style_height(slider, 20, LV_PART_KNOB);
     lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
 
+    lv_obj_t *bubble = np_fill(parent, SETTINGS_COL_A_TEXT_X, y, 56, 28,
+                                np_c_accent_bg(), LV_OPA_COVER,
+                                NP_RADIUS_CONTROL);
+    lv_obj_t *bubble_value = np_label(bubble, pct, NP_FONT_SM, np_c_text(),
+                                      0, 5, 56, LV_TEXT_ALIGN_CENTER);
+    np_set_visible(bubble, false);
+
     if (out_slider != NULL) {
         *out_slider = slider;
     }
     if (out_value != NULL) {
         *out_value = value;
+    }
+    if (out_bubble != NULL) {
+        *out_bubble = bubble;
+    }
+    if (out_bubble_value != NULL) {
+        *out_bubble_value = bubble_value;
     }
 }
 
@@ -288,7 +303,9 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                     "Brilho da tela",
                     SETTINGS_BRIGHTNESS,
                     &view->brightness_slider,
-                    &view->brightness_value);
+                    &view->brightness_value,
+                    &view->brightness_bubble,
+                    &view->brightness_bubble_value);
 
     settings_slider(card,
                     214,
@@ -296,7 +313,9 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                     "Volume geral",
                     SETTINGS_VOLUME,
                     &view->volume_slider,
-                    &view->volume_value);
+                    &view->volume_value,
+                    &view->volume_bubble,
+                    &view->volume_bubble_value);
 
     np_hline(card,
              SETTINGS_COL_A_X,
