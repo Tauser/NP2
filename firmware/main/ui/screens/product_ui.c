@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "offline_value_format.h"
 #include "np_screens.h"
+#include "np_feedback.h"
 #include "weather_condition.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
@@ -31,6 +32,7 @@ typedef struct {
     np_boot_view_t boot;
     np_home_view_t home;
     np_settings_view_t settings;
+    np_feedback_t feedback;
     lv_timer_t *refresh_timer;
     lv_timer_t *settings_stage_timer;
     uint32_t started_at_tick;
@@ -637,6 +639,7 @@ static void show_home(const app_ui_projection_t *projection)
 
     lv_obj_t *const boot_root = s_ui.boot.root;
     s_ui.home = np_home_build(lv_screen_active());
+    np_feedback_bring_to_front(&s_ui.feedback);
     install_home_navigation_callbacks();
     update_home(projection);
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
@@ -685,6 +688,7 @@ static void open_settings_async(void *user_data)
 
     lv_obj_t *const home_root = s_ui.home.root;
     s_ui.settings = np_settings_begin(lv_screen_active());
+    np_feedback_bring_to_front(&s_ui.feedback);
     np_set_visible(s_ui.settings.root, true);
     np_settings_reset_stages(&s_ui.settings);
     if (s_ui.settings.home_button != NULL) {
@@ -789,6 +793,7 @@ static void settings_home_async(void *user_data)
         s_ui.settings_stage_timer = NULL;
     }
     s_ui.home = np_home_build(lv_screen_active());
+    np_feedback_bring_to_front(&s_ui.feedback);
     install_home_navigation_callbacks();
 
     app_ui_projection_t projection = {0};
@@ -829,6 +834,7 @@ static void diagnostics_button_event_cb(lv_event_t *event)
     if (s_ui.refresh_timer != NULL) {
         lv_timer_delete(s_ui.refresh_timer);
     }
+    np_feedback_destroy(&s_ui.feedback);
 
     lv_display_t *display = s_ui.display;
     lv_indev_t *touch_indev = s_ui.touch_indev;
@@ -858,6 +864,8 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_remove_style_all(screen);
 
     s_ui.boot = np_boot_build(screen);
+    s_ui.feedback = np_feedback_create(screen);
+    np_feedback_bring_to_front(&s_ui.feedback);
     s_ui.refresh_timer =
         lv_timer_create(refresh_timer_cb, UI_REFRESH_PERIOD_MS, NULL);
 
