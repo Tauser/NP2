@@ -3089,3 +3089,26 @@ cortes de energia; esses gates continuam pendentes.
   não gravou a placa: a porta retornou `PermissionError(13)` por estar ocupada.
   Nenhum processo de monitor foi interrompido e não há evidência de boot para
   este binário até que a COM8 seja liberada.
+
+### 2026-09-27 — Redraw da Home e watchdog LVGL
+
+- Placa ESP32-P4 v1.3 com 32 MiB de flash e PSRAM, EK79007, GT911 e C6
+  conectado por SDIO. O boot mostrou ESP-Hosted 3.0.6 no P4 e C6, RPC v2 e
+  SW_AGGR. O hash da imagem instalada no C6 não foi coletado neste ensaio;
+  nenhum flash do C6 foi executado.
+- No commit `aad5a71`, a Home passou a atualizar os cards de clima e mercado
+  quando o snapshot exibido ou o ícone mudam. O relógio continua atualizado
+  pela projeção. Isso evita chamar novamente o desenho da linha do mercado
+  em cada atualização de segundo do `app_loop`.
+- Build `idf.py build` para `esp32p4` com IDF 5.5.4: aplicação `0x298780` B,
+  68% livres na menor partição de aplicação. SHA-256 da imagem P4:
+  `AE7E02327E5135B5DDC9384D34060CA2E75E1577A125E4A3669DBA150D172BC6`.
+  A configuração efetiva mostrou RGB565, três framebuffers, ESP-Hosted e
+  Wi-Fi remoto; o boot confirmou rotação de 180° e `TRIPLE_PARTIAL`.
+- `idf.py -p COM8 flash` gravou o P4 e verificou os hashes. Em seguida,
+  `idf.py -p COM8 monitor` reiniciou a placa: a Home apareceu em 8,004 s,
+  o ícone animado de clima (48 frames, 160×160) carregou em 12,134 s e
+  DNS/NTP/HTTPS terminaram com `ESP_OK` até 31,234 s. A observação em repouso
+  passou de 60 s sem novo `task_wdt` ou panic. O gesto que produziu o log
+  original ainda não foi reproduzido neste ensaio; estabilidade sob toque
+  e soak prolongado permanecem abertos.
