@@ -1932,6 +1932,11 @@ static void flash_worker_task(void *arg)
         if (result == ESP_OK) {
             portENTER_CRITICAL(&s_status_lock);
             s_last_success_us = esp_timer_get_time();
+            if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
+                s_last_offline_data_write_us = s_last_success_us;
+            }
+            portEXIT_CRITICAL(&s_status_lock);
+            /* Logging can take a libc mutex. Never do it with a spinlock held. */
             if (request.kind == FLASH_REQUEST_ONBOARDING_PROFILE_WRITE) {
                 ESP_LOGI(TAG, "onboarding profile saved in %lums", (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE) {
@@ -1946,10 +1951,7 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR) {
                 ESP_LOGI(TAG, "credential vault credentials cleared in %lums",
                          (unsigned long)duration_ms);
-            } else if (request.kind == FLASH_REQUEST_OFFLINE_DATA_WRITE) {
-                s_last_offline_data_write_us = s_last_success_us;
             }
-            portEXIT_CRITICAL(&s_status_lock);
             if (request.kind == FLASH_REQUEST_LITTLEFS_PROBE) {
                 ESP_LOGI(TAG, "LittleFS batch %lu completed in %lums; writes=%lu verified=%luB",
                          (unsigned long)request.sequence, (unsigned long)duration_ms,
@@ -1982,7 +1984,11 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_CONFIG_CORRUPT_NEWEST) {
                 ESP_LOGW(TAG, "configuration newest-generation corruption %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
-            } else {
+            } else if (request.kind != FLASH_REQUEST_ONBOARDING_PROFILE_WRITE &&
+                       request.kind != FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE &&
+                       request.kind != FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE &&
+                       request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_WRITE &&
+                       request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR) {
                 ESP_LOGI(TAG,
                          "diagnostic NVS %s %lu completed in %lums; writes=%lu free_entries=%lu>%lu",
                          request.kind == FLASH_REQUEST_NVS_COMPACTION_PROBE ? "batch" : "commit",
