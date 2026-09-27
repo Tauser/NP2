@@ -2973,3 +2973,21 @@ cortes de energia; esses gates continuam pendentes.
   ativo (`C:\Espressif\tools\python\v5.5.4\venv`); nenhuma sessão do
   responsável foi encerrada. O teste físico de abrir Configurações permanece
   pendente dessa gravação.
+
+### 2026-09-27 — Espaçamento ampliado em Configurações
+
+- A tela passou a usar três painéis verticais de 312 x 500 px, separados por
+  16 px: perfil e conectividade, tela e som, e sistema. O cabeçalho permanece
+  como a única navegação; a rail física não foi recriada. Títulos, campos e
+  controles foram reposicionados para preencher a altura sem compactação.
+  A construção escalonada dos três painéis foi preservada.
+- Build ESP-IDF 5.5.4 para `esp32p4`:
+  `idf.py -B build/settings-spacing-20260927 build`. Aplicação `0x286ff0` B
+  em partição de `0x800000` B, com `0x579010` B (68%) livres. SHA-256 P4:
+  `E415E0B43452DA182C863D2CACD92F78793037DEA5BF8C17A25BFE0EA01B5AFB`.
+- `idf.py -B build/settings-spacing-20260927 -p COM8 app-flash` gravou apenas
+  a aplicação P4 em `0x20000`, com `Hash of data verified`. O boot posterior
+  confirmou P4 v1.3, PSRAM de 32 MiB, EK79007, GT911,
+  RGB565/180°/triple-partial/3 FBs, C6 3.0.6/RPC v2/SW_AGGR e Home visível aos
+  8,013 s. A captura de 18 s não registrou panic nem watchdog. A abertura de
+  Configurações pelo touch ainda requer confirmação visual na placa.
