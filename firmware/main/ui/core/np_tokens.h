@@ -143,6 +143,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CALENDAR      "\xEE\xA4\xB5"
 #define NP_ICON_DISPLAY       "\xEE\x8C\x8C" /* desktop_windows U+E30C */
 #define NP_ICON_CLOCK         "\xEE\xA2\xB5" /* schedule U+E8B5 */
+#define NP_ICON_NIGHT         "\xEE\x94\x9C" /* dark_mode U+E51C */
 #define NP_ICON_VOLUME_UP     "\xEE\x81\x90"
 #define NP_ICON_VOLUME_MUTE   "\xEE\x81\x8E"
 #define NP_ICON_WARNING       "\xEE\x80\x82"
@@ -193,6 +194,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CALENDAR      "C"
 #define NP_ICON_DISPLAY       "D"
 #define NP_ICON_CLOCK         "C"
+#define NP_ICON_NIGHT         "N"
 #define NP_ICON_VOLUME_UP     "V"
 #define NP_ICON_VOLUME_MUTE   "v"
 #define NP_ICON_WARNING       "!"

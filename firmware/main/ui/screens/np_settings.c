@@ -58,69 +58,6 @@ static lv_obj_t *settings_panel(lv_obj_t *parent,
     return np_panel(parent, x, y, w, h);
 }
 
-static void settings_slider(lv_obj_t *parent,
-                            int32_t y,
-                            const char *icon,
-                            const char *label,
-                            uint8_t percent,
-                            lv_obj_t **out_slider,
-                            lv_obj_t **out_value,
-                            lv_obj_t **out_bubble,
-                            lv_obj_t **out_bubble_value)
-{
-    char pct[8] = {0};
-
-    np_label(parent, icon, NP_FONT_ICON, np_c_text_2(),
-             SETTINGS_COL_A_X, y + 3, 30, LV_TEXT_ALIGN_CENTER);
-
-    np_label(parent, label, NP_FONT_MD, np_c_text(),
-             SETTINGS_COL_A_TEXT_X, y, 260, LV_TEXT_ALIGN_LEFT);
-
-    (void)snprintf(pct, sizeof(pct), "%u%%", (unsigned int)percent);
-    lv_obj_t *value = np_label(parent, pct, NP_FONT_MD, np_c_text_2(),
-                                430, y, 68, LV_TEXT_ALIGN_RIGHT);
-
-    /* Nao ha wrapper para slider no catalogo atual. A configuracao local
-     * preserva a geometria do controle estatico anterior e so cria um
-     * objeto interativo quando a Settings e aberta. */
-    lv_obj_t *slider = lv_slider_create(parent);
-    lv_obj_set_pos(slider, SETTINGS_COL_A_TEXT_X, y + 34);
-    lv_obj_set_size(slider, SETTINGS_COL_A_TRACK_W, 20);
-    lv_slider_set_range(slider, 0, 100);
-    lv_slider_set_value(slider, percent, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(slider, np_c_hairline(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(slider, 4, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, np_c_accent(), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(slider, 4, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider, np_c_accent(), LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_width(slider, 20, LV_PART_KNOB);
-    lv_obj_set_style_height(slider, 20, LV_PART_KNOB);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-
-    lv_obj_t *bubble = np_fill(parent, SETTINGS_COL_A_TEXT_X, y, 56, 28,
-                                np_c_accent_bg(), LV_OPA_COVER,
-                                NP_RADIUS_CONTROL);
-    lv_obj_t *bubble_value = np_label(bubble, pct, NP_FONT_SM, np_c_text(),
-                                      0, 5, 56, LV_TEXT_ALIGN_CENTER);
-    np_set_visible(bubble, false);
-
-    if (out_slider != NULL) {
-        *out_slider = slider;
-    }
-    if (out_value != NULL) {
-        *out_value = value;
-    }
-    if (out_bubble != NULL) {
-        *out_bubble = bubble;
-    }
-    if (out_bubble_value != NULL) {
-        *out_bubble_value = bubble_value;
-    }
-}
-
 static lv_obj_t *settings_option_row(lv_obj_t *parent,
                                      int32_t y,
                                      const char *icon,
@@ -176,43 +113,32 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
     np_hline(card, 24, 64, SETTINGS_GENERAL_W - 48);
 
     /* Coluna A */
-    settings_slider(card,
+    np_settings_display_sound_slider(card,
                     104,
                     NP_ICON_UV,
                     "Brilho da tela",
                     SETTINGS_BRIGHTNESS,
-                    &view->brightness_slider,
-                    &view->brightness_value,
-                    &view->brightness_bubble,
-                    &view->brightness_bubble_value);
+                    &view->controls.brightness_slider,
+                    &view->controls.brightness_value,
+                    &view->controls.brightness_bubble,
+                    &view->controls.brightness_bubble_value);
 
-    settings_slider(card,
+    np_settings_display_sound_slider(card,
                     214,
                     NP_ICON_VOLUME_UP,
                     "Volume geral",
                     SETTINGS_VOLUME,
-                    &view->volume_slider,
-                    &view->volume_value,
-                    &view->volume_bubble,
-                    &view->volume_bubble_value);
+                    &view->controls.volume_slider,
+                    &view->controls.volume_value,
+                    &view->controls.volume_bubble,
+                    &view->controls.volume_bubble_value);
 
     np_hline(card,
              SETTINGS_COL_A_X,
              310,
              470);
 
-    np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
-             SETTINGS_COL_A_TEXT_X, 352, 220, LV_TEXT_ALIGN_LEFT);
-
-    view->night_detail = np_label(card, "22:00 - 06:00 · brilho ate 15%", NP_FONT_SM,
-                                  np_c_text_2(), SETTINGS_COL_A_TEXT_X, 384, 350,
-                                  LV_TEXT_ALIGN_LEFT);
-    view->night_switch = lv_switch_create(card);
-    lv_obj_set_pos(view->night_switch, 432, 354);
-    lv_obj_set_size(view->night_switch, 52, 28);
-    lv_obj_set_style_bg_color(view->night_switch, np_c_hairline(), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(view->night_switch, np_c_accent(), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(view->night_switch, np_c_text(), LV_PART_KNOB);
+    np_settings_display_sound_night(card, 84, 352, 432, &view->controls);
 
     /* Separador central */
     np_vline(card,

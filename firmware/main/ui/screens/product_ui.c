@@ -36,6 +36,7 @@ typedef struct {
         PRODUCT_SCREEN_SETTINGS,
         PRODUCT_SCREEN_PROFILE,
         PRODUCT_SCREEN_PREFERENCES,
+        PRODUCT_SCREEN_DISPLAY_SOUND,
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
@@ -44,6 +45,7 @@ typedef struct {
     np_settings_view_t settings;
     np_profile_view_t profile;
     np_preferences_view_t preferences;
+    np_settings_display_sound_view_t display_sound;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
@@ -114,6 +116,12 @@ typedef enum {
     SETTINGS_CONTROL_VOLUME,
 } settings_control_t;
 
+static np_display_sound_controls_t *active_display_controls(void)
+{
+    return s_ui.active_screen == PRODUCT_SCREEN_DISPLAY_SOUND
+               ? &s_ui.display_sound.controls : &s_ui.settings.controls;
+}
+
 static np_data_state_t data_state(bool available, bool stale)
 {
     if (!available) return NP_DATA_UNAVAILABLE;
@@ -173,8 +181,8 @@ static void settings_show_value_bubble(lv_obj_t *slider, lv_obj_t *bubble,
 static void settings_value_bubble_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    np_set_visible(s_ui.settings.brightness_bubble, false);
-    np_set_visible(s_ui.settings.volume_bubble, false);
+    np_set_visible(active_display_controls()->brightness_bubble, false);
+    np_set_visible(active_display_controls()->volume_bubble, false);
     lv_timer_pause(s_ui.settings_value_bubble_timer);
 }
 
@@ -193,8 +201,8 @@ static void settings_control_event_cb(lv_event_t *event)
             ESP_LOGW(TAG, "Brightness request unavailable");
             np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                    "Brilho nao alterado", NULL, 2500U);
-            settings_set_percent(s_ui.settings.brightness_slider,
-                                 s_ui.settings.brightness_value,
+            settings_set_percent(active_display_controls()->brightness_slider,
+                                 active_display_controls()->brightness_value,
                                  s_ui.projected_brightness);
             return;
         }
@@ -203,8 +211,8 @@ static void settings_control_event_cb(lv_event_t *event)
             ESP_LOGW(TAG, "Volume request unavailable");
             np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                    "Volume nao alterado", NULL, 2500U);
-            settings_set_percent(s_ui.settings.volume_slider,
-                                 s_ui.settings.volume_value,
+            settings_set_percent(active_display_controls()->volume_slider,
+                                 active_display_controls()->volume_value,
                                  s_ui.projected_volume);
             return;
         }
@@ -215,16 +223,16 @@ static void settings_control_event_cb(lv_event_t *event)
     }
 
     if (control == SETTINGS_CONTROL_BRIGHTNESS) {
-        settings_set_percent(NULL, s_ui.settings.brightness_value, percent);
-        settings_show_value_bubble(s_ui.settings.brightness_slider,
-                                   s_ui.settings.brightness_bubble,
-                                   s_ui.settings.brightness_bubble_value,
+        settings_set_percent(NULL, active_display_controls()->brightness_value, percent);
+        settings_show_value_bubble(active_display_controls()->brightness_slider,
+                                   active_display_controls()->brightness_bubble,
+                                   active_display_controls()->brightness_bubble_value,
                                    percent);
     } else {
-        settings_set_percent(NULL, s_ui.settings.volume_value, percent);
-        settings_show_value_bubble(s_ui.settings.volume_slider,
-                                   s_ui.settings.volume_bubble,
-                                   s_ui.settings.volume_bubble_value,
+        settings_set_percent(NULL, active_display_controls()->volume_value, percent);
+        settings_show_value_bubble(active_display_controls()->volume_slider,
+                                   active_display_controls()->volume_bubble,
+                                   active_display_controls()->volume_bubble_value,
                                    percent);
     }
 }
@@ -237,14 +245,14 @@ static void install_settings_control_callbacks(void)
         s_ui.projected_brightness = projection.device_controls.brightness_percent;
         s_ui.projected_volume = projection.device_controls.volume_percent;
         s_ui.settings_controls_initialized = true;
-        lv_obj_add_event_cb(s_ui.settings.night_switch, night_switch_event_cb,
+        lv_obj_add_event_cb(active_display_controls()->night_switch, night_switch_event_cb,
                             LV_EVENT_VALUE_CHANGED, NULL);
 
-        settings_set_percent(s_ui.settings.brightness_slider,
-                             s_ui.settings.brightness_value,
+        settings_set_percent(active_display_controls()->brightness_slider,
+                             active_display_controls()->brightness_value,
                              s_ui.projected_brightness);
-        settings_set_percent(s_ui.settings.volume_slider,
-                             s_ui.settings.volume_value,
+        settings_set_percent(active_display_controls()->volume_slider,
+                             active_display_controls()->volume_value,
                              s_ui.projected_volume);
 
         if (s_ui.settings_value_bubble_timer == NULL) {
@@ -255,22 +263,22 @@ static void install_settings_control_callbacks(void)
             }
         }
 
-        if (s_ui.settings.brightness_slider != NULL) {
-            lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+        if (active_display_controls()->brightness_slider != NULL) {
+            lv_obj_add_event_cb(active_display_controls()->brightness_slider,
                                 settings_control_event_cb,
                                 LV_EVENT_RELEASED,
                                 (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
-            lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+            lv_obj_add_event_cb(active_display_controls()->brightness_slider,
                                 settings_control_event_cb,
                                 LV_EVENT_PRESS_LOST,
                                 (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
         }
-        if (s_ui.settings.volume_slider != NULL) {
-            lv_obj_add_event_cb(s_ui.settings.volume_slider,
+        if (active_display_controls()->volume_slider != NULL) {
+            lv_obj_add_event_cb(active_display_controls()->volume_slider,
                                 settings_control_event_cb,
                                 LV_EVENT_RELEASED,
                                 (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
-            lv_obj_add_event_cb(s_ui.settings.volume_slider,
+            lv_obj_add_event_cb(active_display_controls()->volume_slider,
                                 settings_control_event_cb,
                                 LV_EVENT_PRESS_LOST,
                                 (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
@@ -1297,6 +1305,44 @@ static void update_home(const app_ui_projection_t *projection)
     }
 }
 
+static void update_display_sound_controls(const app_ui_projection_t *projection)
+{
+    if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
+        s_ui.syncing_night_control = true;
+        if (projection->device_controls.night_mode_enabled) {
+            lv_obj_add_state(active_display_controls()->night_switch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(active_display_controls()->night_switch, LV_STATE_CHECKED);
+        }
+        s_ui.syncing_night_control = false;
+        np_set_text(active_display_controls()->night_detail,
+                    projection->device_controls.effective_brightness_percent !=
+                        (projection->device_controls.night_mode_active &&
+                         projection->device_controls.brightness_percent > 15U
+                             ? 15U : projection->device_controls.brightness_percent)
+                        ? "Nao foi possivel aplicar o brilho"
+                        : !projection->device_controls.night_mode_enabled
+                        ? "22:00 - 06:00 · brilho ate 15%"
+                        : !projection->time_trusted ? "Aguardando horario confiavel"
+                        : projection->device_controls.night_mode_active
+                            ? "Ativo · brilho limitado a 15%"
+                            : "22:00 - 06:00 · programado");
+        if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
+            s_ui.projected_brightness = projection->device_controls.brightness_percent;
+            settings_set_percent(active_display_controls()->brightness_slider,
+                                 active_display_controls()->brightness_value,
+                                 s_ui.projected_brightness);
+        }
+        if (projection->device_controls.volume_percent != s_ui.projected_volume) {
+            s_ui.projected_volume = projection->device_controls.volume_percent;
+            settings_set_percent(active_display_controls()->volume_slider,
+                                 active_display_controls()->volume_value,
+                                 s_ui.projected_volume);
+        }
+    }
+
+}
+
 static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
@@ -1321,39 +1367,7 @@ static void update_settings(const app_ui_projection_t *projection)
     np_set_text(s_ui.settings.wifi_value,
                 projection->network.online ? "Conectado" : "Sem conexao");
 
-    if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
-        s_ui.syncing_night_control = true;
-        if (projection->device_controls.night_mode_enabled) {
-            lv_obj_add_state(s_ui.settings.night_switch, LV_STATE_CHECKED);
-        } else {
-            lv_obj_remove_state(s_ui.settings.night_switch, LV_STATE_CHECKED);
-        }
-        s_ui.syncing_night_control = false;
-        np_set_text(s_ui.settings.night_detail,
-                    projection->device_controls.effective_brightness_percent !=
-                        (projection->device_controls.night_mode_active &&
-                         projection->device_controls.brightness_percent > 15U
-                             ? 15U : projection->device_controls.brightness_percent)
-                        ? "Nao foi possivel aplicar o brilho"
-                        : !projection->device_controls.night_mode_enabled
-                        ? "22:00 - 06:00 · brilho ate 15%"
-                        : !projection->time_trusted ? "Aguardando horario confiavel"
-                        : projection->device_controls.night_mode_active
-                            ? "Ativo · brilho limitado a 15%"
-                            : "22:00 - 06:00 · programado");
-        if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
-            s_ui.projected_brightness = projection->device_controls.brightness_percent;
-            settings_set_percent(s_ui.settings.brightness_slider,
-                                 s_ui.settings.brightness_value,
-                                 s_ui.projected_brightness);
-        }
-        if (projection->device_controls.volume_percent != s_ui.projected_volume) {
-            s_ui.projected_volume = projection->device_controls.volume_percent;
-            settings_set_percent(s_ui.settings.volume_slider,
-                                 s_ui.settings.volume_value,
-                                 s_ui.projected_volume);
-        }
-    }
+    update_display_sound_controls(projection);
 
     if (!projection->notifications.ready) return;
 
@@ -1436,12 +1450,13 @@ static void refresh_timer_cb(lv_timer_t *timer)
                                projection.device_controls.save_result == ESP_OK
                                    ? NULL : "Verifique o dispositivo", 2500U);
         if (projection.device_controls.save_result != ESP_OK &&
-            s_ui.active_screen == PRODUCT_SCREEN_SETTINGS) {
-            settings_set_percent(s_ui.settings.brightness_slider,
-                                 s_ui.settings.brightness_value,
+            (s_ui.active_screen == PRODUCT_SCREEN_SETTINGS ||
+             s_ui.active_screen == PRODUCT_SCREEN_DISPLAY_SOUND)) {
+            settings_set_percent(active_display_controls()->brightness_slider,
+                                 active_display_controls()->brightness_value,
                                  projection.device_controls.brightness_percent);
-            settings_set_percent(s_ui.settings.volume_slider,
-                                 s_ui.settings.volume_value,
+            settings_set_percent(active_display_controls()->volume_slider,
+                                 active_display_controls()->volume_value,
                                  projection.device_controls.volume_percent);
         }
     }
@@ -1457,6 +1472,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
     } else if (projection.revision != s_ui.rendered_revision &&
                s_ui.active_screen == PRODUCT_SCREEN_SETTINGS) {
         update_settings(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_DISPLAY_SOUND) {
+        update_header(&s_ui.display_sound.header, &projection, true);
+        update_display_sound_controls(&projection);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                (s_ui.active_screen == PRODUCT_SCREEN_PROFILE ||
@@ -1605,10 +1625,12 @@ static void release_current_scene(void)
     if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
     if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
+    if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
+    s_ui.display_sound = (np_settings_display_sound_view_t){0};
     s_ui.settings_controls_initialized = false;
     s_ui.settings_notification_callbacks_initialized = false;
     s_ui.settings_timezone_callbacks_initialized = false;
@@ -1672,7 +1694,8 @@ static void scene_navigation_async(void *user_data)
         return;
     }
     if (destination != PRODUCT_SCREEN_PROFILE &&
-        destination != PRODUCT_SCREEN_PREFERENCES) return;
+        destination != PRODUCT_SCREEN_PREFERENCES &&
+        destination != PRODUCT_SCREEN_DISPLAY_SOUND) return;
 
     release_current_scene();
     np_header_t *header;
@@ -1694,6 +1717,14 @@ static void scene_navigation_async(void *user_data)
         lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
                             LV_EVENT_CLICKED, NULL);
         s_ui.active_screen = PRODUCT_SCREEN_PROFILE;
+    } else if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) {
+        s_ui.display_sound = np_settings_display_sound_build(lv_screen_active());
+        s_ui.active_screen = PRODUCT_SCREEN_DISPLAY_SOUND;
+        header = &s_ui.display_sound.header;
+        root = s_ui.display_sound.root;
+        install_settings_control_callbacks();
+        lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
     } else {
         s_ui.preferences = np_preferences_build(lv_screen_active());
         header = &s_ui.preferences.header;
@@ -1702,7 +1733,8 @@ static void scene_navigation_async(void *user_data)
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
         for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
             lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
-                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_SETTINGS);
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
+                                    ? PRODUCT_SCREEN_DISPLAY_SOUND : PRODUCT_SCREEN_SETTINGS));
         }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
@@ -1715,6 +1747,7 @@ static void scene_navigation_async(void *user_data)
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
     update_header(header, &projection, true);
+    if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
     s_ui.rendered_revision = projection.revision;
     np_set_visible(root, true);
     np_feedback_bring_to_front(&s_ui.feedback);

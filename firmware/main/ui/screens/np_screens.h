@@ -12,6 +12,7 @@
 #include "settings/np_settings_notifications.h"
 #include "settings/np_settings_timezone.h"
 #include "settings/np_settings_wifi.h"
+#include "settings/np_settings_display_sound.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,16 +67,7 @@ typedef struct {
     lv_obj_t *left_card;
     lv_obj_t *middle_card;
     lv_obj_t *right_card;
-    lv_obj_t *brightness_slider;
-    lv_obj_t *brightness_value;
-    lv_obj_t *brightness_bubble;
-    lv_obj_t *brightness_bubble_value;
-    lv_obj_t *volume_slider;
-    lv_obj_t *volume_value;
-    lv_obj_t *volume_bubble;
-    lv_obj_t *volume_bubble_value;
-    lv_obj_t *night_switch;
-    lv_obj_t *night_detail;
+    np_display_sound_controls_t controls;
     lv_obj_t *wifi_row;
     lv_obj_t *wifi_value;
     lv_obj_t *notifications_row;
