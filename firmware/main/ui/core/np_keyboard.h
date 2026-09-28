@@ -16,14 +16,26 @@ typedef enum {
     NP_KEYBOARD_MODE_NUMERIC,
 } np_keyboard_mode_t;
 
+#define NP_KEYBOARD_MAX_BINDINGS 8U
+
+typedef struct np_keyboard np_keyboard_t;
+
 typedef struct {
+    np_keyboard_t *owner;
+    lv_obj_t *textarea;
+    np_keyboard_mode_t mode;
+} np_keyboard_binding_t;
+
+struct np_keyboard {
     lv_obj_t *root;
     lv_obj_t *keyboard;
     lv_obj_t *target;
+    np_keyboard_binding_t bindings[NP_KEYBOARD_MAX_BINDINGS];
     bool interaction_inside_keyboard;
     bool reconcile_pending;
+    bool keyboard_events_registered;
     uint32_t lifecycle_generation;
-} np_keyboard_t;
+};
 
 np_keyboard_t np_keyboard_create(lv_obj_t *parent);
 void np_keyboard_bind(np_keyboard_t *keyboard, lv_obj_t *textarea,

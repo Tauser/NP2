@@ -34,13 +34,14 @@ static void schedule_reconcile(np_keyboard_t *keyboard)
 
 static void target_event_cb(lv_event_t *event)
 {
-    np_keyboard_t *const keyboard = lv_event_get_user_data(event);
+    np_keyboard_binding_t *const binding = lv_event_get_user_data(event);
+    np_keyboard_t *const keyboard = binding == NULL ? NULL : binding->owner;
     lv_obj_t *const target = lv_event_get_target(event);
     if (keyboard == NULL || target == NULL) return;
 
     switch (lv_event_get_code(event)) {
     case LV_EVENT_FOCUSED:
-        np_keyboard_focus(keyboard, target, NP_KEYBOARD_MODE_TEXT);
+        np_keyboard_focus(keyboard, target, binding->mode);
         break;
     case LV_EVENT_DEFOCUSED:
         schedule_reconcile(keyboard);
@@ -112,11 +113,29 @@ void np_keyboard_bind(np_keyboard_t *keyboard, lv_obj_t *textarea,
                       np_keyboard_mode_t mode)
 {
     if (keyboard == NULL || keyboard->keyboard == NULL || textarea == NULL) return;
+    if (!keyboard->keyboard_events_registered) {
+        lv_obj_add_event_cb(keyboard->keyboard, keyboard_event_cb, LV_EVENT_ALL,
+                            keyboard);
+        keyboard->keyboard_events_registered = true;
+    }
     if (mode == NP_KEYBOARD_MODE_PASSWORD) {
         lv_textarea_set_password_mode(textarea, true);
     }
-    lv_obj_add_event_cb(textarea, target_event_cb, LV_EVENT_ALL, keyboard);
-    lv_obj_add_event_cb(keyboard->keyboard, keyboard_event_cb, LV_EVENT_ALL, keyboard);
+    for (uint8_t i = 0; i < NP_KEYBOARD_MAX_BINDINGS; ++i) {
+        np_keyboard_binding_t *const binding = &keyboard->bindings[i];
+        if (binding->textarea == textarea) {
+            binding->mode = mode;
+            return;
+        }
+        if (binding->textarea != NULL) continue;
+        *binding = (np_keyboard_binding_t){
+            .owner = keyboard,
+            .textarea = textarea,
+            .mode = mode,
+        };
+        lv_obj_add_event_cb(textarea, target_event_cb, LV_EVENT_ALL, binding);
+        return;
+    }
 }
 
 void np_keyboard_focus(np_keyboard_t *keyboard, lv_obj_t *textarea,
