@@ -34,6 +34,7 @@ struct np_keyboard {
     lv_obj_t *target;
     np_keyboard_binding_t bindings[NP_KEYBOARD_MAX_BINDINGS];
     bool interaction_inside_keyboard;
+    const char *pressed_key;
     bool reconcile_pending;
     bool keyboard_events_registered;
     bool private_input_active;
