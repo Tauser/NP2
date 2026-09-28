@@ -36,6 +36,9 @@ void np_form_apply_field_style(lv_obj_t *field)
                                   LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_text_color(field, np_c_text_3(),
                                 LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_border_width(field, 2, LV_PART_CURSOR);
+    lv_obj_set_style_border_side(field, LV_BORDER_SIDE_LEFT, LV_PART_CURSOR);
+    lv_obj_set_style_border_color(field, np_c_accent(), LV_PART_CURSOR);
 }
 
 lv_obj_t *np_form_text_input(lv_obj_t *parent, int32_t x, int32_t y,
@@ -47,20 +50,26 @@ lv_obj_t *np_form_text_input(lv_obj_t *parent, int32_t x, int32_t y,
     if (input == NULL) return NULL;
     lv_obj_remove_style_all(input);
     lv_obj_set_pos(input, x, y);
-    lv_obj_set_size(input, w, h);
     np_form_apply_field_style(input);
     lv_textarea_set_one_line(input, true);
+    /* One-line mode resets height to LV_SIZE_CONTENT. Apply the template's
+     * dimensions afterwards, with the requested vertical centering. */
+    lv_obj_set_size(input, w, h);
+    lv_obj_set_style_pad_top(input, (h - NP_FONT_SM->line_height) / 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(input, (h - NP_FONT_SM->line_height) / 2, LV_PART_MAIN);
     lv_textarea_set_placeholder_text(input, placeholder != NULL ? placeholder : "");
     if (leading_icon != NULL && leading_icon[0] != '\0') {
         lv_obj_set_style_pad_left(input, NP_SP_48, LV_PART_MAIN);
-        lv_obj_t *const icon = lv_label_create(input);
+        /* A sibling stays fixed while the textarea scrolls its text. Child
+         * coordinates would also include the field's content padding. */
+        lv_obj_t *const icon = lv_label_create(parent);
         if (icon != NULL) {
             lv_obj_set_style_text_font(icon, NP_FONT_ICON, 0);
             lv_obj_set_style_text_color(icon, np_c_text_2(), 0);
             lv_obj_set_style_text_align(icon, LV_TEXT_ALIGN_CENTER, 0);
             lv_label_set_text(icon, leading_icon);
-            lv_obj_set_pos(icon, NP_SP_16,
-                           (h - NP_FONT_ICON->line_height) / 2);
+            lv_obj_set_pos(icon, x + NP_SP_16,
+                           y + (h - NP_FONT_ICON->line_height) / 2);
             lv_obj_set_size(icon, NP_FONT_ICON->line_height,
                             NP_FONT_ICON->line_height);
             lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE);

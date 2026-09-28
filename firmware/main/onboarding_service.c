@@ -10,6 +10,7 @@ static bool s_started;
 static bool s_editing;
 static bool s_timezone_update_pending;
 static bool s_timezone_write_enqueued;
+static bool s_timezone_selected;
 
 esp_err_t onboarding_service_start(void)
 {
@@ -49,6 +50,7 @@ void onboarding_service_refresh(void)
             if (storage.onboarding_profile_valid && storage.onboarding_profile.completed &&
                 storage.onboarding_profile.timezone_index == s_status.timezone_index) {
                 s_status.last_result = ESP_OK;
+                s_timezone_selected = false;
             } else {
                 s_status.last_result = storage.onboarding_profile_result == ESP_OK
                                            ? ESP_FAIL : storage.onboarding_profile_result;
@@ -82,7 +84,7 @@ void onboarding_service_refresh(void)
             s_status.stage = ONBOARDING_STAGE_ERROR;
             s_status.last_result = storage.onboarding_profile_result;
         }
-    } else if (!s_editing && !s_timezone_update_pending && !s_timezone_write_enqueued &&
+    } else if (!s_editing && !s_timezone_selected &&
                storage.onboarding_profile_valid && storage.onboarding_profile.completed) {
         s_status.required = false;
         s_status.completed = true;
@@ -99,7 +101,11 @@ void onboarding_service_refresh(void)
     taskENTER_CRITICAL(&s_lock);
     if (result != ESP_OK) {
         s_timezone_write_enqueued = false;
-        s_status.timezone_persistence_pending = false;
+        /* Another writer can win between the snapshot and enqueue. Keep the
+         * latest choice in RAM and retry on the next app_loop refresh. */
+        const bool retry = result == ESP_ERR_INVALID_STATE || result == ESP_ERR_TIMEOUT;
+        s_timezone_update_pending = s_timezone_update_pending || retry;
+        s_status.timezone_persistence_pending = s_timezone_update_pending;
         s_status.last_result = result;
     }
     taskEXIT_CRITICAL(&s_lock);
@@ -186,6 +192,7 @@ esp_err_t onboarding_service_request_timezone_update(uint16_t timezone_index)
     s_status.timezone_index = timezone_index;
     s_status.last_result = ESP_OK;
     s_timezone_update_pending = true;
+    s_timezone_selected = true;
     s_status.timezone_persistence_pending = true;
     taskEXIT_CRITICAL(&s_lock);
     return ESP_OK;

@@ -173,19 +173,20 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
     np_modal_create(&timezone->modal, parent, TZ_X, TZ_Y, TZ_W, TZ_H,
                     NP_ICON_CALENDAR, np_c_accent(), "Fuso horario", NULL);
     np_label(timezone->modal.content, "Regiao", NP_FONT_SM, np_c_text_2(),
-             24, 12, 96, LV_TEXT_ALIGN_LEFT);
-    timezone->region = np_form_dropdown(timezone->modal.content, 134, 0,
-                                        TZ_W - 158, NP_INPUT_H);
+             24, 0, TZ_W - 48, LV_TEXT_ALIGN_LEFT);
+    timezone->region = np_form_dropdown(timezone->modal.content, 24, 24,
+                                        TZ_W - 48, NP_INPUT_H);
     lv_dropdown_set_options_static(timezone->region, s_region_options);
     np_label(timezone->modal.content, "Cidade", NP_FONT_SM, np_c_text_2(),
-             24, 72, 96, LV_TEXT_ALIGN_LEFT);
-    timezone->search = np_form_text_input(timezone->modal.content, 134, 56,
-                                          TZ_W - 158, NP_INPUT_H,
+             24, 80, TZ_W - 48, LV_TEXT_ALIGN_LEFT);
+    timezone->search = np_form_text_input(timezone->modal.content, 24, 104,
+                                          TZ_W - 48, NP_INPUT_H,
                                           "Buscar cidade...", NP_ICON_SEARCH);
+    lv_textarea_set_max_length(timezone->search, 48);
     timezone->list = lv_obj_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->list);
-    lv_obj_set_pos(timezone->list, 24, 120);
-    lv_obj_set_size(timezone->list, TZ_W - 48, 270);
+    lv_obj_set_pos(timezone->list, 24, 168);
+    lv_obj_set_size(timezone->list, TZ_W - 48, 224);
     lv_obj_set_scroll_dir(timezone->list, LV_DIR_VER);
     timezone->spacer = np_fill(timezone->list, 0, 0, 1, 1, np_c_surface(), LV_OPA_TRANSP, 0);
     for (uint8_t i = 0; i < NP_SETTINGS_TIMEZONE_ROW_POOL; ++i) {
@@ -202,6 +203,9 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
                              np_c_surface_raised(), LV_OPA_COVER, LV_RADIUS_CIRCLE);
         lv_obj_set_style_border_width(row->radio, 2, 0);
         np_dot(row->radio, 4, 4, 12, np_c_accent());
+        /* Decorative children must not swallow the row's selection tap. */
+        lv_obj_remove_flag(row->radio, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(lv_obj_get_child(row->radio, 0), LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(row->root, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(row->root, row_event, LV_EVENT_CLICKED, row);
     }

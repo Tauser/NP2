@@ -1,5 +1,22 @@
 # Settings Wi-Fi — validação incremental
 
+## 2026-09-28 — Retorno do operador e revisão do fuso
+
+- Operador aprovou teclado (com pedido de reduzir teclas azuis), brilho,
+  volume e notificações. Não atribuir essa aprovação a testes de reboot ou
+  persistência que não foram relatados.
+- Fuso ainda não alterava na placa e os campos/busca foram reprovados.
+  Região, busca e lista agora compartilham largura; a altura do input é
+  aplicada após o modo de uma linha do LVGL, que a sobrescrevia. A lupa fica
+  fora da área de texto rolável. Indicador/radio decorativo deixa de capturar
+  toque da linha sem executar a seleção.
+- O serviço mantém a seleção em RAM se houver recusa de enqueue por outro
+  escritor, e repete pelo app_loop. Uma falha definitiva de persistência
+  conserva o fuso escolhido e o resultado de erro, sem restaurar o antigo.
+- Regressão host cobre storage ocupado, corrida de enqueue, nova seleção
+  durante escrita e falha de persistência. Resultado físico do fuso/layout
+  corrigidos permanece pendente de flash manual.
+
 ## 2026-09-28 — Status e seleção
 
 - Base: `74f543e`. `connected_ssid` público vem de `WIFI_EVENT_STA_CONNECTED`,
