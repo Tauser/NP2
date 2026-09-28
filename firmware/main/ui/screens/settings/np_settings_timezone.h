@@ -19,13 +19,16 @@ typedef struct {
 
 typedef struct np_settings_timezone {
     np_modal_t modal;
+    lv_obj_t *region;
     lv_obj_t *search;
     lv_obj_t *list;
     lv_obj_t *spacer;
     np_settings_timezone_row_t rows[NP_SETTINGS_TIMEZONE_ROW_POOL];
     uint16_t filtered[TIMEZONE_CATALOG_COUNT];
+    uint8_t region_by_index[TIMEZONE_CATALOG_COUNT];
     uint16_t filtered_count;
     uint16_t selected_index;
+    uint8_t selected_region;
     char selected_label[48];
     np_settings_timezone_select_cb_t select_callback;
     void *select_user_data;

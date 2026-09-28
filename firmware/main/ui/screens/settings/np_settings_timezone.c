@@ -8,6 +8,45 @@
 #define TZ_W 640
 #define TZ_H 496
 #define TZ_ROW_H 58
+#define TZ_REGION_COUNT 12U
+
+typedef struct {
+    const char *label;
+    const char *prefix;
+} timezone_region_t;
+
+static const timezone_region_t s_regions[TZ_REGION_COUNT] = {
+    {"Todas", NULL},
+    {"America", "America/"},
+    {"Europa", "Europe/"},
+    {"Africa", "Africa/"},
+    {"Asia", "Asia/"},
+    {"Australia", "Australia/"},
+    {"Pacifico", "Pacific/"},
+    {"Atlantico", "Atlantic/"},
+    {"Indico", "Indian/"},
+    {"Antartida", "Antarctica/"},
+    {"Artico", "Arctic/"},
+    {"Outros", "Etc/"},
+};
+
+static const char s_region_options[] =
+    "Todas\nAmerica\nEuropa\nAfrica\nAsia\nAustralia\nPacifico\n"
+    "Atlantico\nIndico\nAntartida\nArtico\nOutros";
+
+static uint8_t region_for_index(uint16_t index)
+{
+    timezone_catalog_entry_t entry = {0};
+    if (!timezone_catalog_get(index, &entry)) return 0U;
+    for (uint8_t region = 1U; region < TZ_REGION_COUNT; ++region) {
+        const size_t prefix_length = strlen(s_regions[region].prefix);
+        if (entry.iana_length >= prefix_length &&
+            memcmp(entry.iana, s_regions[region].prefix, prefix_length) == 0) {
+            return region;
+        }
+    }
+    return 0U;
+}
 
 static void format_label(uint16_t index, char *out, size_t size)
 {
@@ -75,7 +114,8 @@ static void filter(np_settings_timezone_t *timezone, const char *query)
 {
     timezone->filtered_count = 0;
     for (uint16_t i = 0; i < TIMEZONE_CATALOG_COUNT; ++i) {
-        if (matches(i, query)) {
+        if ((timezone->selected_region == 0U ||
+             timezone->region_by_index[i] == timezone->selected_region) && matches(i, query)) {
             timezone->filtered[timezone->filtered_count++] = i;
         }
     }
@@ -89,6 +129,15 @@ static void search_event(lv_event_t *event)
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
     filter(lv_event_get_user_data(event),
            lv_textarea_get_text(lv_event_get_target(event)));
+}
+
+static void region_event(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
+    np_settings_timezone_t *const timezone = lv_event_get_user_data(event);
+    if (timezone == NULL) return;
+    timezone->selected_region = (uint8_t)lv_dropdown_get_selected(timezone->region);
+    filter(timezone, lv_textarea_get_text(timezone->search));
 }
 
 static void scroll_event(lv_event_t *event)
@@ -123,10 +172,30 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
     *timezone = (np_settings_timezone_t){0};
     np_modal_create(&timezone->modal, parent, TZ_X, TZ_Y, TZ_W, TZ_H,
                     NP_ICON_CALENDAR, np_c_accent(), "Fuso horario", NULL);
+    np_label(timezone->modal.content, "Regiao", NP_FONT_SM, np_c_text_2(),
+             24, 12, 96, LV_TEXT_ALIGN_LEFT);
+    timezone->region = lv_dropdown_create(timezone->modal.content);
+    lv_obj_remove_style_all(timezone->region);
+    lv_obj_set_pos(timezone->region, 134, 0);
+    lv_obj_set_size(timezone->region, TZ_W - 158, 44);
+    lv_obj_set_style_bg_color(timezone->region, np_c_surface_raised(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(timezone->region, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(timezone->region, NP_RADIUS_CONTROL, LV_PART_MAIN);
+    lv_obj_set_style_border_width(timezone->region, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(timezone->region, np_c_hairline(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(timezone->region, NP_FONT_SM, LV_PART_MAIN);
+    lv_obj_set_style_text_color(timezone->region, np_c_text(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(timezone->region, np_c_surface_raised(), LV_PART_SELECTED);
+    lv_obj_set_style_text_font(timezone->region, NP_FONT_SM, LV_PART_SELECTED);
+    lv_obj_set_style_text_color(timezone->region, np_c_text(), LV_PART_SELECTED);
+    lv_dropdown_set_options_static(timezone->region, s_region_options);
+    lv_dropdown_set_symbol(timezone->region, LV_SYMBOL_DOWN);
+    np_label(timezone->modal.content, "Cidade", NP_FONT_SM, np_c_text_2(),
+             24, 67, 96, LV_TEXT_ALIGN_LEFT);
     timezone->search = lv_textarea_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->search);
-    lv_obj_set_pos(timezone->search, 24, 0);
-    lv_obj_set_size(timezone->search, TZ_W - 48, 44);
+    lv_obj_set_pos(timezone->search, 134, 55);
+    lv_obj_set_size(timezone->search, TZ_W - 158, 44);
     lv_obj_set_style_bg_color(timezone->search, np_c_surface_raised(), 0);
     lv_obj_set_style_bg_opa(timezone->search, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(timezone->search, NP_RADIUS_CONTROL, 0);
@@ -138,12 +207,12 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
                                 LV_PART_TEXTAREA_PLACEHOLDER);
     lv_obj_set_style_pad_left(timezone->search, 42, 0);
     lv_textarea_set_one_line(timezone->search, true);
-    lv_textarea_set_placeholder_text(timezone->search, "Buscar cidade ou regiao...");
+    lv_textarea_set_placeholder_text(timezone->search, "Buscar cidade...");
     np_label(timezone->modal.content, NP_ICON_SEARCH, NP_FONT_ICON,
-             np_c_text_2(), 36, 10, 24, LV_TEXT_ALIGN_CENTER);
+             np_c_text_2(), 146, 65, 24, LV_TEXT_ALIGN_CENTER);
     timezone->list = lv_obj_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->list);
-    lv_obj_set_pos(timezone->list, 24, 55);
+    lv_obj_set_pos(timezone->list, 24, 110);
     lv_obj_set_size(timezone->list, TZ_W - 48, 280);
     lv_obj_set_scroll_dir(timezone->list, LV_DIR_VER);
     timezone->spacer = np_fill(timezone->list, 0, 0, 1, 1, np_c_surface(), LV_OPA_TRANSP, 0);
@@ -166,7 +235,12 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
     }
     lv_obj_add_event_cb(timezone->search, search_event, LV_EVENT_VALUE_CHANGED,
                         timezone);
+    lv_obj_add_event_cb(timezone->region, region_event, LV_EVENT_VALUE_CHANGED,
+                        timezone);
     lv_obj_add_event_cb(timezone->list, scroll_event, LV_EVENT_SCROLL, timezone);
+    for (uint16_t i = 0; i < TIMEZONE_CATALOG_COUNT; ++i) {
+        timezone->region_by_index[i] = region_for_index(i);
+    }
     filter(timezone, "");
 }
 
@@ -197,6 +271,8 @@ void np_settings_timezone_show(np_settings_timezone_t *timezone, uint16_t select
 {
     if (timezone == NULL) return;
     timezone->selected_index = selected;
+    timezone->selected_region = timezone->region_by_index[selected];
+    lv_dropdown_set_selected(timezone->region, timezone->selected_region);
     lv_textarea_set_text(timezone->search, "");
     filter(timezone, "");
     np_modal_show(&timezone->modal);
