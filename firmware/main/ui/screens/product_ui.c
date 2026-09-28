@@ -17,12 +17,13 @@
 #include "notification_service.h"
 #include "onboarding_service.h"
 #include "weather_condition.h"
+#include "wifi_setup_view.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define SETTINGS_STAGE_INTERVAL_MS 80U
-#define SETTINGS_STAGE_COUNT 4U
+#define SETTINGS_STAGE_COUNT 5U
 
 typedef struct {
     enum {
@@ -54,6 +55,7 @@ typedef struct {
     bool settings_controls_initialized;
     bool settings_notification_callbacks_initialized;
     bool settings_timezone_callbacks_initialized;
+    bool settings_wifi_callbacks_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
 } product_ui_state_t;
@@ -71,6 +73,7 @@ static void notification_switch_event_cb(lv_event_t *event);
 static void notifications_test_event_cb(lv_event_t *event);
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void keyboard_modal_close_cb(void *user_data);
+static void wifi_manage_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
@@ -248,6 +251,13 @@ static void install_settings_control_callbacks(void)
                          NP_KEYBOARD_MODE_TEXT);
         s_ui.settings_timezone_callbacks_initialized = true;
     }
+
+    if (!s_ui.settings_wifi_callbacks_initialized &&
+        s_ui.settings.wifi.manage_button != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.wifi.manage_button, wifi_manage_event_cb,
+                            LV_EVENT_CLICKED, NULL);
+        s_ui.settings_wifi_callbacks_initialized = true;
+    }
 }
 
 static void notification_switch_event_cb(lv_event_t *event)
@@ -319,6 +329,17 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
                            "Fuso horario atualizado",
                            "Aplicando e salvando preferencia", 2200U);
     return ESP_OK;
+}
+
+static void wifi_manage_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    np_settings_wifi_hide(&s_ui.settings.wifi);
+    if (wifi_setup_view_open(s_ui.settings.root) != ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Configuracao indisponivel",
+                               "Tente novamente em alguns instantes", 2600U);
+    }
 }
 
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
@@ -882,6 +903,11 @@ static void update_settings(const app_ui_projection_t *projection)
                               projection->onboarding.timezone_index);
     np_set_text(s_ui.settings.timezone_value,
                 np_settings_timezone_selected_label(&s_ui.settings.timezone));
+    np_settings_wifi_sync(&s_ui.settings.wifi, projection->network.online,
+                          projection->network.scan_results_count,
+                          projection->network.scan_results);
+    np_set_text(s_ui.settings.wifi_value,
+                projection->network.online ? "Conectado" : "Sem conexao");
 
     if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
         if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
@@ -1009,6 +1035,9 @@ static void open_settings_async(void *user_data)
     s_ui.home = (np_home_view_t){0};
     s_ui.settings = np_settings_begin(lv_screen_active());
     s_ui.settings_controls_initialized = false;
+    s_ui.settings_notification_callbacks_initialized = false;
+    s_ui.settings_timezone_callbacks_initialized = false;
+    s_ui.settings_wifi_callbacks_initialized = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     np_set_visible(s_ui.settings.root, true);
     np_settings_reset_stages(&s_ui.settings);
@@ -1121,6 +1150,9 @@ static void settings_home_async(void *user_data)
     lv_obj_delete(settings_root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.settings_controls_initialized = false;
+    s_ui.settings_notification_callbacks_initialized = false;
+    s_ui.settings_timezone_callbacks_initialized = false;
+    s_ui.settings_wifi_callbacks_initialized = false;
     s_ui.settings_stage = 0U;
     s_ui.home = np_home_build(lv_screen_active());
     s_ui.home_data_rendered = false;

@@ -226,13 +226,15 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
              380);
 
     /* Coluna B */
-    (void)settings_option_row(card,
-                              104,
-                              NP_ICON_WIFI,
-                              np_c_positive(),
-                              "Wi-Fi",
-                              "--",
-                              true);
+    view->wifi_row = settings_option_row(card,
+                                         104,
+                                         NP_ICON_WIFI,
+                                         np_c_positive(),
+                                         "Wi-Fi",
+                                         "--",
+                                         true);
+    view->wifi_value = lv_obj_get_child(view->wifi_row, 2);
+    lv_obj_add_flag(view->wifi_row, LV_OBJ_FLAG_CLICKABLE);
 
     view->timezone_row = settings_option_row(card,
                                               194,
@@ -300,6 +302,12 @@ bool np_settings_build_next_card(np_settings_view_t *view)
         return true;
     }
 
+    if (view->wifi.modal.scrim == NULL) {
+        np_settings_wifi_create(&view->wifi, view->root);
+        np_settings_wifi_bind_row(&view->wifi, view->wifi_row);
+        return true;
+    }
+
     if (view->timezone.modal.scrim == NULL) {
         np_settings_timezone_create(&view->timezone, view->root);
         np_settings_timezone_bind_row(&view->timezone, view->timezone_row);
@@ -345,6 +353,7 @@ void np_settings_reset_stages(np_settings_view_t *view)
     np_settings_system_hide(&view->system);
     np_settings_notifications_hide(&view->notifications);
     np_settings_timezone_hide(&view->timezone);
+    np_settings_wifi_hide(&view->wifi);
 }
 
 lv_obj_t *np_settings_create(lv_obj_t *parent)

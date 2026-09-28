@@ -11,6 +11,7 @@
 #include "settings/np_settings_system.h"
 #include "settings/np_settings_notifications.h"
 #include "settings/np_settings_timezone.h"
+#include "settings/np_settings_wifi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,6 +74,8 @@ typedef struct {
     lv_obj_t *volume_value;
     lv_obj_t *volume_bubble;
     lv_obj_t *volume_bubble_value;
+    lv_obj_t *wifi_row;
+    lv_obj_t *wifi_value;
     lv_obj_t *notifications_row;
     lv_obj_t *notifications_value;
     lv_obj_t *timezone_row;
@@ -81,6 +84,7 @@ typedef struct {
     np_settings_system_t system;
     np_settings_notifications_t notifications;
     np_settings_timezone_t timezone;
+    np_settings_wifi_t wifi;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);
