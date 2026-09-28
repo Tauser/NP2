@@ -45,6 +45,7 @@ static const char *const TAG = "np2_connect";
 typedef enum {
     CONNECTIVITY_REQUEST_JOIN = 0,
     CONNECTIVITY_REQUEST_FORGET,
+    CONNECTIVITY_REQUEST_SCAN,
     CONNECTIVITY_REQUEST_RECOVER_HOSTED,
     CONNECTIVITY_REQUEST_RECOVER_HOSTED_COOLDOWN_CAMPAIGN,
     CONNECTIVITY_REQUEST_RECOVER_HOSTED_COOLDOWN_FULL_CAMPAIGN,
@@ -585,6 +586,32 @@ static void process_request(connectivity_request_t *request)
         } else {
             ESP_LOGI(TAG, "station configuration and durable credential cleared");
         }
+    } else if (request->type == CONNECTIVITY_REQUEST_SCAN) {
+        const wifi_scan_config_t scan_cfg = {.show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE};
+        set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING, ESP_OK);
+        err = esp_wifi_scan_start(&scan_cfg, true);
+        if (err == ESP_OK) {
+            uint16_t found = 0;
+            err = esp_wifi_scan_get_ap_num(&found);
+            static wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
+            uint16_t count = found < NP2_WIFI_SCAN_RESULTS_MAX ? found : NP2_WIFI_SCAN_RESULTS_MAX;
+            if (err == ESP_OK && count > 0U) err = esp_wifi_scan_get_ap_records(&count, records);
+            if (err == ESP_OK) {
+                taskENTER_CRITICAL(&s_status_lock);
+                s_status.access_points_found = found;
+                s_status.scan_results_count = (uint8_t)count;
+                memset(s_status.scan_results, 0, sizeof(s_status.scan_results));
+                for (uint16_t i = 0; i < count; ++i) {
+                    memcpy(s_status.scan_results[i].ssid, records[i].ssid,
+                           sizeof(s_status.scan_results[i].ssid) - 1U);
+                    s_status.scan_results[i].rssi = records[i].rssi;
+                    s_status.scan_results[i].secure = records[i].authmode != WIFI_AUTH_OPEN;
+                }
+                taskEXIT_CRITICAL(&s_status_lock);
+                set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE, ESP_OK);
+            }
+        }
+        if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi scan request failed: %s", esp_err_to_name(err));
     } else if (request->type == CONNECTIVITY_REQUEST_RECOVER_HOSTED) {
         err = recover_hosted_link();
         if (err != ESP_OK) {
@@ -1193,6 +1220,21 @@ esp_err_t connectivity_diagnostic_request_join(const char *ssid, const char *pas
     s_request_pending = true;
     taskEXIT_CRITICAL(&s_request_lock);
     secure_zero(&request, sizeof(request));
+    return ESP_OK;
+}
+
+esp_err_t connectivity_diagnostic_request_scan(void)
+{
+    if (!s_started) return ESP_ERR_INVALID_STATE;
+    const connectivity_request_t request = {.type = CONNECTIVITY_REQUEST_SCAN};
+    taskENTER_CRITICAL(&s_request_lock);
+    if (s_request_pending) {
+        taskEXIT_CRITICAL(&s_request_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    memcpy(&s_request_mailbox, &request, sizeof(request));
+    s_request_pending = true;
+    taskEXIT_CRITICAL(&s_request_lock);
     return ESP_OK;
 }
 

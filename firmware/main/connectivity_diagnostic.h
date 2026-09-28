@@ -64,6 +64,9 @@ esp_err_t connectivity_diagnostic_start(void);
  */
 esp_err_t connectivity_diagnostic_request_join(const char *ssid, const char *password);
 
+/* Queues one credential-free scan for the connectivity worker. */
+esp_err_t connectivity_diagnostic_request_scan(void);
+
 /* Removes the active station configuration, durable credential, and retries. */
 esp_err_t connectivity_diagnostic_request_forget(void);
 

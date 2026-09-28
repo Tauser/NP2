@@ -49,7 +49,9 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
              24, 150, 270, LV_TEXT_ALIGN_LEFT);
     np_label(content, "SSID e senha permanecem no servico", NP_FONT_SM, np_c_text_2(),
              24, 176, 280, LV_TEXT_ALIGN_LEFT);
-    wifi->manage_button = np_button(content, 24, 237, 286, 52,
+    wifi->scan_button = np_button(content, 24, 237, 138, 52,
+                                  "Atualizar", false);
+    wifi->manage_button = np_button(content, 172, 237, 138, 52,
                                     "Gerenciar rede", true);
 
     np_label(content, "Redes disponiveis", NP_FONT_SM, np_c_text_3(),

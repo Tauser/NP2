@@ -13,6 +13,7 @@ typedef struct {
     np_modal_t modal;
     lv_obj_t *status_value;
     lv_obj_t *detail_value;
+    lv_obj_t *scan_button;
     lv_obj_t *manage_button;
     lv_obj_t *network_rows[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     lv_obj_t *network_names[NP_SETTINGS_WIFI_VISIBLE_RESULTS];

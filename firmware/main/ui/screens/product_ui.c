@@ -74,6 +74,7 @@ static void notifications_test_event_cb(lv_event_t *event);
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void keyboard_modal_close_cb(void *user_data);
 static void wifi_manage_event_cb(lv_event_t *event);
+static void wifi_scan_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
@@ -256,6 +257,8 @@ static void install_settings_control_callbacks(void)
         s_ui.settings.wifi.manage_button != NULL) {
         lv_obj_add_event_cb(s_ui.settings.wifi.manage_button, wifi_manage_event_cb,
                             LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(s_ui.settings.wifi.scan_button, wifi_scan_event_cb,
+                            LV_EVENT_CLICKED, NULL);
         s_ui.settings_wifi_callbacks_initialized = true;
     }
 }
@@ -339,6 +342,18 @@ static void wifi_manage_event_cb(lv_event_t *event)
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Configuracao indisponivel",
                                "Tente novamente em alguns instantes", 2600U);
+    }
+}
+
+static void wifi_scan_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (connectivity_diagnostic_request_scan() == ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                               "Buscando redes", NULL, 1800U);
+    } else {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Busca indisponivel", NULL, 2200U);
     }
 }
 
