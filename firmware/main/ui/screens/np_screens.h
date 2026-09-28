@@ -77,6 +77,11 @@ typedef struct {
     lv_obj_t *notifications_sound_switch;
     lv_obj_t *notifications_system_switch;
     lv_obj_t *notifications_test_button;
+    lv_obj_t *timezone_row;
+    lv_obj_t *timezone_value;
+    lv_obj_t *timezone_modal_scrim;
+    lv_obj_t *timezone_search;
+    lv_obj_t *timezone_options[5];
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);

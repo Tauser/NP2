@@ -58,8 +58,19 @@
 #define SETTINGS_NOTIFICATIONS_MODAL_W 680
 #define SETTINGS_NOTIFICATIONS_MODAL_H 432
 
+#define SETTINGS_TIMEZONE_MODAL_X   192
+#define SETTINGS_TIMEZONE_MODAL_Y   52
+#define SETTINGS_TIMEZONE_MODAL_W   640
+#define SETTINGS_TIMEZONE_MODAL_H   496
+#define SETTINGS_TIMEZONE_SEARCH_Y  76
+#define SETTINGS_TIMEZONE_LIST_Y    132
+#define SETTINGS_TIMEZONE_ROW_H     58
+#define SETTINGS_TIMEZONE_ROW_GAP   4
+#define SETTINGS_TIMEZONE_COUNT     5
+
 static lv_obj_t *s_system_modal_scrim = NULL;
 static lv_obj_t *s_notifications_modal_scrim = NULL;
+static lv_obj_t *s_timezone_modal_scrim = NULL;
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -294,6 +305,103 @@ static lv_obj_t *settings_notification_switch(lv_obj_t *parent,
     return sw;
 }
 
+static lv_obj_t *settings_timezone_choice(lv_obj_t *parent,
+                                          int32_t y,
+                                          const char *title,
+                                          const char *detail)
+{
+    lv_obj_t *choice = np_fill(parent, 0, y,
+                               SETTINGS_TIMEZONE_MODAL_W - 48,
+                               SETTINGS_TIMEZONE_ROW_H,
+                               np_c_surface_raised(), LV_OPA_COVER,
+                               NP_RADIUS_CONTROL);
+    lv_obj_set_style_border_width(choice, 1, 0);
+    lv_obj_set_style_border_color(choice, np_c_hairline(), 0);
+    lv_obj_add_flag(choice, LV_OBJ_FLAG_CLICKABLE);
+    np_label(choice, title, NP_FONT_SM, np_c_text(),
+             16, 7, 450, LV_TEXT_ALIGN_LEFT);
+    np_label(choice, detail, NP_FONT_SM, np_c_text_2(),
+             16, 31, 470, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *radio = np_fill(choice, 548, 18, 20, 20,
+                              np_c_surface_raised(), LV_OPA_COVER,
+                              LV_RADIUS_CIRCLE);
+    lv_obj_set_style_border_width(radio, 2, 0);
+    lv_obj_set_style_border_color(radio, np_c_text_3(), 0);
+    np_dot(radio, 4, 4, 12, np_c_accent());
+    return choice;
+}
+
+static lv_obj_t *settings_build_timezone_modal(lv_obj_t *root,
+                                                np_settings_view_t *view)
+{
+    lv_obj_t *scrim = np_fill(root, 0, 0, NP_SCREEN_W, NP_SCREEN_H,
+                              np_c_bg(), LV_OPA_70, 0);
+    lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *modal = settings_panel(scrim,
+                                     SETTINGS_TIMEZONE_MODAL_X,
+                                     SETTINGS_TIMEZONE_MODAL_Y,
+                                     SETTINGS_TIMEZONE_MODAL_W,
+                                     SETTINGS_TIMEZONE_MODAL_H);
+    lv_obj_t *icon_tile = np_fill(modal, 24, 17, 44, 44,
+                                  np_c_accent_bg(), LV_OPA_COVER,
+                                  NP_RADIUS_CONTROL);
+    np_label(icon_tile, NP_ICON_CALENDAR, NP_FONT_ICON, np_c_accent(),
+             0, 10, 44, LV_TEXT_ALIGN_CENTER);
+    np_label(modal, "Fuso horario", NP_FONT_MD, np_c_text(),
+             24, 19, 340, LV_TEXT_ALIGN_LEFT);
+    lv_obj_t *close = np_icon_button(modal,
+                                     SETTINGS_TIMEZONE_MODAL_W - 64, 12,
+                                     44, NP_ICON_CLOSE);
+    lv_obj_add_event_cb(close, settings_modal_close_event_cb,
+                        LV_EVENT_CLICKED, scrim);
+    /* The component catalog has no text-input wrapper. This textarea remains
+     * local to the screen and is created only once with the lazy Settings tree. */
+    view->timezone_search = lv_textarea_create(modal);
+    lv_obj_remove_style_all(view->timezone_search);
+    lv_obj_set_pos(view->timezone_search, 24, SETTINGS_TIMEZONE_SEARCH_Y);
+    lv_obj_set_size(view->timezone_search, SETTINGS_TIMEZONE_MODAL_W - 48, 44);
+    lv_obj_set_style_radius(view->timezone_search, NP_RADIUS_CONTROL, 0);
+    lv_obj_set_style_bg_color(view->timezone_search, np_c_surface_raised(), 0);
+    lv_obj_set_style_bg_opa(view->timezone_search, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(view->timezone_search, 1, 0);
+    lv_obj_set_style_border_color(view->timezone_search, np_c_hairline(), 0);
+    lv_obj_set_style_text_font(view->timezone_search, NP_FONT_SM, 0);
+    lv_obj_set_style_text_color(view->timezone_search, np_c_text(), 0);
+    lv_obj_set_style_text_color(view->timezone_search, np_c_text_3(),
+                                 LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_textarea_set_one_line(view->timezone_search, true);
+    lv_textarea_set_placeholder_text(view->timezone_search,
+                                     "     Buscar cidade, pais ou GMT...");
+    np_label(modal, NP_ICON_SEARCH, NP_FONT_ICON, np_c_text_2(),
+             38, SETTINGS_TIMEZONE_SEARCH_Y + 10, 24, LV_TEXT_ALIGN_CENTER);
+
+    lv_obj_t *list = lv_obj_create(modal);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_pos(list, 24, SETTINGS_TIMEZONE_LIST_Y);
+    lv_obj_set_size(list, SETTINGS_TIMEZONE_MODAL_W - 48, 326);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_pad_right(list, 4, 0);
+
+    view->timezone_options[0] = settings_timezone_choice(
+        list, 0 * (SETTINGS_TIMEZONE_ROW_H + SETTINGS_TIMEZONE_ROW_GAP),
+        "Sao Paulo (GMT-3)", "Brasil  ·  America/Sao_Paulo");
+    view->timezone_options[1] = settings_timezone_choice(
+        list, 1 * (SETTINGS_TIMEZONE_ROW_H + SETTINGS_TIMEZONE_ROW_GAP),
+        "Brasilia (GMT-3)", "Brasil  ·  America/Sao_Paulo");
+    view->timezone_options[2] = settings_timezone_choice(
+        list, 2 * (SETTINGS_TIMEZONE_ROW_H + SETTINGS_TIMEZONE_ROW_GAP),
+        "Buenos Aires (GMT-3)", "Argentina  ·  America/Argentina/Buenos_Aires");
+    view->timezone_options[3] = settings_timezone_choice(
+        list, 3 * (SETTINGS_TIMEZONE_ROW_H + SETTINGS_TIMEZONE_ROW_GAP),
+        "Nova York (GMT-5)", "Estados Unidos  ·  America/New_York");
+    view->timezone_options[4] = settings_timezone_choice(
+        list, 4 * (SETTINGS_TIMEZONE_ROW_H + SETTINGS_TIMEZONE_ROW_GAP),
+        "Londres (GMT+0)", "Reino Unido  ·  Europe/London");
+    np_set_visible(scrim, false);
+    return scrim;
+}
+
 static lv_obj_t *settings_notification_item(lv_obj_t *modal,
                                             int32_t y,
                                             const char *icon,
@@ -441,13 +549,15 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                               "--",
                               true);
 
-    (void)settings_option_row(card,
-                              194,
-                              NP_ICON_CALENDAR,
-                              np_c_text_2(),
-                              "Fuso horario",
-                              "--",
-                              true);
+    view->timezone_row = settings_option_row(card,
+                                              194,
+                                              NP_ICON_LOCATION,
+                                              np_c_text_2(),
+                                              "Fuso horario",
+                                              "--",
+                                              true);
+    view->timezone_value = lv_obj_get_child(view->timezone_row, 2);
+    lv_obj_add_flag(view->timezone_row, LV_OBJ_FLAG_CLICKABLE);
 
     view->notifications_row = settings_option_row(card,
                             284, NP_ICON_NOTIFICATIONS, np_c_text_2(),
@@ -494,6 +604,8 @@ np_settings_view_t np_settings_begin(lv_obj_t *parent)
     s_system_modal_scrim = settings_build_system_modal(view.root);
     view.notifications_modal_scrim = settings_build_notifications_modal(view.root, &view);
     s_notifications_modal_scrim = view.notifications_modal_scrim;
+    view.timezone_modal_scrim = settings_build_timezone_modal(view.root, &view);
+    s_timezone_modal_scrim = view.timezone_modal_scrim;
 
     return view;
 }
@@ -546,6 +658,7 @@ void np_settings_reset_stages(np_settings_view_t *view)
         np_set_visible(s_system_modal_scrim, false);
     }
     if (s_notifications_modal_scrim != NULL) np_set_visible(s_notifications_modal_scrim, false);
+    if (s_timezone_modal_scrim != NULL) np_set_visible(s_timezone_modal_scrim, false);
 }
 
 lv_obj_t *np_settings_create(lv_obj_t *parent)
