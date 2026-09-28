@@ -262,7 +262,7 @@ np_keyboard_t np_keyboard_create(lv_obj_t *parent)
     lv_obj_set_style_pad_column(result.keyboard, NP_SP_8, LV_PART_MAIN);
     lv_obj_set_style_bg_color(result.keyboard, np_c_surface_raised(), LV_PART_ITEMS);
     lv_obj_set_style_text_color(result.keyboard, np_c_text(), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(result.keyboard, np_font_text_with_icons(), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(result.keyboard, np_form_text_font(), LV_PART_ITEMS);
     lv_obj_set_style_radius(result.keyboard, NP_RADIUS_CONTROL, LV_PART_ITEMS);
     lv_obj_set_style_border_width(result.keyboard, 1, LV_PART_ITEMS);
     lv_obj_set_style_border_color(result.keyboard, np_c_hairline(), LV_PART_ITEMS);

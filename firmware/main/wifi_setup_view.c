@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "np_form.h"
 #include "provisioning_service.h"
 
 #define WIFI_SETUP_KEY_COUNT 30U
@@ -205,15 +206,9 @@ static lv_obj_t *create_button(lv_obj_t *parent, int32_t x, int32_t y, int32_t w
                                int32_t height, const char *text, lv_event_cb_t callback,
                                void *user_data)
 {
-    lv_obj_t *const button = lv_button_create(parent);
-    lv_obj_set_size(button, width, height);
-    lv_obj_set_pos(button, x, y);
-    lv_obj_set_style_radius(button, 8, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x183554), LV_PART_MAIN);
-    lv_obj_t *const label = lv_label_create(button);
-    lv_label_set_text(label, text);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), LV_PART_MAIN);
-    lv_obj_center(label);
+    lv_obj_t *const button = np_form_button(parent, x, y, width, height, text,
+                                             NP_FORM_BUTTON_SECONDARY);
+    if (button == NULL) return NULL;
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, user_data);
     return button;
 }

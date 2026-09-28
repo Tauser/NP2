@@ -174,21 +174,14 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
                     NP_ICON_CALENDAR, np_c_accent(), "Fuso horario", NULL);
     np_label(timezone->modal.content, "Regiao", NP_FONT_SM, np_c_text_2(),
              24, 12, 96, LV_TEXT_ALIGN_LEFT);
-    timezone->region = lv_dropdown_create(timezone->modal.content);
-    lv_obj_remove_style_all(timezone->region);
-    lv_obj_set_pos(timezone->region, 134, 0);
-    lv_obj_set_size(timezone->region, TZ_W - 158, NP_INPUT_H);
-    np_apply_input_style(timezone->region);
-    lv_obj_set_style_bg_color(timezone->region, np_c_surface_raised(), LV_PART_SELECTED);
-    lv_obj_set_style_text_font(timezone->region, np_font_text_with_icons(), LV_PART_SELECTED);
-    lv_obj_set_style_text_color(timezone->region, np_c_text(), LV_PART_SELECTED);
+    timezone->region = np_form_dropdown(timezone->modal.content, 134, 0,
+                                        TZ_W - 158, NP_INPUT_H);
     lv_dropdown_set_options_static(timezone->region, s_region_options);
-    lv_dropdown_set_symbol(timezone->region, NP_ICON_ARROW_DOWN);
     np_label(timezone->modal.content, "Cidade", NP_FONT_SM, np_c_text_2(),
              24, 72, 96, LV_TEXT_ALIGN_LEFT);
-    timezone->search = np_text_input(timezone->modal.content, 134, 56,
-                                     TZ_W - 158, NP_INPUT_H,
-                                     "Buscar cidade...", NP_ICON_SEARCH);
+    timezone->search = np_form_text_input(timezone->modal.content, 134, 56,
+                                          TZ_W - 158, NP_INPUT_H,
+                                          "Buscar cidade...", NP_ICON_SEARCH);
     timezone->list = lv_obj_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->list);
     lv_obj_set_pos(timezone->list, 24, 120);

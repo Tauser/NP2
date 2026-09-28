@@ -8,6 +8,7 @@
 #define NP_COMPONENTS_H
 
 #include "lvgl.h"
+#include "np_form.h"
 #include "np_tokens.h"
 
 #ifdef __cplusplus
@@ -52,13 +53,6 @@ lv_obj_t *np_dot(lv_obj_t *parent, int32_t x, int32_t y, int32_t size, lv_color_
 
 lv_obj_t *np_icon_button(lv_obj_t *parent, int32_t x, int32_t y,
                          int32_t size, const char *symbol);
-
-/* Campos do sistema: texto Montserrat com fallback para os ícones Material. */
-const lv_font_t *np_font_text_with_icons(void);
-void np_apply_input_style(lv_obj_t *input);
-lv_obj_t *np_text_input(lv_obj_t *parent, int32_t x, int32_t y,
-                        int32_t w, int32_t h, const char *placeholder,
-                        const char *leading_icon);
 
 /* ---------------- compostos legados ---------------- */
 
