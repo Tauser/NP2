@@ -47,10 +47,26 @@
   mantém o prompt aberto para tentar novamente. Senha e confirmação nunca
   coexistem como diálogos filhos alocados.
 - O fluxo de senha foi versionado em `71c1eef` após build e teste host.
+- Revisão do teclado: as células de cursor sem uso agora oferecem `|` e crase
+  em abc/ABC, e `~`/`^` em símbolos, completando o ASCII imprimível. A seleção
+  de rede só atualiza bordas/fundo quando muda, sem invalidar linhas em cada
+  projeção de relógio.
 - `idf.py build` passou com IDF 5.5.4/`esp32p4`, aplicação `0x2a1fe0` B,
   67% livres no slot OTA; sem novos warnings de compilação. SHA-256 P4:
   `9FB13EEE395FA25E6A58B2FD175C109B31482D44F8756325939BDAAE1A809BE9`.
   O descritor da imagem pré-commit identifica `71c1eef-dirty`.
+
+## Imagem final para flash manual
+
+- Base da revisão final: `62d04ba`. `idf.py build` passou para `esp32p4`
+  com IDF 5.5.4; aplicação `0x2a20f0` B, 67% livres no slot OTA de 8 MiB,
+  sem novos warnings de compilação.
+- Arquivo local: `firmware/build/np2_p4.bin`, SHA-256
+  `6C2E9EFF9D4B05EF3C7DB1E5E0B7039CA8B9F88F3ADB3F5B7E668AD89CCC8F40`.
+  Como os builds precedem cada commit, o descritor registra `62d04ba-dirty`.
+- No terminal ESP-IDF, em `firmware/`, o operador pode executar
+  `idf.py -p <PORTA> app-flash` e depois `idf.py -p <PORTA> monitor`.
+  Não foi executado flash, boot nem novo teste físico nesta entrega.
 
 ## Roteiro após flash manual
 
@@ -72,6 +88,7 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
    Com 7 caracteres Conectar deve estar desabilitado; com 8 e 63 habilitado;
    a 64ª tecla deve ser recusada. Cancelar e X devem voltar ao Wi-Fi e uma
    nova entrada começa vazia/mascarada. Repetir 100 ciclos para avaliar heap.
+   Conferir também `|`, crase, `~` e `^` ao alternar os modos de teclado.
 6. Submeter senha incorreta e correta; UI continua operável e só apresenta
    associação/SSID quando o rádio confirmar. Testar rede aberta sem senha.
    Confirmar ausência de segredo em logs e projeções; não exportar dump bruto

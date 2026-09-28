@@ -3,6 +3,24 @@
 #include <stdio.h>
 #include <string.h>
 
+static void complete_key_map(np_wifi_password_t *view)
+{
+    const char *const *const map = lv_keyboard_get_map_array(view->keyboard);
+    const bool special = lv_keyboard_get_mode(view->keyboard) == LV_KEYBOARD_MODE_SPECIAL;
+    for (size_t i = 0U; i < sizeof(view->key_map) / sizeof(view->key_map[0]); ++i) {
+        const char *key = map[i];
+        /* Entry is append/backspace only, so cursor arrows are unused. Use
+         * their existing cells for the four ASCII symbols absent in LVGL. */
+        if (strcmp(key, LV_SYMBOL_LEFT) == 0) key = special ? "~" : "|";
+        else if (strcmp(key, LV_SYMBOL_RIGHT) == 0) key = special ? "^" : "`";
+        view->key_map[i] = key;
+        if (key[0] == '\0') {
+            lv_buttonmatrix_set_map(view->keyboard, view->key_map);
+            return;
+        }
+    }
+}
+
 static void closing(void *user_data)
 {
     np_wifi_password_t *const view = user_data;
@@ -39,9 +57,11 @@ static void key_event(lv_event_t *event)
     const char *const key = lv_keyboard_get_button_text(view->keyboard, index);
     if (key == NULL) return;
     /* No textarea is ever associated. Mode keys remain local presentation. */
-    if (strcmp(key, "abc") == 0) lv_keyboard_set_mode(view->keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    else if (strcmp(key, "ABC") == 0) lv_keyboard_set_mode(view->keyboard, LV_KEYBOARD_MODE_TEXT_UPPER);
-    else if (strcmp(key, "1#") == 0) lv_keyboard_set_mode(view->keyboard, LV_KEYBOARD_MODE_SPECIAL);
+    if (strcmp(key, "abc") == 0 || strcmp(key, "ABC") == 0 || strcmp(key, "1#") == 0) {
+        lv_keyboard_set_mode(view->keyboard, strcmp(key, "abc") == 0 ? LV_KEYBOARD_MODE_TEXT_LOWER :
+                             strcmp(key, "ABC") == 0 ? LV_KEYBOARD_MODE_TEXT_UPPER : LV_KEYBOARD_MODE_SPECIAL);
+        complete_key_map(view);
+    }
     else if (strcmp(key, LV_SYMBOL_BACKSPACE) == 0) (void)view->action(NP_WIFI_PASSWORD_BACKSPACE, 0);
     else if (strcmp(key, LV_SYMBOL_OK) == 0 || strcmp(key, LV_SYMBOL_NEW_LINE) == 0) {
         if (view->action(NP_WIFI_PASSWORD_SUBMIT, 0)) np_modal_hide(&view->modal);
@@ -79,6 +99,7 @@ void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
     lv_obj_set_style_bg_color(view->keyboard, np_c_surface(), LV_PART_MAIN);
     lv_obj_set_style_bg_color(view->keyboard, np_c_surface_raised(), LV_PART_ITEMS);
     lv_obj_remove_event_cb(view->keyboard, lv_keyboard_def_event_cb);
+    complete_key_map(view);
     lv_obj_add_event_cb(view->keyboard, key_event, LV_EVENT_VALUE_CHANGED, view);
     np_set_visible(view->keyboard, secure);
     lv_obj_t *const cancel = np_button(content, 24, 366, 180, 48, "Cancelar", false);

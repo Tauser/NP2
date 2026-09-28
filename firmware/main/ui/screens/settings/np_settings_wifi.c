@@ -17,6 +17,7 @@ static void row_event_cb(lv_event_t *event)
 
 static void select_row(np_settings_wifi_t *wifi, uint8_t selected)
 {
+    if (wifi->selected_index == selected) return;
     wifi->selected_index = selected;
     if (selected < NP_SETTINGS_WIFI_VISIBLE_RESULTS) {
         (void)snprintf(wifi->selected_ssid, sizeof(wifi->selected_ssid), "%s",

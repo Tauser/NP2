@@ -21,6 +21,8 @@ typedef struct {
     lv_obj_t *reveal;
     lv_obj_t *connect;
     lv_obj_t *keyboard;
+    /* Public key labels only; no entered text. */
+    const char *key_map[64];
     bool secure;
     bool visible;
     np_wifi_password_action_cb_t action;
