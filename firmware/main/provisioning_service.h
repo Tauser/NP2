@@ -38,6 +38,9 @@ esp_err_t provisioning_service_arm_open_network(void);
  * retain the password text in a widget, log, state model or event payload.
  */
 esp_err_t provisioning_service_touch_begin(void);
+/* Starts directly at password entry after copying a public SSID to the
+ * service-owned RAM session. The password never crosses the UI boundary. */
+esp_err_t provisioning_service_touch_begin_for_ssid(const char *ssid);
 esp_err_t provisioning_service_touch_append_ssid(char character);
 esp_err_t provisioning_service_touch_backspace_ssid(void);
 esp_err_t provisioning_service_touch_begin_password(void);

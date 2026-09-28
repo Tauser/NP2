@@ -30,6 +30,8 @@ void np_settings_wifi_bind_row(np_settings_wifi_t *wifi, lv_obj_t *row);
 void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
                            uint8_t scan_results_count,
                            const connectivity_scan_result_t *scan_results);
+bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,
+                                         char *out_ssid, size_t out_size);
 
 #ifdef __cplusplus
 }

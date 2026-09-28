@@ -369,6 +369,29 @@ esp_err_t provisioning_service_touch_begin(void)
     return ESP_OK;
 }
 
+esp_err_t provisioning_service_touch_begin_for_ssid(const char *ssid)
+{
+    if (ssid == NULL || !s_started) return ESP_ERR_INVALID_ARG;
+    const size_t length = strnlen(ssid, NP2_PROVISIONING_SSID_BYTES);
+    if (length == 0U || length >= NP2_PROVISIONING_SSID_BYTES) return ESP_ERR_INVALID_SIZE;
+
+    taskENTER_CRITICAL(&s_status_lock);
+    if (s_status.touch_active) {
+        taskEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    secure_zero(s_touch_ssid, sizeof(s_touch_ssid));
+    secure_zero(s_touch_password, sizeof(s_touch_password));
+    memcpy(s_touch_ssid, ssid, length);
+    s_status.touch_active = true;
+    s_status.touch_stage = PROVISIONING_TOUCH_STAGE_PASSWORD;
+    s_status.touch_ssid_length = (uint8_t)length;
+    s_status.touch_password_length = 0U;
+    s_status.last_result = ESP_OK;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
+}
+
 esp_err_t provisioning_service_touch_append_ssid(char character)
 {
     if (!is_printable_ssid_char((uint8_t)character)) {

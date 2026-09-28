@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 esp_err_t wifi_setup_view_open(lv_obj_t *parent);
+esp_err_t wifi_setup_view_open_for_ssid(lv_obj_t *parent, const char *ssid);
 
 #ifdef __cplusplus
 }

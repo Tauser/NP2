@@ -218,12 +218,14 @@ static lv_obj_t *create_button(lv_obj_t *parent, int32_t x, int32_t y, int32_t w
     return button;
 }
 
-esp_err_t wifi_setup_view_open(lv_obj_t *parent)
+static esp_err_t wifi_setup_view_open_internal(lv_obj_t *parent, const char *ssid)
 {
     if (parent == NULL || s_view.overlay != NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    const esp_err_t begin_result = provisioning_service_touch_begin();
+    const esp_err_t begin_result = ssid == NULL
+                                       ? provisioning_service_touch_begin()
+                                       : provisioning_service_touch_begin_for_ssid(ssid);
     if (begin_result != ESP_OK) {
         return begin_result;
     }
@@ -295,4 +297,14 @@ esp_err_t wifi_setup_view_open(lv_obj_t *parent)
     s_view.key_mode = WIFI_SETUP_KEYS_LOWER;
     refresh_view();
     return ESP_OK;
+}
+
+esp_err_t wifi_setup_view_open(lv_obj_t *parent)
+{
+    return wifi_setup_view_open_internal(parent, NULL);
+}
+
+esp_err_t wifi_setup_view_open_for_ssid(lv_obj_t *parent, const char *ssid)
+{
+    return wifi_setup_view_open_internal(parent, ssid);
 }

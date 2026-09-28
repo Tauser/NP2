@@ -1,6 +1,7 @@
 #include "np_settings_wifi.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define SETTINGS_WIFI_MODAL_X 160
 #define SETTINGS_WIFI_MODAL_Y 42
@@ -132,4 +133,17 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
         np_set_text(wifi->network_details[i], detail);
     }
     if (count > 0U) select_row(wifi, wifi->selected_index < count ? wifi->selected_index : 0U);
+}
+
+bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,
+                                         char *out_ssid, size_t out_size)
+{
+    if (wifi == NULL || out_ssid == NULL || out_size == 0U ||
+        wifi->selected_index >= NP_SETTINGS_WIFI_VISIBLE_RESULTS ||
+        wifi->network_names[wifi->selected_index] == NULL) return false;
+    const char *const ssid = lv_label_get_text(wifi->network_names[wifi->selected_index]);
+    const size_t length = strnlen(ssid, out_size);
+    if (length == 0U || length >= out_size) return false;
+    memcpy(out_ssid, ssid, length + 1U);
+    return true;
 }

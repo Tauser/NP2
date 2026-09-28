@@ -424,8 +424,17 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
 static void wifi_manage_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    char ssid[33] = {0};
+    const bool selected_network = event != NULL &&
+                                  lv_event_get_target(event) == s_ui.settings.wifi.connect_button &&
+                                  np_settings_wifi_copy_selected_ssid(&s_ui.settings.wifi,
+                                                                      ssid, sizeof(ssid));
     np_settings_wifi_hide(&s_ui.settings.wifi);
-    if (wifi_setup_view_open(s_ui.settings.root) != ESP_OK) {
+    const esp_err_t result = selected_network
+                                 ? wifi_setup_view_open_for_ssid(s_ui.settings.root, ssid)
+                                 : wifi_setup_view_open(s_ui.settings.root);
+    memset(ssid, 0, sizeof(ssid));
+    if (result != ESP_OK) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Configuracao indisponivel",
                                "Tente novamente em alguns instantes", 2600U);
