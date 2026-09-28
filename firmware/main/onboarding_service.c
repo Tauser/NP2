@@ -40,6 +40,22 @@ void onboarding_service_refresh(void)
         taskEXIT_CRITICAL(&s_lock);
         return;
     }
+    /* A completed write may be followed by a newer selection. Clear the
+     * in-flight marker first, then queue the latest preference below. */
+    if (s_timezone_write_enqueued && !storage.pending && !storage.busy) {
+        s_timezone_write_enqueued = false;
+        if (!s_timezone_update_pending) {
+            s_status.timezone_persistence_pending = false;
+            if (storage.onboarding_profile_valid && storage.onboarding_profile.completed &&
+                storage.onboarding_profile.timezone_index == s_status.timezone_index) {
+                s_status.last_result = ESP_OK;
+            } else {
+                s_status.last_result = storage.onboarding_profile_result == ESP_OK
+                                           ? ESP_FAIL : storage.onboarding_profile_result;
+            }
+        }
+    }
+
     if (s_timezone_update_pending && !s_timezone_write_enqueued && storage.ready &&
         !storage.pending && !storage.busy) {
         timezone_profile = (onboarding_profile_t){
@@ -51,16 +67,6 @@ void onboarding_service_refresh(void)
         s_timezone_write_enqueued = true;
         s_status.timezone_persistence_pending = true;
         submit_timezone_update = true;
-    } else if (s_timezone_write_enqueued && !storage.pending && !storage.busy) {
-        s_timezone_write_enqueued = false;
-        s_status.timezone_persistence_pending = false;
-        if (storage.onboarding_profile_valid && storage.onboarding_profile.completed &&
-            storage.onboarding_profile.timezone_index == s_status.timezone_index) {
-            s_status.last_result = ESP_OK;
-        } else {
-            s_status.last_result = storage.onboarding_profile_result == ESP_OK
-                                       ? ESP_FAIL : storage.onboarding_profile_result;
-        }
     }
 
     if (s_editing && s_status.stage == ONBOARDING_STAGE_SAVING && !storage.pending && !storage.busy) {
@@ -171,14 +177,16 @@ esp_err_t onboarding_service_request_timezone_update(uint16_t timezone_index)
 {
     if (!timezone_catalog_is_valid(timezone_index)) return ESP_ERR_INVALID_ARG;
     taskENTER_CRITICAL(&s_lock);
-    if (!s_started || !s_status.completed || s_timezone_update_pending ||
-        s_timezone_write_enqueued) {
+    if (!s_started || !s_status.completed) {
         taskEXIT_CRITICAL(&s_lock);
         return ESP_ERR_INVALID_STATE;
     }
+    /* The clock follows the newest choice now. Persistence is coalesced by
+     * refresh(), so an in-flight flash write never blocks Settings. */
     s_status.timezone_index = timezone_index;
     s_status.last_result = ESP_OK;
     s_timezone_update_pending = true;
+    s_status.timezone_persistence_pending = true;
     taskEXIT_CRITICAL(&s_lock);
     return ESP_OK;
 }

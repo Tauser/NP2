@@ -442,14 +442,15 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
     if (result != ESP_OK) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Fuso nao alterado",
-                               "Aguarde a atualizacao atual terminar", 2600U);
+                               "Preferencia indisponivel no momento", 2600U);
         return result;
     }
 
+    (void)app_state_request_refresh();
     np_keyboard_hide(&s_ui.keyboard);
     np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
                            "Fuso horario atualizado",
-                           "Aplicando e salvando preferencia", 2200U);
+                           "Aplicando agora e salvando preferencia", 2200U);
     return ESP_OK;
 }
 

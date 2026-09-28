@@ -37,9 +37,10 @@ esp_err_t onboarding_service_reopen(void);
 esp_err_t onboarding_service_set_stage(onboarding_stage_t stage);
 esp_err_t onboarding_service_set_clock_preferences(uint16_t timezone_index, bool clock_24h);
 esp_err_t onboarding_service_complete(void);
-/* Queues a timezone-only update for a completed profile. app_loop submits the
- * flash request, so a Settings callback never starts an NVS operation. The
- * status exposes timezone_persistence_pending until the profile is confirmed. */
+/* Selects a timezone for a completed profile. app_loop applies it immediately
+ * and coalesces persistence through the flash owner, so Settings never waits
+ * for an unrelated write. timezone_persistence_pending remains true until the
+ * newest selection is confirmed. */
 esp_err_t onboarding_service_request_timezone_update(uint16_t timezone_index);
 void onboarding_service_get_status(onboarding_service_status_t *out_status);
 
