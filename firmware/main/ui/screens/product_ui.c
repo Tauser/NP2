@@ -76,6 +76,7 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void keyboard_modal_close_cb(void *user_data);
 static void wifi_manage_event_cb(lv_event_t *event);
 static void wifi_scan_event_cb(lv_event_t *event);
+static void wifi_forget_event_cb(lv_event_t *event);
 static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 
@@ -313,6 +314,10 @@ static void settings_modal_row_event_cb(lv_event_t *event)
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.settings.wifi.scan_button, wifi_scan_event_cb,
                                 LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.settings.wifi.connect_button, wifi_manage_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.settings.wifi.forget_button, wifi_forget_event_cb,
+                                LV_EVENT_CLICKED, NULL);
             s_ui.settings_wifi_callbacks_initialized = true;
         }
         app_ui_projection_t projection = {0}; app_state_get_ui_projection(&projection);
@@ -436,6 +441,18 @@ static void wifi_scan_event_cb(lv_event_t *event)
     } else {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Busca indisponivel", NULL, 2200U);
+    }
+}
+
+static void wifi_forget_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (connectivity_diagnostic_request_forget() == ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                               "Rede esquecida", NULL, 1800U);
+    } else {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Nao foi possivel esquecer", NULL, 2200U);
     }
 }
 

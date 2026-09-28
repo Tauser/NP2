@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define NP_SETTINGS_WIFI_VISIBLE_RESULTS 4U
+#define NP_SETTINGS_WIFI_VISIBLE_RESULTS 5U
 
 typedef struct {
     np_modal_t modal;
@@ -15,9 +15,12 @@ typedef struct {
     lv_obj_t *detail_value;
     lv_obj_t *scan_button;
     lv_obj_t *manage_button;
+    lv_obj_t *forget_button;
+    lv_obj_t *connect_button;
     lv_obj_t *network_rows[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     lv_obj_t *network_names[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     lv_obj_t *network_details[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
+    uint8_t selected_index;
 } np_settings_wifi_t;
 
 void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent);
