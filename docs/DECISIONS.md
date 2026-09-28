@@ -1048,3 +1048,28 @@ coordenador de flash, recusando persistência pendente/OTA em andamento. OTA
 de produto permanece no gate G5; Settings indica manutenção em vez de
 oferecer um botão de atualização sem função. Validação física continua
 dependente do flash manual e resultados do operador.
+
+## ADR-042 — Perfil e Preferências com fallback incremental
+
+**Decisão:** introduzir duas cenas leves, Perfil e Preferências, usando o
+header e os tokens existentes. Há um único perfil, sempre principal, com
+saudação obrigatória. Não existem seleção de perfil padrão nem controle de
+saudação. Preferências é um hub de cinco linhas, sem controles locais.
+
+**Motivo:** separar identidade e navegação das configurações sem substituir
+serviços ou redesenhar Home. Nesta primeira fase, as cinco linhas abrem a
+Settings anterior, ainda compilada e com seus modais lazy. O botão Perfil
+no hub permite abrir a cena de identidade; cada cena libera a anterior antes
+de construir a próxima, na task LVGL, após o callback de toque.
+
+Não há fonte de identidade no AppState atual. Nome e avatar aparecem como
+não configurados; Editar/Nome/Avatar explicam que a edição fica para a fase
+de identidade. A saudação é "Olá!" até existir nome real. Localização é
+omitida: a cidade fixa do provider de clima não é localização do usuário.
+Não há backend, preferência persistida ou schema novo nesta fase.
+
+Teclado e feedback continuam compartilhados. A saída cancela os trabalhos
+adiados conhecidos dos modais e da construção de Settings antes do descarte.
+Não são criadas antecipadamente as cinco futuras telas. WDT, display, C6,
+partições e os contratos de persistência permanecem no baseline existente.
+Build não comprova estabilidade física; o flash é manual pelo operador.

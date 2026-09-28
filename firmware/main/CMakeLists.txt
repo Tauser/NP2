@@ -17,6 +17,7 @@ idf_component_register(
          "ui/core/np_styles.c" "ui/core/np_form.c" "ui/core/np_components.c" "ui/core/np_feedback.c" "ui/core/np_modal.c" "ui/core/np_keyboard.c" "ui/core/np_confirm.c"
          "ui/assets/np_weather_background_assets.c"
          "ui/screens/np_boot.c" "ui/screens/np_home.c"
+         "ui/screens/np_profile.c" "ui/screens/np_preferences.c"
          "ui/screens/np_settings.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
          "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          ${NP2_FONT_SRCS}
