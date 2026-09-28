@@ -68,7 +68,6 @@ static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
 static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
-static void notifications_event_cb(lv_event_t *event);
 static void notification_switch_event_cb(lv_event_t *event);
 static void notifications_test_event_cb(lv_event_t *event);
 static void timezone_open_event_cb(lv_event_t *event);
@@ -221,16 +220,14 @@ static void install_settings_control_callbacks(void)
                             LV_EVENT_PRESS_LOST,
                             (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
     }
-    lv_obj_add_event_cb(s_ui.settings.notifications_row, notifications_event_cb,
-                        LV_EVENT_CLICKED, s_ui.settings.notifications_modal_scrim);
-    lv_obj_add_event_cb(s_ui.settings.notifications_general_switch, notification_switch_event_cb,
+    lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)0U);
-    lv_obj_add_event_cb(s_ui.settings.notifications_sound_switch, notification_switch_event_cb,
+    lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)1U);
-    lv_obj_add_event_cb(s_ui.settings.notifications_system_switch, notification_switch_event_cb,
+    lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)2U);
-    if (s_ui.settings.notifications_test_button != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.notifications_test_button,
+    if (s_ui.settings.notifications.test_button != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.notifications.test_button,
                             notifications_test_event_cb,
                             LV_EVENT_CLICKED, NULL);
     }
@@ -249,13 +246,6 @@ static void install_settings_control_callbacks(void)
         lv_obj_add_event_cb(s_ui.settings.timezone_search,
                             timezone_search_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     }
-}
-
-static void notifications_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    lv_obj_t *scrim = lv_event_get_user_data(event);
-    if (scrim != NULL) { lv_obj_move_foreground(scrim); np_set_visible(scrim, true); }
 }
 
 static void notification_switch_event_cb(lv_event_t *event)
@@ -973,16 +963,6 @@ static void update_home(const app_ui_projection_t *projection)
     }
 }
 
-static void set_notification_switch(lv_obj_t *sw, bool enabled)
-{
-    if (sw == NULL) return;
-    if (enabled) {
-        lv_obj_add_state(sw, LV_STATE_CHECKED);
-    } else {
-        lv_obj_remove_state(sw, LV_STATE_CHECKED);
-    }
-}
-
 static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
@@ -1014,12 +994,10 @@ static void update_settings(const app_ui_projection_t *projection)
     if (!projection->notifications.ready) return;
 
     s_ui.syncing_notification_controls = true;
-    set_notification_switch(s_ui.settings.notifications_general_switch,
-                            projection->notifications.general_enabled);
-    set_notification_switch(s_ui.settings.notifications_sound_switch,
-                            projection->notifications.sound_enabled);
-    set_notification_switch(s_ui.settings.notifications_system_switch,
-                            projection->notifications.system_alerts_enabled);
+    np_settings_notifications_sync(&s_ui.settings.notifications,
+                                   projection->notifications.general_enabled,
+                                   projection->notifications.sound_enabled,
+                                   projection->notifications.system_alerts_enabled);
     s_ui.syncing_notification_controls = false;
     np_set_text(s_ui.settings.notifications_value,
                 projection->notifications.persistence_pending
