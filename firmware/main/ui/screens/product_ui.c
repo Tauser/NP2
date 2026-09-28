@@ -56,6 +56,7 @@ typedef struct {
     bool settings_notification_callbacks_initialized;
     bool settings_timezone_callbacks_initialized;
     bool settings_wifi_callbacks_initialized;
+    bool settings_rows_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
 } product_ui_state_t;
@@ -75,6 +76,7 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void keyboard_modal_close_cb(void *user_data);
 static void wifi_manage_event_cb(lv_event_t *event);
 static void wifi_scan_event_cb(lv_event_t *event);
+static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
@@ -260,6 +262,86 @@ static void install_settings_control_callbacks(void)
         lv_obj_add_event_cb(s_ui.settings.wifi.scan_button, wifi_scan_event_cb,
                             LV_EVENT_CLICKED, NULL);
         s_ui.settings_wifi_callbacks_initialized = true;
+    }
+
+    if (!s_ui.settings_rows_initialized && s_ui.settings.wifi_row != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.wifi_row, settings_modal_row_event_cb,
+                            LV_EVENT_CLICKED, (void *)0U);
+        lv_obj_add_event_cb(s_ui.settings.timezone_row, settings_modal_row_event_cb,
+                            LV_EVENT_CLICKED, (void *)1U);
+        lv_obj_add_event_cb(s_ui.settings.notifications_row, settings_modal_row_event_cb,
+                            LV_EVENT_CLICKED, (void *)2U);
+        lv_obj_add_event_cb(s_ui.settings.system_row, settings_modal_row_event_cb,
+                            LV_EVENT_CLICKED, (void *)3U);
+        s_ui.settings_rows_initialized = true;
+    }
+}
+
+static void discard_settings_modals(uintptr_t keep)
+{
+    np_keyboard_hide(&s_ui.keyboard);
+    if (keep != 0U && s_ui.settings.wifi.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.settings.wifi.modal.scrim);
+        s_ui.settings.wifi = (np_settings_wifi_t){0};
+        s_ui.settings_wifi_callbacks_initialized = false;
+    }
+    if (keep != 1U && s_ui.settings.timezone.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.settings.timezone.modal.scrim);
+        s_ui.settings.timezone = (np_settings_timezone_t){0};
+        s_ui.settings_timezone_callbacks_initialized = false;
+    }
+    if (keep != 2U && s_ui.settings.notifications.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.settings.notifications.modal.scrim);
+        s_ui.settings.notifications = (np_settings_notifications_t){0};
+        s_ui.settings_notification_callbacks_initialized = false;
+    }
+    if (keep != 3U && s_ui.settings.system.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.settings.system.modal.scrim);
+        s_ui.settings.system = (np_settings_system_t){0};
+    }
+}
+
+static void settings_modal_row_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    const uintptr_t type = (uintptr_t)lv_event_get_user_data(event);
+    discard_settings_modals(type);
+    if (type == 0U) {
+        if (s_ui.settings.wifi.modal.scrim == NULL) {
+            np_settings_wifi_create(&s_ui.settings.wifi, s_ui.settings.root);
+            lv_obj_add_event_cb(s_ui.settings.wifi.manage_button, wifi_manage_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.settings.wifi.scan_button, wifi_scan_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            s_ui.settings_wifi_callbacks_initialized = true;
+        }
+        app_ui_projection_t projection = {0}; app_state_get_ui_projection(&projection);
+        np_settings_wifi_sync(&s_ui.settings.wifi, projection.network.online,
+                              projection.network.scan_results_count, projection.network.scan_results);
+        np_settings_wifi_show(&s_ui.settings.wifi);
+    } else if (type == 1U) {
+        if (s_ui.settings.timezone.modal.scrim == NULL) {
+            np_settings_timezone_create(&s_ui.settings.timezone, s_ui.settings.root);
+            np_settings_timezone_set_select_callback(&s_ui.settings.timezone, timezone_select_cb, NULL);
+            np_settings_timezone_set_close_callback(&s_ui.settings.timezone, keyboard_modal_close_cb, &s_ui.keyboard);
+            np_keyboard_bind(&s_ui.keyboard, s_ui.settings.timezone.search, NP_KEYBOARD_MODE_TEXT);
+            s_ui.settings_timezone_callbacks_initialized = true;
+        }
+        app_ui_projection_t projection = {0}; app_state_get_ui_projection(&projection);
+        np_settings_timezone_show(&s_ui.settings.timezone, projection.onboarding.timezone_index);
+    } else if (type == 2U) {
+        if (s_ui.settings.notifications.modal.scrim == NULL) {
+            np_settings_notifications_create(&s_ui.settings.notifications, s_ui.settings.root);
+            lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)0U);
+            lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)1U);
+            lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)2U);
+            lv_obj_add_event_cb(s_ui.settings.notifications.test_button, notifications_test_event_cb, LV_EVENT_CLICKED, NULL);
+            s_ui.settings_notification_callbacks_initialized = true;
+        }
+        np_settings_notifications_show(&s_ui.settings.notifications);
+    } else {
+        if (s_ui.settings.system.modal.scrim == NULL) np_settings_system_create(&s_ui.settings.system, s_ui.settings.root);
+        np_settings_system_show(&s_ui.settings.system);
     }
 }
 
@@ -1053,6 +1135,7 @@ static void open_settings_async(void *user_data)
     s_ui.settings_notification_callbacks_initialized = false;
     s_ui.settings_timezone_callbacks_initialized = false;
     s_ui.settings_wifi_callbacks_initialized = false;
+    s_ui.settings_rows_initialized = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     np_set_visible(s_ui.settings.root, true);
     np_settings_reset_stages(&s_ui.settings);
@@ -1168,6 +1251,7 @@ static void settings_home_async(void *user_data)
     s_ui.settings_notification_callbacks_initialized = false;
     s_ui.settings_timezone_callbacks_initialized = false;
     s_ui.settings_wifi_callbacks_initialized = false;
+    s_ui.settings_rows_initialized = false;
     s_ui.settings_stage = 0U;
     s_ui.home = np_home_build(lv_screen_active());
     s_ui.home_data_rendered = false;
