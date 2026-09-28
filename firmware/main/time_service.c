@@ -17,6 +17,24 @@ static time_service_status_t s_status = {
 static bool s_started;
 static bool s_sntp_initialized;
 
+static const char *const s_timezone_posix[TIME_SERVICE_TIMEZONE_COUNT] = {
+    "BRT3",
+    "BRT3",
+    "ART3",
+    "EST5EDT,M3.2.0/2,M11.1.0/2",
+    "GMT0BST,M3.5.0/1,M10.5.0/2",
+};
+
+static esp_err_t apply_timezone(uint8_t timezone_index)
+{
+    if (timezone_index >= TIME_SERVICE_TIMEZONE_COUNT) return ESP_ERR_INVALID_ARG;
+    /* Newlib owns internal locks while changing TZ. Keep this operation out of
+     * the small FreeRTOS critical section used for service state. */
+    if (setenv("TZ", s_timezone_posix[timezone_index], 1) != 0) return ESP_FAIL;
+    tzset();
+    return ESP_OK;
+}
+
 static uint32_t elapsed_ms_since(int64_t start_us)
 {
     const int64_t elapsed_us = esp_timer_get_time() - start_us;
@@ -37,12 +55,8 @@ static bool read_valid_system_time(uint32_t *out_unix_s)
 
 esp_err_t time_service_start(void)
 {
-    /* Newlib acquires its own lock here, so this must remain outside the
-     * FreeRTOS critical section used for the small service status. */
-    if (setenv("TZ", "BRT3", 1) != 0) {
-        return ESP_FAIL;
-    }
-    tzset();
+    const esp_err_t timezone_result = apply_timezone(TIME_SERVICE_TIMEZONE_SAO_PAULO);
+    if (timezone_result != ESP_OK) return timezone_result;
 
     portENTER_CRITICAL(&s_status_lock);
     if (s_started) {
@@ -51,9 +65,29 @@ esp_err_t time_service_start(void)
     }
     s_started = true;
     s_status.ready = true;
+    s_status.timezone_index = TIME_SERVICE_TIMEZONE_SAO_PAULO;
     s_status.last_result = ESP_ERR_INVALID_STATE;
     portEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;
+}
+
+esp_err_t time_service_set_timezone_index(uint8_t timezone_index)
+{
+    if (timezone_index >= TIME_SERVICE_TIMEZONE_COUNT) return ESP_ERR_INVALID_ARG;
+
+    portENTER_CRITICAL(&s_status_lock);
+    const bool started = s_started;
+    const bool unchanged = s_status.timezone_index == timezone_index;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!started) return ESP_ERR_INVALID_STATE;
+    if (unchanged) return ESP_OK;
+
+    const esp_err_t result = apply_timezone(timezone_index);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.last_result = result;
+    if (result == ESP_OK) s_status.timezone_index = timezone_index;
+    portEXIT_CRITICAL(&s_status_lock);
+    return result;
 }
 
 esp_err_t time_service_sync(void)

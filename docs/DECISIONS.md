@@ -681,6 +681,11 @@ proteção criptográfica e gate próprio.
 onboarding. NVS continua acessada exclusivamente pelo coordenador, em uma
 requisição de fila limitada.
 
+O fuso pode ser atualizado posteriormente pela Settings: o callback apenas
+registra a intenção no `onboarding_service`; o `app_loop` aplica a política de
+hora local e o serviço solicita a gravação serializada ao `FlashCoordinator`.
+O perfil permanece independente do schema de dados offline.
+
 **Validação/rollback:** os serviços permanecem cobertos pelo build P4. A UI do
 wizard deverá receber validação própria quando for reimplementada sem EEZ.
 

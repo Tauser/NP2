@@ -1005,7 +1005,7 @@ static esp_err_t write_config_journal(void)
 
 static bool onboarding_profile_is_valid(const onboarding_profile_t *profile)
 {
-    return profile != NULL && profile->timezone_index <= 1U;
+    return profile != NULL && profile->timezone_index <= 4U;
 }
 
 typedef struct {

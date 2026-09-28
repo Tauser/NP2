@@ -11,11 +11,18 @@ extern "C" {
 #endif
 
 #define TIME_SERVICE_NTP_HOST "time.cloudflare.com"
+#define TIME_SERVICE_TIMEZONE_SAO_PAULO 0U
+#define TIME_SERVICE_TIMEZONE_BRASILIA  1U
+#define TIME_SERVICE_TIMEZONE_BUENOS_AIRES 2U
+#define TIME_SERVICE_TIMEZONE_NEW_YORK  3U
+#define TIME_SERVICE_TIMEZONE_LONDON    4U
+#define TIME_SERVICE_TIMEZONE_COUNT     5U
 
 typedef struct {
     bool ready;
     bool sync_in_progress;
     bool trusted;
+    uint8_t timezone_index;
     uint32_t last_sync_unix_s;
     uint32_t last_duration_ms;
     uint32_t completed_syncs;
@@ -29,6 +36,10 @@ esp_err_t time_service_start(void);
  * first initialization so a later reader has one authoritative time source.
  */
 esp_err_t time_service_sync(void);
+
+/* Applies a supported local-time policy. It is called by app_loop after the
+ * persisted onboarding preference changes, never by the LVGL task. */
+esp_err_t time_service_set_timezone_index(uint8_t timezone_index);
 
 void time_service_get_status(time_service_status_t *out_status);
 

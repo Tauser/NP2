@@ -165,6 +165,15 @@ static void refresh_projection(void)
     notification_service_get_status(&notifications);
     device_control_get_status(&controls);
 
+    if (time_status.ready && time_status.timezone_index != onboarding.timezone_index) {
+        const esp_err_t timezone_result =
+            time_service_set_timezone_index(onboarding.timezone_index);
+        if (timezone_result != ESP_OK) {
+            ESP_LOGW(TAG, "Timezone update unavailable: %s", esp_err_to_name(timezone_result));
+        }
+        time_service_get_status(&time_status);
+    }
+
     candidate.ready = true;
     candidate.storage = (app_storage_projection_t){
         .ready = storage.ready,
@@ -205,6 +214,7 @@ static void refresh_projection(void)
         .completed = onboarding.completed,
         .clock_24h = onboarding.clock_24h,
         .timezone_index = onboarding.timezone_index,
+        .timezone_persistence_pending = onboarding.timezone_persistence_pending,
         .stage = (uint8_t)onboarding.stage,
         .last_result = onboarding.last_result,
     };
