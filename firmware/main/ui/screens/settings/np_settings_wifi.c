@@ -25,7 +25,7 @@ static void select_row(np_settings_wifi_t *wifi, uint8_t selected)
                                       active ? np_c_accent() : np_c_hairline(), 0);
         lv_obj_set_style_border_width(wifi->network_rows[i], active ? 2 : 1, 0);
     }
-    np_set_text(wifi->connect_button, "Conectar rede");
+    np_set_text(lv_obj_get_child(wifi->connect_button, 0), "Conectar rede");
 }
 
 static void network_event_cb(lv_event_t *event)
@@ -145,7 +145,7 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
     if (count > 0U) {
         select_row(wifi, wifi->selected_index < count ? wifi->selected_index : 0U);
     } else {
-        np_set_text(wifi->connect_button, "Selecione uma rede");
+        np_set_text(lv_obj_get_child(wifi->connect_button, 0), "Selecione uma rede");
     }
 }
 
