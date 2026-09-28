@@ -23,7 +23,7 @@ escolhe o controle/modal desejado nessa tela existente.
 ## Recursos
 
 Contagem estática aproximada, incluindo root e header/drawer: Perfil 66
-objetos LVGL, Preferências 62. Teclado, feedback e a tela ativa global não
+objetos LVGL, Preferências 71 após o ajuste visual. Teclado, feedback e a tela ativa global não
 entram nesses números; são recursos compartilhados existentes. Sem árvores
 das futuras telas, imagens, blur, sombras ou animações novas. Uma cena é
 descartada antes de criar a seguinte. Cada cena nova é construída em uma
@@ -69,3 +69,28 @@ Por solicitação do operador após o primeiro flash, a engrenagem do header
 abre Perfil em Home, Preferências e Settings anterior. Em Perfil ela mantém
 a mesma cena. Abrir preferências continua levando ao hub; o drawer mantém
 seu acesso direto ao hub. Diagnóstico deixa de ser o destino da engrenagem.
+
+## Preferências conforme referência — 2026-09-28
+
+Painel único em 1024x600, título com engrenagem em círculo azul e subtítulo.
+Cinco linhas uniformes, sem rolagem, com blocos de ícones de fonte, títulos,
+descrições e chevrons. Tela/Sistema usam cor neutra, Wi-Fi/Fuso azul e
+Notificações vermelho. Toda a linha é o alvo de toque; o bloco decorativo
+do ícone não intercepta o evento. A linha apresenta feedback ao pressionar.
+
+Glyph desktop_windows U+E30C adicionado ao subset Material de 24 px;
+schedule U+E8B5 já estava disponível. A engrenagem U+E8B8 foi adicionada
+ao subset de 48 px. Conversor local `lv_font_conv@1.5.3`, fonte Material
+Symbols Rounded existente. Comparação dos codepoints confirma que nenhum
+glyph anterior foi removido; métricas de altura/baseline foram preservadas.
+
+Navegação/fallback continuam iguais. No flash manual, conferir ícones,
+centralização, textos sem cortes, última linha dentro do painel e toque
+também sobre o bloco do ícone. Build não é evidência de aceite visual.
+
+`idf.py build` final passou em P4/IDF 5.5.4, imagem `0x2acc30` bytes,
+67% livres no slot de 8 MiB, sem warnings de compilação no log final.
+Descritor `9159402-dirty`; SHA-256:
+`A01527F871ED3E8E56E18CBD1D1967C386E7533913EB00F3D228975CDF9A3BCE`.
+Nenhum flash foi executado; WDT, schema offline e pipeline de display
+permanecem sem alterações.
