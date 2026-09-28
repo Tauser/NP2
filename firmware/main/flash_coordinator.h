@@ -16,7 +16,9 @@
 typedef struct {
     bool completed;
     bool clock_24h;
-    uint8_t timezone_index;
+    /* Kept at four bytes total, preserving records written by the five-zone
+     * catalog while allowing the full IANA selection range. */
+    uint16_t timezone_index;
 } onboarding_profile_t;
 
 /* Non-secret product preferences. This record is deliberately independent of

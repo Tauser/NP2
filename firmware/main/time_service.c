@@ -17,20 +17,16 @@ static time_service_status_t s_status = {
 static bool s_started;
 static bool s_sntp_initialized;
 
-static const char *const s_timezone_posix[TIME_SERVICE_TIMEZONE_COUNT] = {
-    "BRT3",
-    "BRT3",
-    "ART3",
-    "EST5EDT,M3.2.0/2,M11.1.0/2",
-    "GMT0BST,M3.5.0/1,M10.5.0/2",
-};
-
-static esp_err_t apply_timezone(uint8_t timezone_index)
+static esp_err_t apply_timezone(uint16_t timezone_index)
 {
-    if (timezone_index >= TIME_SERVICE_TIMEZONE_COUNT) return ESP_ERR_INVALID_ARG;
+    char posix_timezone[72] = {0};
+    if (!timezone_catalog_copy_posix(timezone_index, posix_timezone,
+                                     sizeof(posix_timezone))) {
+        return ESP_ERR_INVALID_ARG;
+    }
     /* Newlib owns internal locks while changing TZ. Keep this operation out of
      * the small FreeRTOS critical section used for service state. */
-    if (setenv("TZ", s_timezone_posix[timezone_index], 1) != 0) return ESP_FAIL;
+    if (setenv("TZ", posix_timezone, 1) != 0) return ESP_FAIL;
     tzset();
     return ESP_OK;
 }
@@ -71,9 +67,9 @@ esp_err_t time_service_start(void)
     return ESP_OK;
 }
 
-esp_err_t time_service_set_timezone_index(uint8_t timezone_index)
+esp_err_t time_service_set_timezone_index(uint16_t timezone_index)
 {
-    if (timezone_index >= TIME_SERVICE_TIMEZONE_COUNT) return ESP_ERR_INVALID_ARG;
+    if (!timezone_catalog_is_valid(timezone_index)) return ESP_ERR_INVALID_ARG;
 
     portENTER_CRITICAL(&s_status_lock);
     const bool started = s_started;

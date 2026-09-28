@@ -7,6 +7,7 @@
  * filesystem GC, staging and maintenance mode are separate future requests.
  */
 #include "flash_coordinator.h"
+#include "timezone_catalog.h"
 
 #include "cache_record.h"
 #include "offline_data_codec.h"
@@ -42,6 +43,9 @@
 #define FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES 4096U
 #define FLASH_COORDINATOR_LITTLEFS_VERIFY_CHUNK_BYTES 256U
 #define FLASH_COORDINATOR_FULL_PROBE_CHUNK_BYTES (16U * 1024U)
+
+_Static_assert(sizeof(onboarding_profile_t) == 4U,
+               "Onboarding profile layout must remain compatible with stored records");
 #define FLASH_COORDINATOR_FULL_PROBE_TAIL_BYTES \
     (sizeof(cache_record_header_t) + OFFLINE_DATA_ENCODED_SIZE)
 #define FLASH_COORDINATOR_FULL_PROBE_MAX_PROPOSALS 60U
@@ -1005,7 +1009,7 @@ static esp_err_t write_config_journal(void)
 
 static bool onboarding_profile_is_valid(const onboarding_profile_t *profile)
 {
-    return profile != NULL && profile->timezone_index <= 4U;
+    return profile != NULL && timezone_catalog_is_valid(profile->timezone_index);
 }
 
 typedef struct {

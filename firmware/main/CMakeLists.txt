@@ -18,9 +18,10 @@ idf_component_register(
          "ui/assets/np_weather_background_assets.c"
          "ui/screens/np_boot.c" "ui/screens/np_home.c"
          "ui/screens/np_settings.c"
-         "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
+         "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          ${NP2_FONT_SRCS}
     INCLUDE_DIRS "." "ui/core" "ui/screens"
+    EMBED_TXTFILES "timezone_catalog.csv"
     REQUIRES esp_app_format esp_event esp_netif esp_psram esp_wifi espressif__esp_hosted
              espressif__esp_wifi_remote joltwallet__littlefs nvs_flash esp_driver_usb_serial_jtag
              esp_http_client mbedtls app_update bootloader_support

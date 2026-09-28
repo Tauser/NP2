@@ -1,6 +1,7 @@
 #include "onboarding_service.h"
 
 #include "flash_coordinator.h"
+#include "timezone_catalog.h"
 #include "freertos/FreeRTOS.h"
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -128,9 +129,9 @@ esp_err_t onboarding_service_set_stage(onboarding_stage_t stage)
     return ESP_OK;
 }
 
-esp_err_t onboarding_service_set_clock_preferences(uint8_t timezone_index, bool clock_24h)
+esp_err_t onboarding_service_set_clock_preferences(uint16_t timezone_index, bool clock_24h)
 {
-    if (timezone_index > 4U) return ESP_ERR_INVALID_ARG;
+    if (!timezone_catalog_is_valid(timezone_index)) return ESP_ERR_INVALID_ARG;
     taskENTER_CRITICAL(&s_lock);
     if (!s_started || s_status.completed) {
         taskEXIT_CRITICAL(&s_lock);
@@ -166,9 +167,9 @@ esp_err_t onboarding_service_complete(void)
     return result;
 }
 
-esp_err_t onboarding_service_request_timezone_update(uint8_t timezone_index)
+esp_err_t onboarding_service_request_timezone_update(uint16_t timezone_index)
 {
-    if (timezone_index > 4U) return ESP_ERR_INVALID_ARG;
+    if (!timezone_catalog_is_valid(timezone_index)) return ESP_ERR_INVALID_ARG;
     taskENTER_CRITICAL(&s_lock);
     if (!s_started || !s_status.completed || s_timezone_update_pending ||
         s_timezone_write_enqueued) {

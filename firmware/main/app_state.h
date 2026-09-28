@@ -70,7 +70,7 @@ typedef struct {
     bool required;
     bool completed;
     bool clock_24h;
-    uint8_t timezone_index;
+    uint16_t timezone_index;
     bool timezone_persistence_pending;
     uint8_t stage;
     esp_err_t last_result;
