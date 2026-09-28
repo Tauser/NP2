@@ -18,6 +18,14 @@ static void row_event_cb(lv_event_t *event)
 static void select_row(np_settings_wifi_t *wifi, uint8_t selected)
 {
     wifi->selected_index = selected;
+    if (selected < NP_SETTINGS_WIFI_VISIBLE_RESULTS) {
+        (void)snprintf(wifi->selected_ssid, sizeof(wifi->selected_ssid), "%s",
+                       lv_label_get_text(wifi->network_names[selected]));
+        lv_obj_remove_state(wifi->connect_button, LV_STATE_DISABLED);
+    } else {
+        wifi->selected_ssid[0] = '\0';
+        lv_obj_add_state(wifi->connect_button, LV_STATE_DISABLED);
+    }
     for (uint8_t i = 0; i < NP_SETTINGS_WIFI_VISIBLE_RESULTS; ++i) {
         const bool active = i == selected;
         np_set_bg_color(wifi->network_rows[i], active ? np_c_accent_bg() : np_c_surface_raised());
@@ -25,7 +33,8 @@ static void select_row(np_settings_wifi_t *wifi, uint8_t selected)
                                       active ? np_c_accent() : np_c_hairline(), 0);
         lv_obj_set_style_border_width(wifi->network_rows[i], active ? 2 : 1, 0);
     }
-    np_set_text(lv_obj_get_child(wifi->connect_button, 0), "Conectar rede");
+    np_set_text(lv_obj_get_child(wifi->connect_button, 0),
+                selected < NP_SETTINGS_WIFI_VISIBLE_RESULTS ? "Conectar rede" : "Selecione uma rede");
 }
 
 static void network_event_cb(lv_event_t *event)
@@ -44,8 +53,8 @@ static void network_event_cb(lv_event_t *event)
 
 static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
 {
-    lv_obj_t *const row = np_fill(wifi->modal.content, 360, 70 + index * 59,
-                                  320, 54, np_c_surface_raised(), LV_OPA_COVER,
+    lv_obj_t *const row = np_fill(wifi->modal.content, 360, 70 + index * 49,
+                                  320, 46, np_c_surface_raised(), LV_OPA_COVER,
                                   NP_RADIUS_CONTROL);
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, np_c_hairline(), 0);
@@ -64,6 +73,7 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
 {
     if (wifi == NULL || parent == NULL) return;
     *wifi = (np_settings_wifi_t){0};
+    wifi->selected_index = NP_SETTINGS_WIFI_VISIBLE_RESULTS;
     np_modal_create(&wifi->modal, parent,
                     SETTINGS_WIFI_MODAL_X, SETTINGS_WIFI_MODAL_Y,
                     SETTINGS_WIFI_MODAL_W, SETTINGS_WIFI_MODAL_H,
@@ -95,7 +105,8 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
         np_set_visible(wifi->network_rows[i], false);
     }
     np_hline(content, 24, 418, 656);
-    wifi->connect_button = np_button(content, 500, 438, 180, 52, "Conectar", true);
+    wifi->connect_button = np_button(content, 360, 342, 320, 52, "Selecione uma rede", true);
+    lv_obj_add_state(wifi->connect_button, LV_STATE_DISABLED);
 }
 
 void np_settings_wifi_show(np_settings_wifi_t *wifi)
@@ -115,20 +126,21 @@ void np_settings_wifi_bind_row(np_settings_wifi_t *wifi, lv_obj_t *row)
     }
 }
 
-void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
+void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *connected_ssid,
                            uint8_t scan_results_count,
                            const connectivity_scan_result_t *scan_results)
 {
     if (wifi == NULL) return;
     np_set_text(wifi->status_value, online ? "Conectado" : "Sem conexao");
-    np_set_text(wifi->detail_value, online ? "Internet disponivel" :
-                                            "Nenhuma rede ativa");
+    np_set_text(wifi->detail_value, connected_ssid != NULL && connected_ssid[0] != '\0'
+                                       ? connected_ssid : "Nenhuma rede associada");
 
     /* Settings projects network state before this lazy modal exists. */
     if (wifi->network_rows[0] == NULL) return;
 
     const uint8_t count = scan_results_count < NP_SETTINGS_WIFI_VISIBLE_RESULTS
                               ? scan_results_count : NP_SETTINGS_WIFI_VISIBLE_RESULTS;
+    uint8_t selected = NP_SETTINGS_WIFI_VISIBLE_RESULTS;
     for (uint8_t i = 0; i < NP_SETTINGS_WIFI_VISIBLE_RESULTS; ++i) {
         const bool visible = scan_results != NULL && i < count &&
                              scan_results[i].ssid[0] != '\0';
@@ -141,12 +153,9 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
                        scan_results[i].secure ? "Protegida" : "Aberta");
         np_set_text(wifi->network_names[i], scan_results[i].ssid);
         np_set_text(wifi->network_details[i], detail);
+        if (strcmp(wifi->selected_ssid, scan_results[i].ssid) == 0) selected = i;
     }
-    if (count > 0U) {
-        select_row(wifi, wifi->selected_index < count ? wifi->selected_index : 0U);
-    } else {
-        np_set_text(lv_obj_get_child(wifi->connect_button, 0), "Selecione uma rede");
-    }
+    select_row(wifi, selected);
 }
 
 bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,
@@ -154,8 +163,9 @@ bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,
 {
     if (wifi == NULL || out_ssid == NULL || out_size == 0U ||
         wifi->selected_index >= NP_SETTINGS_WIFI_VISIBLE_RESULTS ||
-        wifi->network_names[wifi->selected_index] == NULL) return false;
-    const char *const ssid = lv_label_get_text(wifi->network_names[wifi->selected_index]);
+        wifi->network_names[wifi->selected_index] == NULL ||
+        lv_obj_has_flag(wifi->network_rows[wifi->selected_index], LV_OBJ_FLAG_HIDDEN)) return false;
+    const char *const ssid = wifi->selected_ssid;
     const size_t length = strnlen(ssid, out_size);
     if (length == 0U || length >= out_size) return false;
     memcpy(out_ssid, ssid, length + 1U);

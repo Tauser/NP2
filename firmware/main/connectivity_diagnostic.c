@@ -221,6 +221,7 @@ static void clear_active_credentials(void)
     s_active_station_request_valid = false;
     s_status.reconnect_attempts = 0;
     s_status.online = false;
+    memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
     s_status.station_credentials_in_ram = false;
     s_status.credential_vault_saved = false;
     s_status.credential_vault_save_pending = false;
@@ -246,6 +247,7 @@ static void request_station_retry(esp_err_t result)
     taskENTER_CRITICAL(&s_status_lock);
     s_station_deadline_us = 0;
     s_status.online = false;
+    memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
     s_status.last_result = result;
     if (s_status.station_credentials_in_ram) {
         s_retry_pending = true;
@@ -272,6 +274,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     (void)arg;
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        const wifi_event_sta_connected_t *const connected = event_data;
+        taskENTER_CRITICAL(&s_status_lock);
+        memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        if (connected != NULL) {
+            const size_t length = connected->ssid_len < sizeof(s_status.connected_ssid)
+                                      ? connected->ssid_len : sizeof(s_status.connected_ssid) - 1U;
+            memcpy(s_status.connected_ssid, connected->ssid, length);
+        }
+        taskEXIT_CRITICAL(&s_status_lock);
         set_station_deadline(CONNECTIVITY_DIAGNOSTIC_STATE_WAITING_FOR_IP, ESP_OK,
                              NP2_WIFI_DHCP_TIMEOUT_MS);
         return;
@@ -311,6 +322,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (intentional_disconnect) {
             s_station_deadline_us = 0;
             s_status.online = false;
+            memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
             s_status.last_result = ESP_OK;
             s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF;
             s_retry_pending = s_status.station_credentials_in_ram;
@@ -319,6 +331,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             return;
         }
         s_status.online = false;
+        memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
         s_station_deadline_us = 0;
         s_status.last_disconnect_reason = reason;
         /* AUTH_EXPIRE and handshake timeouts occur after an AP restart or a
@@ -377,6 +390,7 @@ static void hosted_event_handler(void *arg, esp_event_base_t event_base,
         s_status.link_up = false;
         s_status.wifi_ready = false;
         s_status.online = false;
+        memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
         s_station_deadline_us = 0;
         s_retry_pending = false;
         s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_LINK_DOWN;
@@ -415,6 +429,7 @@ static esp_err_t configure_station_from_request(const connectivity_request_t *re
     s_intentional_station_disconnect_pending = replace_active_station_config;
     s_status.reconnect_attempts = 0;
     s_status.online = false;
+    memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
     s_status.station_credentials_in_ram = true;
     s_status.credential_vault_saved = false;
     s_status.credential_vault_save_pending = false;
@@ -984,6 +999,7 @@ static bool begin_hosted_recovery_cycle(void)
         s_status.link_up = false;
         s_status.wifi_ready = false;
         s_status.online = false;
+        memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
         s_station_deadline_us = 0;
         s_retry_pending = false;
         s_hosted_recovery_in_progress = true;

@@ -238,6 +238,8 @@ static void refresh_projection(void)
         .save_result = controls.save_result,
     };
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
+    memcpy(candidate.network.connected_ssid, network.connected_ssid,
+           sizeof(candidate.network.connected_ssid));
     candidate.time_trusted = time_status.trusted;
     const time_t now = time(NULL);
     candidate.current_unix_s = candidate.time_trusted && now >= (time_t)APP_VALID_EPOCH_SECONDS &&

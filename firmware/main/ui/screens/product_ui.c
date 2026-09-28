@@ -322,6 +322,7 @@ static void settings_modal_row_event_cb(lv_event_t *event)
         }
         app_ui_projection_t projection = {0}; app_state_get_ui_projection(&projection);
         np_settings_wifi_sync(&s_ui.settings.wifi, projection.network.online,
+                              projection.network.connected_ssid,
                               projection.network.scan_results_count, projection.network.scan_results);
         np_settings_wifi_show(&s_ui.settings.wifi);
     } else if (type == 1U) {
@@ -424,6 +425,10 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
 static void wifi_manage_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (lv_event_get_target(event) == s_ui.settings.wifi.manage_button) {
+        wifi_scan_event_cb(event);
+        return;
+    }
     char ssid[33] = {0};
     const bool selected_network = event != NULL &&
                                   lv_event_get_target(event) == s_ui.settings.wifi.connect_button &&
@@ -1027,6 +1032,7 @@ static void update_settings(const app_ui_projection_t *projection)
     np_set_text(s_ui.settings.timezone_value,
                 np_settings_timezone_selected_label(&s_ui.settings.timezone));
     np_settings_wifi_sync(&s_ui.settings.wifi, projection->network.online,
+                          projection->network.connected_ssid,
                           projection->network.scan_results_count,
                           projection->network.scan_results);
     np_set_text(s_ui.settings.wifi_value,

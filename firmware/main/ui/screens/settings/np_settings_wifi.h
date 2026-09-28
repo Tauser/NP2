@@ -21,13 +21,14 @@ typedef struct {
     lv_obj_t *network_names[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     lv_obj_t *network_details[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     uint8_t selected_index;
+    char selected_ssid[33];
 } np_settings_wifi_t;
 
 void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent);
 void np_settings_wifi_show(np_settings_wifi_t *wifi);
 void np_settings_wifi_hide(np_settings_wifi_t *wifi);
 void np_settings_wifi_bind_row(np_settings_wifi_t *wifi, lv_obj_t *row);
-void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
+void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *connected_ssid,
                            uint8_t scan_results_count,
                            const connectivity_scan_result_t *scan_results);
 bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,

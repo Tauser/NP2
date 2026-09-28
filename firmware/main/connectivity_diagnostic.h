@@ -53,6 +53,8 @@ typedef struct {
     bool credential_vault_saved;
     bool credential_vault_save_pending;
     bool online;
+    /* Public association identity, captured from STA_CONNECTED, never a credential. */
+    char connected_ssid[33];
 } connectivity_diagnostic_status_t;
 
 /* Starts the worker and returns without waiting for SDIO, Wi-Fi or scan work. */

@@ -28,7 +28,7 @@ typedef enum {
 } app_network_state_t;
 
 /* This is a UI projection, not the complete application state. It contains no
- * SSID, password, request body or other secret material. */
+ * password, request body or other secret material. Public SSIDs are allowed. */
 typedef struct {
     bool ready;
     bool busy;
@@ -63,6 +63,7 @@ typedef struct {
     uint32_t reconnect_attempts;
     uint32_t transport_failures;
     bool online;
+    char connected_ssid[33];
     esp_err_t last_result;
 } app_network_projection_t;
 
