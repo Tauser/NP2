@@ -34,6 +34,10 @@ lv_obj_t *np_form_button(lv_obj_t *parent, int32_t x, int32_t y,
                          np_form_button_kind_t kind);
 void np_form_apply_button_style(lv_obj_t *button, np_form_button_kind_t kind);
 
+/* Compact action embedded in a form field, rendered from NP_FONT_ICON. */
+lv_obj_t *np_form_icon_button(lv_obj_t *parent, int32_t x, int32_t y,
+                              int32_t size, const char *icon);
+
 #ifdef __cplusplus
 }
 #endif

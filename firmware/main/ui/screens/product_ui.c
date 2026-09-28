@@ -535,7 +535,8 @@ static void wifi_password_draw(lv_event_t *event)
     /* Draw individual glyphs only. No password string, textarea or label;
      * each descriptor lives only for the current rendering pass. */
     const int32_t advance = 12;
-    const uint8_t max_visible = (uint8_t)((lv_area_get_width(&area) - 32) / advance);
+    /* Reserve the visibility action at the field's trailing edge. */
+    const uint8_t max_visible = (uint8_t)((lv_area_get_width(&area) - 80) / advance);
     const uint8_t first = status.touch_password_length > max_visible ?
                           status.touch_password_length - max_visible : 0U;
     const int32_t baseline = area.y1 +

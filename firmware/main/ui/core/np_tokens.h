@@ -156,6 +156,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_KEYBOARD_CAPSLOCK "\xEE\x8C\x98"
 #define NP_ICON_KEYBOARD_HIDE "\xEE\x8C\x9A"
 #define NP_ICON_LOCK          "\xEE\xA2\x99"
+#define NP_ICON_VISIBILITY    "\xEE\xA3\xB4"
+#define NP_ICON_VISIBILITY_OFF "\xEE\xA3\xB5"
 #else
 #define NP_FONT_HERO     (&lv_font_montserrat_48)
 #define NP_FONT_BRAND    (&lv_font_montserrat_48)
@@ -202,6 +204,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_KEYBOARD_CAPSLOCK "^"
 #define NP_ICON_KEYBOARD_HIDE "v"
 #define NP_ICON_LOCK          "L"
+#define NP_ICON_VISIBILITY    "o"
+#define NP_ICON_VISIBILITY_OFF "x"
 #endif
 
 /* ------------------------------------------------------------------ */

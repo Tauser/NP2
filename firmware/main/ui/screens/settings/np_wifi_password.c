@@ -61,7 +61,7 @@ void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
     if (view == NULL || parent == NULL) return;
     *view = (np_wifi_password_t){.keyboard = keyboard, .secure = secure, .action = action};
     /* It stays above the child dialog, so the shared keyboard remains usable. */
-    np_modal_create(&view->modal, parent, 320, 104, 384, 258,
+    np_modal_create(&view->modal, parent, 320, 104, 384, 230,
                      NP_ICON_WIFI, np_c_positive(), "Senha da rede", ssid);
     np_modal_set_close_callback(&view->modal, closing, view);
     lv_obj_t *const content = view->modal.content;
@@ -76,11 +76,11 @@ void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
     lv_obj_set_style_border_color(view->field, np_c_accent(), LV_PART_MAIN);
     if (draw != NULL) lv_obj_add_event_cb(view->field, draw, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(view->field, field_event, LV_EVENT_CLICKED, view);
-    view->reveal = np_button(content, 20, 94, 170, 32, "Mostrar senha", false);
+    view->reveal = np_form_icon_button(content, 316, 42, 40, NP_ICON_VISIBILITY);
     lv_obj_add_event_cb(view->reveal, reveal_event, LV_EVENT_CLICKED, view);
     np_set_visible(view->reveal, secure);
-    lv_obj_t *const cancel = np_button(content, 20, 132, 164, 44, "Cancelar", false);
-    view->connect = np_button(content, 200, 132, 164, 44, "Conectar", true);
+    lv_obj_t *const cancel = np_button(content, 20, 104, 164, 44, "Cancelar", false);
+    view->connect = np_button(content, 200, 104, 164, 44, "Conectar", true);
     lv_obj_set_style_opa(view->connect, LV_OPA_40, LV_STATE_DISABLED);
     lv_obj_add_event_cb(cancel, cancel_event, LV_EVENT_CLICKED, view);
     lv_obj_add_event_cb(view->connect, connect_event, LV_EVENT_CLICKED, view);
@@ -94,7 +94,8 @@ void np_wifi_password_sync(np_wifi_password_t *view, uint8_t length, bool visibl
 {
     if (view == NULL || view->field == NULL) return;
     view->visible = visible;
-    np_set_text(lv_obj_get_child(view->reveal, 0), visible ? "Ocultar senha" : "Mostrar senha");
+    np_set_text(lv_obj_get_child(view->reveal, 0),
+                visible ? NP_ICON_VISIBILITY_OFF : NP_ICON_VISIBILITY);
     if (!view->secure || length >= 8U) lv_obj_remove_state(view->connect, LV_STATE_DISABLED);
     else lv_obj_add_state(view->connect, LV_STATE_DISABLED);
     lv_obj_invalidate(view->field);

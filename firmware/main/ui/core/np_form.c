@@ -147,3 +147,36 @@ lv_obj_t *np_form_button(lv_obj_t *parent, int32_t x, int32_t y,
     }
     return button;
 }
+
+lv_obj_t *np_form_icon_button(lv_obj_t *parent, int32_t x, int32_t y,
+                              int32_t size, const char *icon)
+{
+    if (parent == NULL || size <= 0) return NULL;
+    lv_obj_t *const button = lv_button_create(parent);
+    if (button == NULL) return NULL;
+    lv_obj_remove_style_all(button);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_size(button, size, size);
+    lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(button, np_c_accent_bg(),
+                              LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER,
+                            LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(button, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(button, np_c_accent(),
+                                  LV_PART_MAIN | LV_STATE_FOCUSED);
+
+    lv_obj_t *const label = lv_label_create(button);
+    if (label != NULL) {
+        lv_label_set_text(label, icon != NULL ? icon : "");
+        lv_obj_set_style_text_font(label, NP_FONT_ICON, 0);
+        lv_obj_set_style_text_color(label, np_c_text_2(), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(label, 0, (size - NP_FONT_ICON->line_height) / 2);
+        lv_obj_set_size(label, size, NP_FONT_ICON->line_height);
+        lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    }
+    return button;
+}
