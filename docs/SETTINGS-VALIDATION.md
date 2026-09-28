@@ -22,6 +22,23 @@ operador. O layout/fuso da revisão anterior e o Modo noturno desta revisão
 precisam de novo flash manual e teste. Não há nova evidência de boot/reboot,
 temperatura ou persistência física nesta entrega.
 
+## 2026-09-28 — Sistema
+
+- Versão real obtida do descritor da imagem. Temperatura interna do chip
+  obtida pelo driver IDF a cada 5 s no worker de controles; ausência/falha
+  aparece como indisponível, sem temperatura ambiente sintética.
+- Reiniciar painel abre confirmação lazy. Cancelar/X/sair não enfileiram
+  comando. O coordenador revalida preferências, gravações, sessão/journal
+  OTA e estado de boot antes de executar o reinício em sua própria task.
+  Uma recusa mantém a confirmação aberta, ou publica feedback se surgir
+  depois de enfileirar. Nenhuma leitura de OTA-data ocorre no callback LVGL.
+- Atualização sem função foi substituída pela indicação de manutenção;
+  nenhuma OTA é liberada pela tela enquanto G5 permanecer aberto.
+- Admissão do reinício passou no teste host; regressões de fuso e senha
+  também passaram. Temperatura/reinício dependem de validação física.
+- `idf.py build` passou no P4/IDF 5.5.4: aplicação `0x2a9480` B, 67% livres,
+  sem novos warnings de compilação. Modo noturno foi versionado em `3358453`.
+
 ## Aceite após flash manual
 
 - Conferir o fuso em cidades com offsets diferentes, reabrir o modal e
@@ -31,6 +48,11 @@ temperatura ou persistência física nesta entrega.
 - Reiniciar e conferir retenção de preferências. Sem hora confiável, o painel
   deve manter o brilho escolhido e informar espera de sincronização.
 - Repetir os fluxos Wi-Fi do roteiro em `WIFI-SETTINGS-VALIDATION.md`.
+- Sistema: comparar versão com o descritor do build; conferir que a
+  temperatura é do chip e que falha de sensor mostra indisponibilidade.
+- Reiniciar: cancelar e fechar devem preservar a execução atual. Confirmar
+  após salvar deve reiniciar sem perder preferências. Durante gravação ou
+  OTA/boot ainda não confirmado, o pedido deve ser recusado e permitir retry.
 
 Registrar unidade/BOM, commit, hashes P4/C6, configuração efetiva, data e
 log sanitizado. Build/teste host não comprovam estabilidade física de Settings.

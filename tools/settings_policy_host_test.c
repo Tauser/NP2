@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "../firmware/main/night_mode_policy.h"
 #include "../firmware/main/device_control_profile.h"
+#include "../firmware/main/system_restart_policy.h"
 
 int main(void)
 {
@@ -34,5 +35,13 @@ int main(void)
         assert(night_mode_brightness(brightness, false) == brightness);
     }
     puts("Settings policy and legacy profile: PASS");
+    assert(system_restart_allowed(true, false, false, false, false, false));
+    assert(!system_restart_allowed(false, false, false, false, false, false));
+    assert(!system_restart_allowed(true, true, false, false, false, false));
+    assert(!system_restart_allowed(true, false, true, false, false, false));
+    assert(!system_restart_allowed(true, false, false, true, false, false));
+    assert(!system_restart_allowed(true, false, false, false, true, false));
+    assert(!system_restart_allowed(true, false, false, false, false, true));
+    puts("Settings restart admission: PASS");
     return 0;
 }

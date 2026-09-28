@@ -89,6 +89,9 @@ typedef struct {
     esp_err_t update_journal_result;
     bool p4_ota_active;
     bool p4_ota_finished;
+    bool restart_pending;
+    uint32_t restart_completion_id;
+    esp_err_t restart_result;
     uint32_t p4_ota_expected_bytes;
     uint32_t p4_ota_written_bytes;
     const esp_partition_t *p4_ota_partition;
@@ -98,6 +101,9 @@ typedef struct {
 } flash_coordinator_status_t;
 
 esp_err_t flash_coordinator_start(void);
+/* Physical UI confirmation must precede this request. The sole flash owner
+ * rechecks readiness/preferences/OTA before restarting the P4. */
+esp_err_t flash_coordinator_request_restart(void);
 
 /*
  * Queues a single, rate-limited NVS commit used only by the Phase 2 display

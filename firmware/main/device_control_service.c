@@ -4,6 +4,10 @@
 #include "night_mode_policy.h"
 #include "time_service.h"
 #include <time.h>
+#include <stdio.h>
+#include <string.h>
+#include "esp_app_desc.h"
+#include "driver/temperature_sensor.h"
 
 #include "bsp/display.h"
 #include "bsp/esp32_p4_wifi6_touch_lcd_7b.h"
@@ -27,6 +31,7 @@ static const char *const TAG = "device_controls";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task;
 static esp_codec_dev_handle_t s_speaker;
+static temperature_sensor_handle_t s_temperature_sensor;
 static bool s_started;
 static bool s_brightness_pending;
 static bool s_volume_pending;
@@ -118,12 +123,15 @@ static void restore_preferences(void)
     const esp_err_t brightness_result = apply_brightness(brightness);
     /* Audio is opened by this worker, away from the LVGL touch callback. */
     const esp_err_t volume_result = apply_volume(volume);
+    char version[32] = {0};
+    (void)snprintf(version, sizeof(version), "%s", esp_app_get_description()->version);
     portENTER_CRITICAL(&s_lock);
     s_status.brightness_percent = brightness;
     s_status.volume_percent = volume;
     s_status.effective_brightness_percent = brightness;
     s_status.night_mode_enabled = flash.device_control_profile_valid &&
                                  flash.device_control_profile.night_mode_enabled != 0U;
+    memcpy(s_status.firmware_version, version, sizeof(version));
     s_status.brightness_result = brightness_result;
     s_status.volume_result = volume_result;
     s_status.audio_ready = volume_result == ESP_OK;
@@ -334,6 +342,13 @@ static void submit_dirty_profile(void)
 static void device_control_task(void *arg)
 {
     (void)arg;
+    const temperature_sensor_config_t sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
+    if (temperature_sensor_install(&sensor_config, &s_temperature_sensor) == ESP_OK &&
+        temperature_sensor_enable(s_temperature_sensor) != ESP_OK) {
+        (void)temperature_sensor_uninstall(s_temperature_sensor);
+        s_temperature_sensor = NULL;
+    }
+    TickType_t last_temperature_tick = xTaskGetTickCount() - pdMS_TO_TICKS(5000U);
     bool restored = false;
     for (;;) {
         if (!restored) {
@@ -349,6 +364,18 @@ static void device_control_task(void *arg)
             play_pending_notification_tone();
             finish_save_if_complete();
             submit_dirty_profile();
+        }
+        if (s_temperature_sensor != NULL &&
+            xTaskGetTickCount() - last_temperature_tick >= pdMS_TO_TICKS(5000U)) {
+            last_temperature_tick = xTaskGetTickCount();
+            float celsius = 0;
+            const bool available = temperature_sensor_get_celsius(s_temperature_sensor, &celsius) == ESP_OK &&
+                                   celsius >= -40.0f && celsius <= 125.0f;
+            portENTER_CRITICAL(&s_lock);
+            s_status.temperature_available = available;
+            s_status.chip_temperature_deci_c = available
+                ? (int16_t)(celsius * 10.0f + (celsius >= 0 ? 0.5f : -0.5f)) : 0;
+            portEXIT_CRITICAL(&s_lock);
         }
         (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DEVICE_CONTROL_POLL_MS));
     }
@@ -461,5 +488,7 @@ void device_control_get_status(device_control_status_t *out_status)
     if (out_status == NULL) return;
     portENTER_CRITICAL(&s_lock);
     *out_status = s_status;
+    out_status->persistence_pending = s_status.persistence_pending ||
+                                      s_brightness_pending || s_volume_pending;
     portEXIT_CRITICAL(&s_lock);
 }

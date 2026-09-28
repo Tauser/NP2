@@ -8,6 +8,11 @@
  */
 #include "flash_coordinator.h"
 #include "timezone_catalog.h"
+#include "device_control_service.h"
+#include "notification_service.h"
+#include "onboarding_service.h"
+#include "system_restart_policy.h"
+#include "esp_system.h"
 
 #include "cache_record.h"
 #include "offline_data_codec.h"
@@ -124,6 +129,7 @@ typedef enum {
     FLASH_REQUEST_P4_OTA_ACTIVATE,
     FLASH_REQUEST_P4_OTA_CONFIRM,
     FLASH_REQUEST_P4_OTA_ROLLBACK,
+    FLASH_REQUEST_RESTART,
 } flash_request_kind_t;
 
 typedef struct {
@@ -1806,6 +1812,57 @@ static esp_err_t commit_littlefs_probe(uint32_t sequence, uint32_t *out_writes,
     return ESP_OK;
 }
 
+static bool restart_requests_safe(bool from_owner)
+{
+    flash_coordinator_status_t flash = {0};
+    device_control_status_t controls = {0};
+    notification_service_status_t notifications = {0};
+    onboarding_service_status_t onboarding = {0};
+    flash_coordinator_get_status(&flash);
+    device_control_get_status(&controls);
+    notification_service_get_status(&notifications);
+    onboarding_service_get_status(&onboarding);
+    esp_ota_img_states_t boot_state = ESP_OTA_IMG_UNDEFINED;
+    if (from_owner) {
+        /* OTA-data reads stay on the flash owner, never on the LVGL caller. */
+        const esp_partition_t *const running = esp_ota_get_running_partition();
+        if (running == NULL) return false;
+        const esp_err_t boot_result = esp_ota_get_state_partition(running, &boot_state);
+        if (boot_result != ESP_OK && boot_result != ESP_ERR_NOT_FOUND) return false;
+    }
+    const bool updating = flash.p4_ota_active || flash.p4_ota_finished ||
+                          (flash.update_journal_valid &&
+                           flash.update_journal_state != UPDATE_JOURNAL_IDLE &&
+                           flash.update_journal_state != UPDATE_JOURNAL_ACCEPTED);
+    return system_restart_allowed(flash.ready && controls.ready && notifications.ready,
+                                   !from_owner && flash.busy, !from_owner && flash.pending,
+                                   controls.persistence_pending || notifications.persistence_pending ||
+                                       onboarding.timezone_persistence_pending || onboarding.required,
+                                   updating, boot_state == ESP_OTA_IMG_PENDING_VERIFY);
+}
+
+esp_err_t flash_coordinator_request_restart(void)
+{
+    if (s_request_queue == NULL || !restart_requests_safe(false)) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_status_lock);
+    if (s_status.restart_pending) {
+        portEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_status.restart_pending = true;
+    s_status.restart_result = ESP_OK;
+    portEXIT_CRITICAL(&s_status_lock);
+    /* No multi-KiB flash request on the LVGL callback stack. */
+    static const flash_request_t request = {.kind = FLASH_REQUEST_RESTART};
+    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
+        portENTER_CRITICAL(&s_status_lock);
+        s_status.restart_pending = false;
+        portEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_OK;
+}
+
 static void flash_worker_task(void *arg)
 {
     (void)arg;
@@ -1843,6 +1900,18 @@ static void flash_worker_task(void *arg)
     flash_request_t request;
     while (xQueueReceive(s_request_queue, &request, portMAX_DELAY) == pdTRUE) {
         set_busy(true, false);
+        if (request.kind == FLASH_REQUEST_RESTART) {
+            /* Restart is serialized after earlier writes, with a final check
+             * for changes accepted after the UI's confirmation snapshot. */
+            if (restart_requests_safe(true)) esp_restart();
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.restart_pending = false;
+            s_status.restart_result = ESP_ERR_INVALID_STATE;
+            ++s_status.restart_completion_id;
+            portEXIT_CRITICAL(&s_status_lock);
+            set_busy(false, false);
+            continue;
+        }
         const int64_t started_us = esp_timer_get_time();
         uint32_t batch_writes = 0;
         uint32_t free_entries_before = 0;

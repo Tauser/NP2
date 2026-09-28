@@ -7,6 +7,7 @@
 
 #include "app_state.h"
 #include "device_control_service.h"
+#include "flash_coordinator.h"
 #include "diagnostic_ui.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -42,6 +43,9 @@ typedef struct {
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
     np_confirm_t wifi_confirmation;
+    np_confirm_t system_confirmation;
+    bool system_confirmation_pending;
+    uint32_t restart_completion_id;
     char pending_wifi_ssid[33];
     bool pending_wifi_secure;
     bool wifi_password_pending;
@@ -91,6 +95,9 @@ static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 static void discard_wifi_password(void);
 static void discard_wifi_confirmation(void);
+static void discard_system_confirmation(void);
+static void system_restart_event_cb(lv_event_t *event);
+static void system_modal_closed(void *user_data);
 static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 
 typedef enum {
@@ -314,6 +321,7 @@ static void install_settings_control_callbacks(void)
 static void discard_settings_modals(uintptr_t keep)
 {
     np_keyboard_hide(&s_ui.keyboard);
+    if (keep != 3U) discard_system_confirmation();
     if (keep != 0U && s_ui.settings.wifi.modal.scrim != NULL) {
         discard_wifi_password();
         discard_wifi_confirmation();
@@ -381,8 +389,66 @@ static void settings_modal_row_event_cb(lv_event_t *event)
         }
         np_settings_notifications_show(&s_ui.settings.notifications);
     } else {
-        if (s_ui.settings.system.modal.scrim == NULL) np_settings_system_create(&s_ui.settings.system, s_ui.settings.root);
+        if (s_ui.settings.system.modal.scrim == NULL) {
+            np_settings_system_create(&s_ui.settings.system, s_ui.settings.root);
+            lv_obj_add_event_cb(s_ui.settings.system.restart_button, system_restart_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            np_modal_set_close_callback(&s_ui.settings.system.modal, system_modal_closed, NULL);
+        }
         np_settings_system_show(&s_ui.settings.system);
+    }
+}
+
+static void discard_system_confirmation(void)
+{
+    s_ui.system_confirmation_pending = false;
+    if (s_ui.system_confirmation.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.system_confirmation.modal.scrim);
+        s_ui.system_confirmation = (np_confirm_t){0};
+    }
+}
+
+static void system_modal_closed(void *user_data)
+{
+    (void)user_data;
+    discard_system_confirmation();
+}
+
+static bool system_restart_confirmed(void *user_data)
+{
+    (void)user_data;
+    np_feedback_bring_to_front(&s_ui.feedback);
+    const esp_err_t result = flash_coordinator_request_restart();
+    if (result != ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                               "Reinicio indisponivel",
+                               "Aguarde o salvamento ou a manutencao terminar", 2600U);
+        return false;
+    }
+    (void)app_state_request_refresh();
+    return true;
+}
+
+static void system_restart_open_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.system_confirmation_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
+        !np_modal_is_visible(&s_ui.settings.system.modal)) return;
+    discard_system_confirmation();
+    np_confirm_create(&s_ui.system_confirmation, s_ui.settings.system.modal.scrim,
+                       "Reiniciar painel?", "O painel sera reiniciado.\nSuas configuracoes serao mantidas.",
+                       "Reiniciar", system_restart_confirmed, NULL);
+}
+
+static void system_restart_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.system_confirmation_pending) return;
+    s_ui.system_confirmation_pending = true;
+    if (lv_async_call(system_restart_open_async, NULL) != LV_RESULT_OK) {
+        s_ui.system_confirmation_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Confirmacao indisponivel", NULL, 2200U);
     }
 }
 
@@ -1227,6 +1293,13 @@ static void update_settings(const app_ui_projection_t *projection)
     if (projection == NULL) return;
 
     update_header(&s_ui.settings.header, projection, true);
+    char chip_temperature[24] = "Nao disponivel";
+    if (projection->system.temperature_available) {
+        format_temperature_deci(projection->system.chip_temperature_deci_c,
+                                  chip_temperature, sizeof(chip_temperature));
+    }
+    np_settings_system_sync(&s_ui.settings.system, projection->system.firmware_version,
+                             chip_temperature, projection->system.restart_pending);
 
     np_settings_timezone_sync(&s_ui.settings.timezone,
                               projection->onboarding.timezone_index);
@@ -1248,7 +1321,12 @@ static void update_settings(const app_ui_projection_t *projection)
         }
         s_ui.syncing_night_control = false;
         np_set_text(s_ui.settings.night_detail,
-                    !projection->device_controls.night_mode_enabled
+                    projection->device_controls.effective_brightness_percent !=
+                        (projection->device_controls.night_mode_active &&
+                         projection->device_controls.brightness_percent > 15U
+                             ? 15U : projection->device_controls.brightness_percent)
+                        ? "Nao foi possivel aplicar o brilho"
+                        : !projection->device_controls.night_mode_enabled
                         ? "22:00 - 06:00 · brilho ate 15%"
                         : !projection->time_trusted ? "Aguardando horario confiavel"
                         : projection->device_controls.night_mode_active
@@ -1322,6 +1400,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
 
+    if (projection.system.restart_completion_id != s_ui.restart_completion_id) {
+        s_ui.restart_completion_id = projection.system.restart_completion_id;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Reinicio adiado", "Uma operacao ainda esta em andamento", 2600U);
+    }
     if (projection.device_controls.save_completion_id !=
         s_ui.control_save_completion_id) {
         s_ui.control_save_completion_id = projection.device_controls.save_completion_id;
@@ -1507,6 +1590,7 @@ static void settings_home_async(void *user_data)
      * active at a time on the LVGL task. */
     discard_wifi_password();
     discard_wifi_confirmation();
+    discard_system_confirmation();
     lv_obj_delete(settings_root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.settings_controls_initialized = false;
@@ -1557,6 +1641,7 @@ static void diagnostics_button_event_cb(lv_event_t *event)
     np_keyboard_destroy(&s_ui.keyboard);
     discard_wifi_password();
     discard_wifi_confirmation();
+    discard_system_confirmation();
     np_feedback_destroy(&s_ui.feedback);
 
     lv_display_t *display = s_ui.display;

@@ -17,6 +17,9 @@ typedef struct {
     uint8_t effective_brightness_percent;
     bool night_mode_enabled;
     bool night_mode_active;
+    char firmware_version[32];
+    bool temperature_available;
+    int16_t chip_temperature_deci_c;
     bool audio_ready;
     esp_err_t brightness_result;
     esp_err_t volume_result;

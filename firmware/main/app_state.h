@@ -113,6 +113,15 @@ typedef struct {
 } app_device_control_projection_t;
 
 typedef struct {
+    char firmware_version[32];
+    bool temperature_available;
+    int16_t chip_temperature_deci_c;
+    bool restart_pending;
+    uint32_t restart_completion_id;
+    esp_err_t restart_result;
+} app_system_projection_t;
+
+typedef struct {
     uint32_t revision;
     bool ready;
     app_storage_projection_t storage;
@@ -121,6 +130,7 @@ typedef struct {
     app_weather_asset_projection_t weather_assets;
     app_notification_projection_t notifications;
     app_device_control_projection_t device_controls;
+    app_system_projection_t system;
     bool time_trusted;
     uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;

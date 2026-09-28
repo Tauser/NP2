@@ -241,6 +241,13 @@ static void refresh_projection(void)
         .save_result = controls.save_result,
     };
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
+    memcpy(candidate.system.firmware_version, controls.firmware_version,
+           sizeof(candidate.system.firmware_version));
+    candidate.system.temperature_available = controls.temperature_available;
+    candidate.system.chip_temperature_deci_c = controls.chip_temperature_deci_c;
+    candidate.system.restart_pending = storage.restart_pending;
+    candidate.system.restart_completion_id = storage.restart_completion_id;
+    candidate.system.restart_result = storage.restart_result;
     memcpy(candidate.network.connected_ssid, network.connected_ssid,
            sizeof(candidate.network.connected_ssid));
     candidate.time_trusted = time_status.trusted;
