@@ -10,6 +10,7 @@
 #include "np_components.h"
 #include "settings/np_settings_system.h"
 #include "settings/np_settings_notifications.h"
+#include "settings/np_settings_timezone.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,11 +77,9 @@ typedef struct {
     lv_obj_t *notifications_value;
     lv_obj_t *timezone_row;
     lv_obj_t *timezone_value;
-    lv_obj_t *timezone_modal_scrim;
-    lv_obj_t *timezone_search;
-    lv_obj_t *timezone_options[5];
     np_settings_system_t system;
     np_settings_notifications_t notifications;
+    np_settings_timezone_t timezone;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);

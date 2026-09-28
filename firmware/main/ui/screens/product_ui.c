@@ -1,7 +1,6 @@
 #include "product_ui.h"
 
 #include <stdint.h>
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -53,10 +52,8 @@ typedef struct {
     bool syncing_notification_controls;
     bool home_data_rendered;
     bool settings_controls_initialized;
-    bool timezone_modal_open;
     uint8_t projected_brightness;
     uint8_t projected_volume;
-    uint8_t selected_timezone_index;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -70,9 +67,8 @@ static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
 static void notification_switch_event_cb(lv_event_t *event);
 static void notifications_test_event_cb(lv_event_t *event);
-static void timezone_open_event_cb(lv_event_t *event);
-static void timezone_choice_event_cb(lv_event_t *event);
-static void timezone_search_event_cb(lv_event_t *event);
+static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
+static void keyboard_modal_close_cb(void *user_data);
 static void update_settings(const app_ui_projection_t *projection);
 
 typedef enum {
@@ -231,21 +227,13 @@ static void install_settings_control_callbacks(void)
                             notifications_test_event_cb,
                             LV_EVENT_CLICKED, NULL);
     }
-    if (s_ui.settings.timezone_row != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.timezone_row, timezone_open_event_cb,
-                            LV_EVENT_CLICKED, NULL);
-    }
-    for (uint8_t i = 0U; i < 5U; ++i) {
-        if (s_ui.settings.timezone_options[i] != NULL) {
-            lv_obj_add_event_cb(s_ui.settings.timezone_options[i],
-                                timezone_choice_event_cb, LV_EVENT_CLICKED,
-                                (void *)(uintptr_t)i);
-        }
-    }
-    if (s_ui.settings.timezone_search != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.timezone_search,
-                            timezone_search_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    }
+    np_settings_timezone_set_select_callback(&s_ui.settings.timezone,
+                                             timezone_select_cb, NULL);
+    np_settings_timezone_set_close_callback(&s_ui.settings.timezone,
+                                            keyboard_modal_close_cb,
+                                            &s_ui.keyboard);
+    np_keyboard_bind(&s_ui.keyboard, s_ui.settings.timezone.search,
+                     NP_KEYBOARD_MODE_TEXT);
 }
 
 static void notification_switch_event_cb(lv_event_t *event)
@@ -296,120 +284,27 @@ static void notifications_test_event_cb(lv_event_t *event)
     }
 }
 
-static const char *timezone_label(uint8_t timezone_index)
+static void keyboard_modal_close_cb(void *user_data)
 {
-    static const char *const labels[] = {
-        "Sao Paulo (GMT-3)",
-        "Brasilia (GMT-3)",
-        "Buenos Aires (GMT-3)",
-        "Nova York (GMT-5)",
-        "Londres (GMT+0)",
-    };
-    return timezone_index < sizeof(labels) / sizeof(labels[0])
-               ? labels[timezone_index] : labels[0];
+    np_keyboard_hide(user_data);
 }
 
-static void set_timezone_choice(lv_obj_t *choice, bool selected)
+static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
 {
-    if (choice == NULL) return;
-    np_set_bg_color(choice, selected ? np_c_accent_bg() : np_c_surface_raised());
-    lv_obj_set_style_border_color(choice,
-                                  selected ? np_c_accent() : np_c_hairline(), 0);
-    lv_obj_t *radio = lv_obj_get_child(choice, 2);
-    if (radio == NULL) return;
-    lv_obj_set_style_border_color(radio,
-                                  selected ? np_c_accent() : np_c_text_3(), 0);
-    np_set_visible(lv_obj_get_child(radio, 0), selected);
-}
-
-static void update_timezone_choices(uint8_t timezone_index)
-{
-    for (uint8_t i = 0U; i < 5U; ++i) {
-        set_timezone_choice(s_ui.settings.timezone_options[i], timezone_index == i);
-    }
-}
-
-static bool timezone_matches_query(uint8_t timezone_index, const char *query)
-{
-    static const char *const searchable[] = {
-        "sao paulo gmt-3 brasil america/sao_paulo",
-        "brasilia gmt-3 brasil america/sao_paulo",
-        "buenos aires gmt-3 argentina america/argentina/buenos_aires",
-        "nova york gmt-5 estados unidos america/new_york",
-        "londres gmt+0 reino unido europe/london",
-    };
-    if (query == NULL || query[0] == '\0') return true;
-    if (timezone_index >= sizeof(searchable) / sizeof(searchable[0])) return false;
-
-    const char *const text = searchable[timezone_index];
-    for (const char *start = text; *start != '\0'; ++start) {
-        const char *left = start;
-        const char *right = query;
-        while (*left != '\0' && *right != '\0' &&
-               tolower((unsigned char)*left) == tolower((unsigned char)*right)) {
-            ++left;
-            ++right;
-        }
-        if (*right == '\0') return true;
-    }
-    return false;
-}
-
-static void filter_timezone_choices(const char *query)
-{
-    int32_t y = 0;
-    for (uint8_t i = 0U; i < 5U; ++i) {
-        const bool visible = timezone_matches_query(i, query);
-        np_set_visible(s_ui.settings.timezone_options[i], visible);
-        if (visible && s_ui.settings.timezone_options[i] != NULL) {
-            lv_obj_set_y(s_ui.settings.timezone_options[i], y);
-            y += 62;
-        }
-    }
-}
-
-static void timezone_open_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    app_ui_projection_t projection = {0};
-    app_state_get_ui_projection(&projection);
-    s_ui.selected_timezone_index = projection.onboarding.timezone_index;
-    s_ui.timezone_modal_open = true;
-    lv_textarea_set_text(s_ui.settings.timezone_search, "");
-    filter_timezone_choices("");
-    update_timezone_choices(s_ui.selected_timezone_index);
-    if (s_ui.settings.timezone_modal_scrim != NULL) {
-        lv_obj_move_foreground(s_ui.settings.timezone_modal_scrim);
-        np_set_visible(s_ui.settings.timezone_modal_scrim, true);
-    }
-}
-
-static void timezone_choice_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    const uint8_t timezone_index =
-        (uint8_t)(uintptr_t)lv_event_get_user_data(event);
-    if (timezone_index == s_ui.selected_timezone_index) return;
-
+    (void)user_data;
     const esp_err_t result = onboarding_service_request_timezone_update(timezone_index);
     if (result != ESP_OK) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Fuso nao alterado",
                                "Aguarde a atualizacao atual terminar", 2600U);
-        return;
+        return result;
     }
-    s_ui.selected_timezone_index = timezone_index;
-    update_timezone_choices(s_ui.selected_timezone_index);
-    np_set_text(s_ui.settings.timezone_value, timezone_label(timezone_index));
+
+    np_keyboard_hide(&s_ui.keyboard);
     np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
                            "Fuso horario atualizado",
                            "Aplicando e salvando preferencia", 2200U);
-}
-
-static void timezone_search_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
-    filter_timezone_choices(lv_textarea_get_text(lv_event_get_target(event)));
+    return ESP_OK;
 }
 
 static bool projection_local_time(const app_ui_projection_t *projection, struct tm *local)
@@ -969,12 +864,10 @@ static void update_settings(const app_ui_projection_t *projection)
 
     update_header(&s_ui.settings.header, projection, true);
 
-    if (!s_ui.timezone_modal_open) {
-        s_ui.selected_timezone_index = projection->onboarding.timezone_index;
-    }
+    np_settings_timezone_sync(&s_ui.settings.timezone,
+                              projection->onboarding.timezone_index);
     np_set_text(s_ui.settings.timezone_value,
-                timezone_label(projection->onboarding.timezone_index));
-    update_timezone_choices(s_ui.selected_timezone_index);
+                np_settings_timezone_selected_label(&s_ui.settings.timezone));
 
     if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
         if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
