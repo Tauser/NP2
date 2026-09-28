@@ -6,29 +6,28 @@
 #define NP_KEYBOARD_H 230
 
 /* LVGL's stock control glyphs are FontAwesome codepoints, outside the
- * NovaPanel font subset. These maps retain the keyboard engine and geometry,
- * but use Material symbols that are part of the product font. */
-#define NP_KEYBOARD_BACKSPACE NP_ICON_ARROW_LEFT NP_ICON_CLOSE
+ * NovaPanel font subset. These maps use their Material counterparts. */
+#define NP_KEYBOARD_BACKSPACE NP_ICON_BACKSPACE
 
 static const char *const s_text_lower_map[] = {
     "123", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", NP_KEYBOARD_BACKSPACE, "\n",
-    NP_ICON_ARROW_UP, "a", "s", "d", "f", "g", "h", "j", "k", "l", NP_ICON_CHECK, "\n",
+    NP_ICON_KEYBOARD_CAPSLOCK, "a", "s", "d", "f", "g", "h", "j", "k", "l", NP_ICON_CHECK, "\n",
     "_", "-", "z", "x", "c", "v", "b", "n", "m", ".", ",", ":", "\n",
-    NP_ICON_CLOSE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
+    NP_ICON_KEYBOARD_HIDE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
 };
 
 static const char *const s_text_upper_map[] = {
     "123", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", NP_KEYBOARD_BACKSPACE, "\n",
-    NP_ICON_ARROW_UP, "A", "S", "D", "F", "G", "H", "J", "K", "L", NP_ICON_CHECK, "\n",
+    NP_ICON_KEYBOARD_CAPSLOCK, "A", "S", "D", "F", "G", "H", "J", "K", "L", NP_ICON_CHECK, "\n",
     "_", "-", "Z", "X", "C", "V", "B", "N", "M", ".", ",", ":", "\n",
-    NP_ICON_CLOSE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
+    NP_ICON_KEYBOARD_HIDE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
 };
 
 static const char *const s_special_map[] = {
     "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", NP_KEYBOARD_BACKSPACE, "\n",
     "ABC", "+", "&", "/", "*", "=", "%", "!", "?", "#", "<", ">", "\n",
     "\\", "@", "$", "(", ")", "{", "}", "[", "]", ";", "\"", "'", "\n",
-    NP_ICON_CLOSE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
+    NP_ICON_KEYBOARD_HIDE, NP_ICON_ARROW_LEFT, " ", NP_ICON_ARROW_RIGHT, NP_ICON_CHECK, ""
 };
 
 static const lv_buttonmatrix_ctrl_t s_text_ctrl_map[] = {
@@ -172,13 +171,13 @@ static void keyboard_event_cb(lv_event_t *event)
         set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
         return;
     }
-    if (strcmp(key, NP_ICON_ARROW_UP) == 0) {
+    if (strcmp(key, NP_ICON_KEYBOARD_CAPSLOCK) == 0) {
         set_mode(keyboard, mode == LV_KEYBOARD_MODE_TEXT_UPPER
                                ? LV_KEYBOARD_MODE_TEXT_LOWER
                                : LV_KEYBOARD_MODE_TEXT_UPPER);
         return;
     }
-    if (strcmp(key, NP_ICON_CLOSE) == 0) {
+    if (strcmp(key, NP_ICON_KEYBOARD_HIDE) == 0) {
         np_keyboard_hide(keyboard);
         return;
     }

@@ -54,21 +54,8 @@ static void network_event_cb(lv_event_t *event)
 
 static lv_obj_t *network_lock(lv_obj_t *parent)
 {
-    lv_obj_t *const root = np_group(parent, 246, 12, 20, 24);
-    lv_obj_t *const shackle = lv_arc_create(root);
-    lv_obj_remove_style_all(shackle);
-    lv_obj_set_pos(shackle, 4, 1);
-    lv_obj_set_size(shackle, 12, 14);
-    lv_obj_set_style_pad_all(shackle, 0, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(shackle, 2, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(shackle, true, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(shackle, np_c_text_2(), LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(shackle, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(shackle, LV_OPA_TRANSP, LV_PART_INDICATOR);
-    lv_arc_set_bg_angles(shackle, 180, 360);
-    lv_obj_remove_flag(shackle, LV_OBJ_FLAG_CLICKABLE);
-    (void)np_fill(root, 3, 11, 14, 10, np_c_text_2(), LV_OPA_COVER, 2);
-    return root;
+    return np_label(parent, NP_ICON_LOCK, NP_FONT_ICON, np_c_text_2(),
+                    246, 12, 20, LV_TEXT_ALIGN_CENTER);
 }
 
 static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)

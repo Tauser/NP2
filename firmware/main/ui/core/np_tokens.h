@@ -118,6 +118,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_FONT_SM       (&ui_font_np_monserrat_16_ptbr)
 #define NP_FONT_ICON     (&ui_font_np_material_24)
 #define NP_FONT_ICON_BADGE (&ui_font_np_material_48)
+/* UI icons are always Material glyphs. Add a semantic constant here and its
+ * codepoint to ui_font_np_material_24.c; never draw a substitute shape. */
 #define NP_ICON_MENU          "\xEE\xA6\xB9"
 #define NP_ICON_WIFI          "\xEE\x98\xBE"
 #define NP_ICON_WIFI_LOW      "\xEE\x93\x8A"
@@ -150,6 +152,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_ARROW_LEFT    "\xEE\x8C\x94"
 #define NP_ICON_ARROW_RIGHT   "\xEE\x8C\x95"
 #define NP_ICON_ARROW_UP      "\xEE\x8C\x96"
+#define NP_ICON_BACKSPACE     "\xEE\x85\x8A"
+#define NP_ICON_KEYBOARD_CAPSLOCK "\xEE\x8C\x98"
+#define NP_ICON_KEYBOARD_HIDE "\xEE\x8C\x9A"
+#define NP_ICON_LOCK          "\xEE\xA2\x99"
 #else
 #define NP_FONT_HERO     (&lv_font_montserrat_48)
 #define NP_FONT_BRAND    (&lv_font_montserrat_48)
@@ -192,6 +198,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_ARROW_LEFT    "<"
 #define NP_ICON_ARROW_RIGHT   ">"
 #define NP_ICON_ARROW_UP      "^"
+#define NP_ICON_BACKSPACE     "<"
+#define NP_ICON_KEYBOARD_CAPSLOCK "^"
+#define NP_ICON_KEYBOARD_HIDE "v"
+#define NP_ICON_LOCK          "L"
 #endif
 
 /* ------------------------------------------------------------------ */
