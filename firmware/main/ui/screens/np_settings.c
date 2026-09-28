@@ -48,11 +48,6 @@
 #define SETTINGS_BRIGHTNESS         60
 #define SETTINGS_VOLUME             65
 
-#define SETTINGS_SYSTEM_MODAL_X     192
-#define SETTINGS_SYSTEM_MODAL_Y     116
-#define SETTINGS_SYSTEM_MODAL_W     640
-#define SETTINGS_SYSTEM_MODAL_H     368
-
 #define SETTINGS_NOTIFICATIONS_MODAL_X 172
 #define SETTINGS_NOTIFICATIONS_MODAL_Y 84
 #define SETTINGS_NOTIFICATIONS_MODAL_W 680
@@ -68,7 +63,6 @@
 #define SETTINGS_TIMEZONE_ROW_GAP   4
 #define SETTINGS_TIMEZONE_COUNT     5
 
-static lv_obj_t *s_system_modal_scrim = NULL;
 static lv_obj_t *s_notifications_modal_scrim = NULL;
 static lv_obj_t *s_timezone_modal_scrim = NULL;
 
@@ -203,93 +197,6 @@ static void settings_modal_close_event_cb(lv_event_t *event)
     if (scrim != NULL) {
         np_set_visible(scrim, false);
     }
-}
-
-static void settings_modal_open_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) {
-        return;
-    }
-
-    lv_obj_t *scrim = lv_event_get_user_data(event);
-    if (scrim != NULL) {
-        lv_obj_move_foreground(scrim);
-        np_set_visible(scrim, true);
-    }
-}
-
-static void settings_system_value(lv_obj_t *modal,
-                                  int32_t x,
-                                  int32_t y,
-                                  int32_t w,
-                                  const char *label,
-                                  const char *value)
-{
-    np_label(modal, label, NP_FONT_SM, np_c_text_3(),
-             x, y, w, LV_TEXT_ALIGN_LEFT);
-
-    np_label(modal, value, NP_FONT_MD, np_c_text(),
-             x, y + 24, w, LV_TEXT_ALIGN_LEFT);
-}
-
-static lv_obj_t *settings_build_system_modal(lv_obj_t *root)
-{
-    lv_obj_t *scrim = np_fill(root,
-                              0, 0, NP_SCREEN_W, NP_SCREEN_H,
-                              np_c_bg(), LV_OPA_70, 0);
-    lv_obj_add_flag(scrim, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *modal = settings_panel(scrim,
-                                     SETTINGS_SYSTEM_MODAL_X, SETTINGS_SYSTEM_MODAL_Y,
-                                     SETTINGS_SYSTEM_MODAL_W, SETTINGS_SYSTEM_MODAL_H);
-
-    np_label(modal, NP_ICON_SETTINGS, NP_FONT_ICON, np_c_text_2(),
-             24, 22, 30, LV_TEXT_ALIGN_CENTER);
-
-    np_label(modal, "Sistema", NP_FONT_LG, np_c_text(),
-             68, 18, 300, LV_TEXT_ALIGN_LEFT);
-
-    np_label(modal, "Informacoes do dispositivo", NP_FONT_SM, np_c_text_2(),
-             68, 48, 300, LV_TEXT_ALIGN_LEFT);
-
-    lv_obj_t *close = np_icon_button(modal,
-                                     SETTINGS_SYSTEM_MODAL_W - 68, 16,
-                                     44, NP_ICON_CLOSE);
-    lv_obj_add_event_cb(close,
-                        settings_modal_close_event_cb,
-                        LV_EVENT_CLICKED,
-                        scrim);
-
-    np_hline(modal, 24, 82, SETTINGS_SYSTEM_MODAL_W - 48);
-
-    settings_system_value(modal, 32, 110, 250,
-                          "Display", "1024x600 · RGB565");
-
-    settings_system_value(modal, 336, 110, 250,
-                          "Touch", "Capacitivo");
-
-    settings_system_value(modal, 32, 184, 250,
-                          "Firmware", "--");
-
-    settings_system_value(modal, 336, 184, 250,
-                          "Temperatura", "--");
-
-    np_vline(modal, 320, 104, 134);
-
-    lv_obj_t *update = np_button(modal,
-                                 32, 282,
-                                 276, 52,
-                                 "Atualizar sistema", true);
-    lv_obj_clear_flag(update, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *restart = np_button(modal,
-                                  332, 282,
-                                  276, 52,
-                                  "Reiniciar", false);
-    lv_obj_clear_flag(restart, LV_OBJ_FLAG_CLICKABLE);
-
-    np_set_visible(scrim, false);
-    return scrim;
 }
 
 static lv_obj_t *settings_notification_switch(lv_obj_t *parent,
@@ -574,10 +481,7 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                             true);
 
     lv_obj_add_flag(system_row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(system_row,
-                        settings_modal_open_event_cb,
-                        LV_EVENT_CLICKED,
-                        s_system_modal_scrim);
+    np_settings_system_bind_row(&view->system, system_row);
 
     return card;
 }
@@ -601,7 +505,7 @@ np_settings_view_t np_settings_begin(lv_obj_t *parent)
      * O modal e construido uma unica vez e nasce oculto.
      * Assim o toque em Sistema nao cria arvore LVGL nova.
      */
-    s_system_modal_scrim = settings_build_system_modal(view.root);
+    np_settings_system_create(&view.system, view.root);
     view.notifications_modal_scrim = settings_build_notifications_modal(view.root, &view);
     s_notifications_modal_scrim = view.notifications_modal_scrim;
     view.timezone_modal_scrim = settings_build_timezone_modal(view.root, &view);
@@ -654,9 +558,7 @@ void np_settings_reset_stages(np_settings_view_t *view)
         np_set_visible(view->left_card, false);
     }
 
-    if (s_system_modal_scrim != NULL) {
-        np_set_visible(s_system_modal_scrim, false);
-    }
+    np_settings_system_hide(&view->system);
     if (s_notifications_modal_scrim != NULL) np_set_visible(s_notifications_modal_scrim, false);
     if (s_timezone_modal_scrim != NULL) np_set_visible(s_timezone_modal_scrim, false);
 }

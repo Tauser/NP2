@@ -8,6 +8,7 @@
 #define NP_SCREENS_H
 
 #include "np_components.h"
+#include "settings/np_settings_system.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,6 +83,7 @@ typedef struct {
     lv_obj_t *timezone_modal_scrim;
     lv_obj_t *timezone_search;
     lv_obj_t *timezone_options[5];
+    np_settings_system_t system;
 } np_settings_view_t;
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);
