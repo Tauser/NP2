@@ -36,6 +36,22 @@
   67% livres; sem novos warnings de compilação. SHA-256 P4:
   `99A5CFE8701CFCD305258676DBF0AE5F5F2F923FB35E2D07048DEB0C0E414279`.
 
+## 2026-09-28 — Confirmação destrutiva
+
+- Esquecer rede abre confirmação lazy com Cancelar/X e Esquecer rede.
+  Somente o botão de confirmação enfileira o pedido no serviço; fechar,
+  cancelar ou sair não executa a remoção. O feedback indica pedido aceito,
+  sem confundir a fila com a conclusão da persistência.
+- `np_confirm` é componente visual reutilizável, com callback da ponte,
+  desarme ao fechar e proteção contra segundo envio após aceite. Uma recusa
+  mantém o prompt aberto para tentar novamente. Senha e confirmação nunca
+  coexistem como diálogos filhos alocados.
+- O fluxo de senha foi versionado em `71c1eef` após build e teste host.
+- `idf.py build` passou com IDF 5.5.4/`esp32p4`, aplicação `0x2a1fe0` B,
+  67% livres no slot OTA; sem novos warnings de compilação. SHA-256 P4:
+  `9FB13EEE395FA25E6A58B2FD175C109B31482D44F8756325939BDAAE1A809BE9`.
+  O descritor da imagem pré-commit identifica `71c1eef-dirty`.
+
 ## Roteiro após flash manual
 
 Registrar data, unidade/BOM, commit, SHA-256 P4/C6, configuração efetiva e log
@@ -60,6 +76,11 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
    associação/SSID quando o rádio confirmar. Testar rede aberta sem senha.
    Confirmar ausência de segredo em logs e projeções; não exportar dump bruto
    enquanto existirem credenciais ou pixels da revelação.
+7. Esquecer rede → Cancelar e X: associação e credencial devem permanecer.
+   Esquecer rede → confirmar: um único pedido, desconexão e SSID limpo após
+   processamento; reboot não deve reassociar com a credencial removida.
+   Em recusa por serviço ocupado, manter confirmação aberta sem anunciar
+   remoção concluída. Repetir troca entre senha/confirmar/outros modais.
 
 Build não comprova ausência de crash, estabilidade gráfica ou gate de rede.
 Os resultados físicos acima permanecem pendentes do operador.

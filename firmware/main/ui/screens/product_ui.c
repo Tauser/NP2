@@ -13,6 +13,7 @@
 #include "offline_value_format.h"
 #include "np_screens.h"
 #include "np_feedback.h"
+#include "np_confirm.h"
 #include "np_keyboard.h"
 #include "notification_service.h"
 #include "onboarding_service.h"
@@ -40,9 +41,11 @@ typedef struct {
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
+    np_confirm_t wifi_confirmation;
     char pending_wifi_ssid[33];
     bool pending_wifi_secure;
     bool wifi_password_pending;
+    bool wifi_confirmation_pending;
     lv_timer_t *refresh_timer;
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
@@ -85,6 +88,7 @@ static void wifi_forget_event_cb(lv_event_t *event);
 static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 static void discard_wifi_password(void);
+static void discard_wifi_confirmation(void);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -289,6 +293,7 @@ static void discard_settings_modals(uintptr_t keep)
     np_keyboard_hide(&s_ui.keyboard);
     if (keep != 0U && s_ui.settings.wifi.modal.scrim != NULL) {
         discard_wifi_password();
+        discard_wifi_confirmation();
         lv_obj_delete(s_ui.settings.wifi.modal.scrim);
         s_ui.settings.wifi = (np_settings_wifi_t){0};
         s_ui.settings_wifi_callbacks_initialized = false;
@@ -438,6 +443,14 @@ static void discard_wifi_password(void)
     s_ui.wifi_password = (np_wifi_password_t){0};
 }
 
+static void discard_wifi_confirmation(void)
+{
+    if (s_ui.wifi_confirmation.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.wifi_confirmation.modal.scrim);
+    }
+    s_ui.wifi_confirmation = (np_confirm_t){0};
+}
+
 static void sync_wifi_password(void)
 {
     provisioning_service_status_t status = {0};
@@ -521,6 +534,7 @@ static void wifi_password_open_async(void *user_data)
     if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
         !np_modal_is_visible(&s_ui.settings.wifi.modal)) return;
     discard_wifi_password();
+    discard_wifi_confirmation();
     const esp_err_t result = provisioning_service_touch_begin_for_network(
         s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure);
     if (result == ESP_OK) {
@@ -568,15 +582,45 @@ static void wifi_scan_event_cb(lv_event_t *event)
     }
 }
 
-static void wifi_forget_event_cb(lv_event_t *event)
+static bool wifi_forget_confirmed(void *user_data)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    (void)user_data;
+    np_feedback_bring_to_front(&s_ui.feedback);
     if (connectivity_diagnostic_request_forget() == ESP_OK) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
-                               "Rede esquecida", NULL, 1800U);
+                               "Remocao solicitada", "Aguardando o servico", 2200U);
+        return true;
     } else {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Nao foi possivel esquecer", NULL, 2200U);
+        return false;
+    }
+}
+
+static void wifi_forget_open_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.wifi_confirmation_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
+        !np_modal_is_visible(&s_ui.settings.wifi.modal)) return;
+    discard_wifi_password();
+    discard_wifi_confirmation();
+    np_confirm_create(&s_ui.wifi_confirmation, s_ui.settings.wifi.modal.scrim,
+                        "Esquecer rede?",
+                        "A conexao sera encerrada e a credencial salva removida.\n"
+                        "Para reconectar, sera preciso configurar a rede novamente.",
+                        "Esquecer rede", wifi_forget_confirmed, NULL);
+}
+
+static void wifi_forget_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.wifi_confirmation_pending) return;
+    s_ui.wifi_confirmation_pending = true;
+    if (lv_async_call(wifi_forget_open_async, NULL) != LV_RESULT_OK) {
+        s_ui.wifi_confirmation_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Confirmacao indisponivel", NULL, 2200U);
     }
 }
 
@@ -1388,6 +1432,7 @@ static void settings_home_async(void *user_data)
     /* Free Settings before constructing Home to keep one scene's draw tree
      * active at a time on the LVGL task. */
     discard_wifi_password();
+    discard_wifi_confirmation();
     lv_obj_delete(settings_root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.settings_controls_initialized = false;
@@ -1437,6 +1482,7 @@ static void diagnostics_button_event_cb(lv_event_t *event)
     }
     np_keyboard_destroy(&s_ui.keyboard);
     discard_wifi_password();
+    discard_wifi_confirmation();
     np_feedback_destroy(&s_ui.feedback);
 
     lv_display_t *display = s_ui.display;
