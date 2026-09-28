@@ -14,6 +14,7 @@
 #include "offline_value_format.h"
 #include "np_screens.h"
 #include "np_feedback.h"
+#include "np_keyboard.h"
 #include "notification_service.h"
 #include "onboarding_service.h"
 #include "weather_condition.h"
@@ -36,6 +37,7 @@ typedef struct {
     np_home_view_t home;
     np_settings_view_t settings;
     np_feedback_t feedback;
+    np_keyboard_t keyboard;
     lv_timer_t *refresh_timer;
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
@@ -1236,6 +1238,7 @@ static void settings_home_async(void *user_data)
         lv_timer_delete(s_ui.settings_value_bubble_timer);
         s_ui.settings_value_bubble_timer = NULL;
     }
+    np_keyboard_hide(&s_ui.keyboard);
     /* Free Settings before constructing Home to keep one scene's draw tree
      * active at a time on the LVGL task. */
     lv_obj_delete(settings_root);
@@ -1281,6 +1284,7 @@ static void diagnostics_button_event_cb(lv_event_t *event)
     if (s_ui.refresh_timer != NULL) {
         lv_timer_delete(s_ui.refresh_timer);
     }
+    np_keyboard_destroy(&s_ui.keyboard);
     np_feedback_destroy(&s_ui.feedback);
 
     lv_display_t *display = s_ui.display;
@@ -1312,6 +1316,7 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     s_ui.boot = np_boot_build(screen);
     s_ui.feedback = np_feedback_create(screen);
+    s_ui.keyboard = np_keyboard_create(screen);
     np_feedback_bring_to_front(&s_ui.feedback);
     s_ui.refresh_timer =
         lv_timer_create(refresh_timer_cb, UI_REFRESH_PERIOD_MS, NULL);
