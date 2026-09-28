@@ -77,6 +77,7 @@ typedef struct {
     lv_obj_t *notifications_value;
     lv_obj_t *timezone_row;
     lv_obj_t *timezone_value;
+    lv_obj_t *system_row;
     np_settings_system_t system;
     np_settings_notifications_t notifications;
     np_settings_timezone_t timezone;

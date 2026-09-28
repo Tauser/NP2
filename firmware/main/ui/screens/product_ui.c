@@ -22,7 +22,7 @@
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define SETTINGS_STAGE_INTERVAL_MS 80U
-#define SETTINGS_STAGE_COUNT 3U
+#define SETTINGS_STAGE_COUNT 4U
 
 typedef struct {
     enum {
@@ -52,6 +52,8 @@ typedef struct {
     bool syncing_notification_controls;
     bool home_data_rendered;
     bool settings_controls_initialized;
+    bool settings_notification_callbacks_initialized;
+    bool settings_timezone_callbacks_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
 } product_ui_state_t;
@@ -175,65 +177,77 @@ static void settings_control_event_cb(lv_event_t *event)
 
 static void install_settings_control_callbacks(void)
 {
-    app_ui_projection_t projection = {0};
-    app_state_get_ui_projection(&projection);
-    s_ui.projected_brightness = projection.device_controls.brightness_percent;
-    s_ui.projected_volume = projection.device_controls.volume_percent;
-    s_ui.settings_controls_initialized = true;
+    if (!s_ui.settings_controls_initialized) {
+        app_ui_projection_t projection = {0};
+        app_state_get_ui_projection(&projection);
+        s_ui.projected_brightness = projection.device_controls.brightness_percent;
+        s_ui.projected_volume = projection.device_controls.volume_percent;
+        s_ui.settings_controls_initialized = true;
 
-    settings_set_percent(s_ui.settings.brightness_slider,
-                         s_ui.settings.brightness_value,
-                         s_ui.projected_brightness);
-    settings_set_percent(s_ui.settings.volume_slider,
-                         s_ui.settings.volume_value,
-                         s_ui.projected_volume);
+        settings_set_percent(s_ui.settings.brightness_slider,
+                             s_ui.settings.brightness_value,
+                             s_ui.projected_brightness);
+        settings_set_percent(s_ui.settings.volume_slider,
+                             s_ui.settings.volume_value,
+                             s_ui.projected_volume);
 
-    if (s_ui.settings_value_bubble_timer == NULL) {
-        s_ui.settings_value_bubble_timer =
-            lv_timer_create(settings_value_bubble_timer_cb, 1000U, NULL);
-        if (s_ui.settings_value_bubble_timer != NULL) {
-            lv_timer_pause(s_ui.settings_value_bubble_timer);
+        if (s_ui.settings_value_bubble_timer == NULL) {
+            s_ui.settings_value_bubble_timer =
+                lv_timer_create(settings_value_bubble_timer_cb, 1000U, NULL);
+            if (s_ui.settings_value_bubble_timer != NULL) {
+                lv_timer_pause(s_ui.settings_value_bubble_timer);
+            }
+        }
+
+        if (s_ui.settings.brightness_slider != NULL) {
+            lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+                                settings_control_event_cb,
+                                LV_EVENT_RELEASED,
+                                (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+            lv_obj_add_event_cb(s_ui.settings.brightness_slider,
+                                settings_control_event_cb,
+                                LV_EVENT_PRESS_LOST,
+                                (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+        }
+        if (s_ui.settings.volume_slider != NULL) {
+            lv_obj_add_event_cb(s_ui.settings.volume_slider,
+                                settings_control_event_cb,
+                                LV_EVENT_RELEASED,
+                                (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+            lv_obj_add_event_cb(s_ui.settings.volume_slider,
+                                settings_control_event_cb,
+                                LV_EVENT_PRESS_LOST,
+                                (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
         }
     }
 
-    if (s_ui.settings.brightness_slider != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.brightness_slider,
-                            settings_control_event_cb,
-                            LV_EVENT_RELEASED,
-                            (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
-        lv_obj_add_event_cb(s_ui.settings.brightness_slider,
-                            settings_control_event_cb,
-                            LV_EVENT_PRESS_LOST,
-                            (void *)(uintptr_t)SETTINGS_CONTROL_BRIGHTNESS);
+    if (!s_ui.settings_notification_callbacks_initialized &&
+        s_ui.settings.notifications.general_switch != NULL) {
+        lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb,
+                            LV_EVENT_VALUE_CHANGED, (void *)0U);
+        lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb,
+                            LV_EVENT_VALUE_CHANGED, (void *)1U);
+        lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb,
+                            LV_EVENT_VALUE_CHANGED, (void *)2U);
+        if (s_ui.settings.notifications.test_button != NULL) {
+            lv_obj_add_event_cb(s_ui.settings.notifications.test_button,
+                                notifications_test_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+        }
+        s_ui.settings_notification_callbacks_initialized = true;
     }
-    if (s_ui.settings.volume_slider != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.volume_slider,
-                            settings_control_event_cb,
-                            LV_EVENT_RELEASED,
-                            (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
-        lv_obj_add_event_cb(s_ui.settings.volume_slider,
-                            settings_control_event_cb,
-                            LV_EVENT_PRESS_LOST,
-                            (void *)(uintptr_t)SETTINGS_CONTROL_VOLUME);
+
+    if (!s_ui.settings_timezone_callbacks_initialized &&
+        s_ui.settings.timezone.search != NULL) {
+        np_settings_timezone_set_select_callback(&s_ui.settings.timezone,
+                                                 timezone_select_cb, NULL);
+        np_settings_timezone_set_close_callback(&s_ui.settings.timezone,
+                                                keyboard_modal_close_cb,
+                                                &s_ui.keyboard);
+        np_keyboard_bind(&s_ui.keyboard, s_ui.settings.timezone.search,
+                         NP_KEYBOARD_MODE_TEXT);
+        s_ui.settings_timezone_callbacks_initialized = true;
     }
-    lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb,
-                        LV_EVENT_VALUE_CHANGED, (void *)0U);
-    lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb,
-                        LV_EVENT_VALUE_CHANGED, (void *)1U);
-    lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb,
-                        LV_EVENT_VALUE_CHANGED, (void *)2U);
-    if (s_ui.settings.notifications.test_button != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.notifications.test_button,
-                            notifications_test_event_cb,
-                            LV_EVENT_CLICKED, NULL);
-    }
-    np_settings_timezone_set_select_callback(&s_ui.settings.timezone,
-                                             timezone_select_cb, NULL);
-    np_settings_timezone_set_close_callback(&s_ui.settings.timezone,
-                                            keyboard_modal_close_cb,
-                                            &s_ui.keyboard);
-    np_keyboard_bind(&s_ui.keyboard, s_ui.settings.timezone.search,
-                     NP_KEYBOARD_MODE_TEXT);
 }
 
 static void notification_switch_event_cb(lv_event_t *event)
@@ -1043,10 +1057,6 @@ static void settings_stage_timer_cb(lv_timer_t *timer)
 
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);
-    } else if (s_ui.settings_stage == 1U) {
-        np_set_visible(s_ui.settings.middle_card, true);
-    } else {
-        np_set_visible(s_ui.settings.right_card, true);
     }
 
     s_ui.settings_stage++;
@@ -1071,10 +1081,6 @@ static void settings_stage_async(void *user_data)
 
     if (s_ui.settings_stage == 0U) {
         np_set_visible(s_ui.settings.left_card, true);
-    } else if (s_ui.settings_stage == 1U) {
-        np_set_visible(s_ui.settings.middle_card, true);
-    } else {
-        np_set_visible(s_ui.settings.right_card, true);
     }
 
     s_ui.settings_stage++;

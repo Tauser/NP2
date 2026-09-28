@@ -243,26 +243,20 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
                                               true);
     view->timezone_value = lv_obj_get_child(view->timezone_row, 2);
     lv_obj_add_flag(view->timezone_row, LV_OBJ_FLAG_CLICKABLE);
-    np_settings_timezone_bind_row(&view->timezone, view->timezone_row);
 
     view->notifications_row = settings_option_row(card,
                             284, NP_ICON_NOTIFICATIONS, np_c_text_2(),
                             "Notificacoes", "--", true);
     view->notifications_value = lv_obj_get_child(view->notifications_row, 2);
     lv_obj_add_flag(view->notifications_row, LV_OBJ_FLAG_CLICKABLE);
-    np_settings_notifications_bind_row(&view->notifications,
-                                       view->notifications_row);
-    lv_obj_t *system_row =
-        settings_option_row(card,
-                            374,
-                            NP_ICON_SETTINGS,
-                            np_c_text_2(),
-                            "Sistema",
-                            "Informacoes e manutencao",
-                            true);
-
-    lv_obj_add_flag(system_row, LV_OBJ_FLAG_CLICKABLE);
-    np_settings_system_bind_row(&view->system, system_row);
+    view->system_row = settings_option_row(card,
+                                           374,
+                                           NP_ICON_SETTINGS,
+                                           np_c_text_2(),
+                                           "Sistema",
+                                           "Informacoes e manutencao",
+                                           true);
+    lv_obj_add_flag(view->system_row, LV_OBJ_FLAG_CLICKABLE);
 
     return card;
 }
@@ -281,14 +275,6 @@ np_settings_view_t np_settings_begin(lv_obj_t *parent)
     /* np_header() mantem o drawer fechado por padrao. */
     view.header = np_header(view.root);
     view.home_button = NULL;
-
-    /*
-     * O modal e construido uma unica vez e nasce oculto.
-     * Assim o toque em Sistema nao cria arvore LVGL nova.
-     */
-    np_settings_system_create(&view.system, view.root);
-    np_settings_notifications_create(&view.notifications, view.root);
-    np_settings_timezone_create(&view.timezone, view.root);
 
     return view;
 }
@@ -311,6 +297,25 @@ bool np_settings_build_next_card(np_settings_view_t *view)
         view->right_card = view->left_card;
 
         np_set_visible(view->left_card, false);
+        return true;
+    }
+
+    if (view->timezone.modal.scrim == NULL) {
+        np_settings_timezone_create(&view->timezone, view->root);
+        np_settings_timezone_bind_row(&view->timezone, view->timezone_row);
+        return true;
+    }
+
+    if (view->notifications.modal.scrim == NULL) {
+        np_settings_notifications_create(&view->notifications, view->root);
+        np_settings_notifications_bind_row(&view->notifications,
+                                           view->notifications_row);
+        return true;
+    }
+
+    if (view->system.modal.scrim == NULL) {
+        np_settings_system_create(&view->system, view->root);
+        np_settings_system_bind_row(&view->system, view->system_row);
         return true;
     }
 
