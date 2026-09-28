@@ -1030,3 +1030,21 @@ continua exclusivamente pela mailbox privada de conectividade; persistência
 usa a política de vault/FlashCoordinator existente. Sem mudança no schema
 offline, WDT, C6 ou configurações de hardware. Build/teste host não fecham
 validação de toque, render, recuperação ou estabilidade na placa.
+
+## ADR-041 — Modo noturno local e fechamento de Settings
+
+**Decisão:** Modo noturno aplica o horário local configurado, das 22:00 às
+06:00, e limita o brilho efetivo a 15%, conservando a preferência diurna.
+Não aumenta um brilho abaixo do limite nem altera volume/notificações. Sem
+hora confiável, conserva o brilho escolhido e informa espera de sincronismo.
+O worker de controles aplica o efeito; UI emite a preferência e consome a
+projeção do app_loop. A preferência usa o perfil pequeno de controles no
+FlashCoordinator, com leitura compatível do payload antigo de dois bytes
+(modo desabilitado). O schema de dados offline permanece igual.
+
+Sistema apresenta versão real e temperatura interna do chip, com ausência
+explícita se a leitura falhar. Reinício exige confirmação e execução pelo
+coordenador de flash, recusando persistência pendente/OTA em andamento. OTA
+de produto permanece no gate G5; Settings indica manutenção em vez de
+oferecer um botão de atualização sem função. Validação física continua
+dependente do flash manual e resultados do operador.

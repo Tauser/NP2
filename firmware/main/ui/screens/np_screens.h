@@ -74,6 +74,8 @@ typedef struct {
     lv_obj_t *volume_value;
     lv_obj_t *volume_bubble;
     lv_obj_t *volume_bubble_value;
+    lv_obj_t *night_switch;
+    lv_obj_t *night_detail;
     lv_obj_t *wifi_row;
     lv_obj_t *wifi_value;
     lv_obj_t *notifications_row;

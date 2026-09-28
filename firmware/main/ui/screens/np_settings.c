@@ -58,16 +58,6 @@ static lv_obj_t *settings_panel(lv_obj_t *parent,
     return np_panel(parent, x, y, w, h);
 }
 
-static void settings_toggle(lv_obj_t *parent, int32_t x, int32_t y, bool on)
-{
-    lv_obj_t *track = np_fill(parent, x, y, 52, 28,
-                              on ? np_c_accent() : np_c_hairline(),
-                              LV_OPA_COVER, 14);
-
-    np_dot(track, on ? 27 : 3, 3, 22,
-           on ? np_c_text_on_accent() : np_c_text_2());
-}
-
 static void settings_slider(lv_obj_t *parent,
                             int32_t y,
                             const char *icon,
@@ -214,10 +204,15 @@ static lv_obj_t *settings_general_card(np_settings_view_t *view)
     np_label(card, "Modo noturno", NP_FONT_MD, np_c_text(),
              SETTINGS_COL_A_TEXT_X, 352, 220, LV_TEXT_ALIGN_LEFT);
 
-    np_label(card, "22:00 - 06:00", NP_FONT_SM, np_c_text_2(),
-             SETTINGS_COL_A_TEXT_X, 384, 180, LV_TEXT_ALIGN_LEFT);
-
-    settings_toggle(card, 432, 354, true);
+    view->night_detail = np_label(card, "22:00 - 06:00 · brilho ate 15%", NP_FONT_SM,
+                                  np_c_text_2(), SETTINGS_COL_A_TEXT_X, 384, 350,
+                                  LV_TEXT_ALIGN_LEFT);
+    view->night_switch = lv_switch_create(card);
+    lv_obj_set_pos(view->night_switch, 432, 354);
+    lv_obj_set_size(view->night_switch, 52, 28);
+    lv_obj_set_style_bg_color(view->night_switch, np_c_hairline(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(view->night_switch, np_c_accent(), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(view->night_switch, np_c_text(), LV_PART_KNOB);
 
     /* Separador central */
     np_vline(card,

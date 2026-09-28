@@ -103,6 +103,9 @@ typedef struct {
     bool ready;
     uint8_t brightness_percent;
     uint8_t volume_percent;
+    uint8_t effective_brightness_percent;
+    bool night_mode_enabled;
+    bool night_mode_active;
     bool persistence_pending;
     uint32_t save_completion_id;
     uint8_t save_completion_mask;

@@ -8,6 +8,7 @@
 #include "esp_partition.h"
 #include "offline_data_model.h"
 #include "update_journal.h"
+#include "device_control_profile.h"
 
 /*
  * The coordinator is the sole owner of normal flash writes. Callers only
@@ -29,11 +30,6 @@ typedef struct {
     bool sound_enabled;
     bool system_alerts_enabled;
 } notification_profile_t;
-
-typedef struct {
-    uint8_t brightness_percent;
-    uint8_t volume_percent;
-} device_control_profile_t;
 
 typedef struct {
     bool ready;

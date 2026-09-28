@@ -1226,11 +1226,8 @@ typedef struct {
     device_control_profile_t profile;
 } device_control_profile_record_t;
 
-static bool device_control_profile_is_valid(const device_control_profile_t *profile)
-{
-    return profile != NULL && profile->brightness_percent <= 100U &&
-           profile->volume_percent <= 100U;
-}
+_Static_assert(sizeof(device_control_profile_record_t) == sizeof(cache_record_header_t) + 4U,
+               "Keep legacy controls record alignment");
 
 static esp_err_t read_device_control_profile_slot(
     const char *key, device_control_profile_record_t *out_record)
@@ -1247,10 +1244,15 @@ static esp_err_t read_device_control_profile_slot(
     if (result != ESP_OK) return result;
     if (record_size != sizeof(record) ||
         !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
-        record.header.payload_size != sizeof(record.profile) ||
+        (record.header.payload_size != 2U && record.header.payload_size != sizeof(record.profile)) ||
         record.header.payload_crc32 != cache_record_crc32(
-            (const uint8_t *)&record.profile, sizeof(record.profile)) ||
-        !device_control_profile_is_valid(&record.profile)) {
+            (const uint8_t *)&record.profile, record.header.payload_size)) {
+        return ESP_ERR_INVALID_CRC;
+    }
+    /* The original two-byte payload shares this record's four-byte alignment.
+     * Preserve brightness/volume and explicitly default the new preference. */
+    if (!device_control_profile_decode((const uint8_t *)&record.profile,
+                                        record.header.payload_size, &record.profile)) {
         return ESP_ERR_INVALID_CRC;
     }
     if (out_record != NULL) *out_record = record;

@@ -14,6 +14,9 @@ typedef struct {
     bool ready;
     uint8_t brightness_percent;
     uint8_t volume_percent;
+    uint8_t effective_brightness_percent;
+    bool night_mode_enabled;
+    bool night_mode_active;
     bool audio_ready;
     esp_err_t brightness_result;
     esp_err_t volume_result;
@@ -25,6 +28,7 @@ typedef struct {
 
 #define DEVICE_CONTROL_BRIGHTNESS_MASK 0x01U
 #define DEVICE_CONTROL_VOLUME_MASK     0x02U
+#define DEVICE_CONTROL_NIGHT_MASK      0x04U
 
 /* Starts the owner task. It restores and persists preferences asynchronously
  * through FlashCoordinator; touch callbacks only submit requests. */
@@ -33,6 +37,7 @@ esp_err_t device_control_service_start(void);
 /* Coalesced, non-blocking requests safe to issue from the LVGL task. */
 esp_err_t device_control_set_brightness(uint8_t percent);
 esp_err_t device_control_set_volume(uint8_t percent);
+esp_err_t device_control_set_night_mode(bool enabled);
 /* Queues one short PCM chime on the device-control task at the saved volume. */
 esp_err_t device_control_play_notification_tone(void);
 

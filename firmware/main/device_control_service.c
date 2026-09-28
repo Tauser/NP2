@@ -1,6 +1,9 @@
 #include "device_control_service.h"
 
 #include "flash_coordinator.h"
+#include "night_mode_policy.h"
+#include "time_service.h"
+#include <time.h>
 
 #include "bsp/display.h"
 #include "bsp/esp32_p4_wifi6_touch_lcd_7b.h"
@@ -40,6 +43,7 @@ static TickType_t s_last_notification_tone_tick;
 static device_control_status_t s_status = {
     .brightness_percent = DEVICE_CONTROL_DEFAULT_BRIGHTNESS,
     .volume_percent = DEVICE_CONTROL_DEFAULT_VOLUME,
+    .effective_brightness_percent = DEVICE_CONTROL_DEFAULT_BRIGHTNESS,
     .brightness_result = ESP_OK,
     .volume_result = ESP_OK,
     .save_result = ESP_OK,
@@ -117,6 +121,9 @@ static void restore_preferences(void)
     portENTER_CRITICAL(&s_lock);
     s_status.brightness_percent = brightness;
     s_status.volume_percent = volume;
+    s_status.effective_brightness_percent = brightness;
+    s_status.night_mode_enabled = flash.device_control_profile_valid &&
+                                 flash.device_control_profile.night_mode_enabled != 0U;
     s_status.brightness_result = brightness_result;
     s_status.volume_result = volume_result;
     s_status.audio_ready = volume_result == ESP_OK;
@@ -142,11 +149,15 @@ static void apply_pending_controls(void)
     portEXIT_CRITICAL(&s_lock);
 
     if (brightness_pending) {
-        const esp_err_t result = apply_brightness(brightness);
+        portENTER_CRITICAL(&s_lock);
+        const uint8_t effective = night_mode_brightness(brightness, s_status.night_mode_active);
+        portEXIT_CRITICAL(&s_lock);
+        const esp_err_t result = apply_brightness(effective);
         portENTER_CRITICAL(&s_lock);
         s_status.brightness_result = result;
         if (result == ESP_OK) {
             s_status.brightness_percent = brightness;
+            s_status.effective_brightness_percent = effective;
             s_dirty_mask |= DEVICE_CONTROL_BRIGHTNESS_MASK;
             s_status.persistence_pending = true;
             s_last_change_tick = xTaskGetTickCount();
@@ -168,6 +179,28 @@ static void apply_pending_controls(void)
         portEXIT_CRITICAL(&s_lock);
         if (result != ESP_OK) report_control_failure(DEVICE_CONTROL_VOLUME_MASK, result);
     }
+}
+
+static void apply_night_schedule(void)
+{
+    time_service_status_t clock = {0};
+    time_service_get_status(&clock);
+    const time_t now = time(NULL);
+    struct tm local = {0};
+    const bool trusted = clock.trusted && localtime_r(&now, &local) != NULL;
+    portENTER_CRITICAL(&s_lock);
+    const bool active = night_mode_active(s_status.night_mode_enabled, trusted,
+                                          (unsigned)local.tm_hour);
+    const uint8_t brightness = night_mode_brightness(s_status.brightness_percent, active);
+    const bool changed = brightness != s_status.effective_brightness_percent;
+    s_status.night_mode_active = active;
+    portEXIT_CRITICAL(&s_lock);
+    if (!changed) return;
+    const esp_err_t result = apply_brightness(brightness);
+    portENTER_CRITICAL(&s_lock);
+    s_status.brightness_result = result;
+    if (result == ESP_OK) s_status.effective_brightness_percent = brightness;
+    portEXIT_CRITICAL(&s_lock);
 }
 
 static void fill_notification_tone(int16_t *samples, uint8_t phase_step)
@@ -222,7 +255,9 @@ static void finish_save_if_complete(void)
                        flash.device_control_profile.brightness_percent ==
                            s_submitted_profile.brightness_percent &&
                        flash.device_control_profile.volume_percent ==
-                           s_submitted_profile.volume_percent;
+                           s_submitted_profile.volume_percent &&
+                       flash.device_control_profile.night_mode_enabled ==
+                           s_submitted_profile.night_mode_enabled;
     if (saved) {
         if ((s_submitted_mask & DEVICE_CONTROL_BRIGHTNESS_MASK) != 0U &&
             s_status.brightness_percent == s_submitted_profile.brightness_percent) {
@@ -235,6 +270,11 @@ static void finish_save_if_complete(void)
             completed_mask |= DEVICE_CONTROL_VOLUME_MASK;
         }
         s_status.save_result = ESP_OK;
+        if ((s_submitted_mask & DEVICE_CONTROL_NIGHT_MASK) != 0U &&
+            s_status.night_mode_enabled == (s_submitted_profile.night_mode_enabled != 0U)) {
+            s_dirty_mask &= (uint8_t)~DEVICE_CONTROL_NIGHT_MASK;
+            completed_mask |= DEVICE_CONTROL_NIGHT_MASK;
+        }
     } else {
         completed_mask = s_submitted_mask;
         s_dirty_mask = 0U;
@@ -263,6 +303,7 @@ static void submit_dirty_profile(void)
     profile = (device_control_profile_t){
         .brightness_percent = s_status.brightness_percent,
         .volume_percent = s_status.volume_percent,
+        .night_mode_enabled = s_status.night_mode_enabled ? 1U : 0U,
     };
     mask = s_dirty_mask;
     portEXIT_CRITICAL(&s_lock);
@@ -304,6 +345,7 @@ static void device_control_task(void *arg)
             }
         } else {
             apply_pending_controls();
+            apply_night_schedule();
             play_pending_notification_tone();
             finish_save_if_complete();
             submit_dirty_profile();
@@ -371,6 +413,25 @@ esp_err_t device_control_set_brightness(uint8_t percent)
 esp_err_t device_control_set_volume(uint8_t percent)
 {
     return request_update(percent, false);
+}
+
+esp_err_t device_control_set_night_mode(bool enabled)
+{
+    portENTER_CRITICAL(&s_lock);
+    if (!s_started || !s_status.ready || s_task == NULL) {
+        portEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_status.night_mode_enabled != enabled) {
+        s_status.night_mode_enabled = enabled;
+        s_dirty_mask |= DEVICE_CONTROL_NIGHT_MASK;
+        s_status.persistence_pending = true;
+        s_last_change_tick = xTaskGetTickCount();
+    }
+    const TaskHandle_t task = s_task;
+    portEXIT_CRITICAL(&s_lock);
+    xTaskNotifyGive(task);
+    return ESP_OK;
 }
 
 esp_err_t device_control_play_notification_tone(void)

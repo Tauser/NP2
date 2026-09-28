@@ -59,6 +59,7 @@ typedef struct {
     bool navigation_pending;
     bool notification_feedback_initialized;
     bool syncing_notification_controls;
+    bool syncing_night_control;
     bool home_data_rendered;
     bool settings_controls_initialized;
     bool settings_notification_callbacks_initialized;
@@ -78,6 +79,7 @@ static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
 static void install_settings_control_callbacks(void);
 static void settings_value_bubble_timer_cb(lv_timer_t *timer);
+static void night_switch_event_cb(lv_event_t *event);
 static void notification_switch_event_cb(lv_event_t *event);
 static void notifications_test_event_cb(lv_event_t *event);
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
@@ -219,6 +221,8 @@ static void install_settings_control_callbacks(void)
         s_ui.projected_brightness = projection.device_controls.brightness_percent;
         s_ui.projected_volume = projection.device_controls.volume_percent;
         s_ui.settings_controls_initialized = true;
+        lv_obj_add_event_cb(s_ui.settings.night_switch, night_switch_event_cb,
+                            LV_EVENT_VALUE_CHANGED, NULL);
 
         settings_set_percent(s_ui.settings.brightness_slider,
                              s_ui.settings.brightness_value,
@@ -1236,6 +1240,20 @@ static void update_settings(const app_ui_projection_t *projection)
                 projection->network.online ? "Conectado" : "Sem conexao");
 
     if (s_ui.settings_controls_initialized && projection->device_controls.ready) {
+        s_ui.syncing_night_control = true;
+        if (projection->device_controls.night_mode_enabled) {
+            lv_obj_add_state(s_ui.settings.night_switch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(s_ui.settings.night_switch, LV_STATE_CHECKED);
+        }
+        s_ui.syncing_night_control = false;
+        np_set_text(s_ui.settings.night_detail,
+                    !projection->device_controls.night_mode_enabled
+                        ? "22:00 - 06:00 · brilho ate 15%"
+                        : !projection->time_trusted ? "Aguardando horario confiavel"
+                        : projection->device_controls.night_mode_active
+                            ? "Ativo · brilho limitado a 15%"
+                            : "22:00 - 06:00 · programado");
         if (projection->device_controls.brightness_percent != s_ui.projected_brightness) {
             s_ui.projected_brightness = projection->device_controls.brightness_percent;
             settings_set_percent(s_ui.settings.brightness_slider,
@@ -1262,6 +1280,17 @@ static void update_settings(const app_ui_projection_t *projection)
                 projection->notifications.persistence_pending
                     ? "Atualizando..."
                     : projection->notifications.general_enabled ? "Ativadas" : "Silenciadas");
+}
+
+static void night_switch_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || s_ui.syncing_night_control) return;
+    const bool enabled = lv_obj_has_state(lv_event_get_target(event), LV_STATE_CHECKED);
+    if (device_control_set_night_mode(enabled) != ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Modo noturno indisponivel", NULL, 2200U);
+    }
+    (void)app_state_request_refresh();
 }
 
 static void install_home_navigation_callbacks(void);
@@ -1297,7 +1326,9 @@ static void refresh_timer_cb(lv_timer_t *timer)
         s_ui.control_save_completion_id) {
         s_ui.control_save_completion_id = projection.device_controls.save_completion_id;
         const uint8_t mask = projection.device_controls.save_completion_mask;
-        const char *const title = (mask & (DEVICE_CONTROL_BRIGHTNESS_MASK |
+        const char *const title = (mask & DEVICE_CONTROL_NIGHT_MASK) != 0U
+                                      ? "Preferencias da tela salvas"
+                                      : (mask & (DEVICE_CONTROL_BRIGHTNESS_MASK |
                                            DEVICE_CONTROL_VOLUME_MASK)) ==
                                           (DEVICE_CONTROL_BRIGHTNESS_MASK |
                                            DEVICE_CONTROL_VOLUME_MASK)
