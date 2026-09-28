@@ -117,6 +117,9 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
     np_set_text(wifi->detail_value, online ? "Internet disponivel" :
                                             "Nenhuma rede ativa");
 
+    /* Settings projects network state before this lazy modal exists. */
+    if (wifi->network_rows[0] == NULL) return;
+
     const uint8_t count = scan_results_count < NP_SETTINGS_WIFI_VISIBLE_RESULTS
                               ? scan_results_count : NP_SETTINGS_WIFI_VISIBLE_RESULTS;
     for (uint8_t i = 0; i < NP_SETTINGS_WIFI_VISIBLE_RESULTS; ++i) {
