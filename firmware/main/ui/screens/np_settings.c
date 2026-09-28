@@ -278,6 +278,14 @@ np_settings_view_t np_settings_begin(lv_obj_t *parent)
     view.header = np_header(view.root);
     view.home_button = NULL;
 
+    /* Modal trees are compact and are created once before the scene becomes
+     * visible. Building them from separate timer turns caused an LVGL style
+     * fault on the physical target. */
+    np_settings_wifi_create(&view.wifi, view.root);
+    np_settings_timezone_create(&view.timezone, view.root);
+    np_settings_notifications_create(&view.notifications, view.root);
+    np_settings_system_create(&view.system, view.root);
+
     return view;
 }
 
@@ -299,30 +307,10 @@ bool np_settings_build_next_card(np_settings_view_t *view)
         view->right_card = view->left_card;
 
         np_set_visible(view->left_card, false);
-        return true;
-    }
-
-    if (view->wifi.modal.scrim == NULL) {
-        np_settings_wifi_create(&view->wifi, view->root);
         np_settings_wifi_bind_row(&view->wifi, view->wifi_row);
-        return true;
-    }
-
-    if (view->timezone.modal.scrim == NULL) {
-        np_settings_timezone_create(&view->timezone, view->root);
         np_settings_timezone_bind_row(&view->timezone, view->timezone_row);
-        return true;
-    }
-
-    if (view->notifications.modal.scrim == NULL) {
-        np_settings_notifications_create(&view->notifications, view->root);
         np_settings_notifications_bind_row(&view->notifications,
                                            view->notifications_row);
-        return true;
-    }
-
-    if (view->system.modal.scrim == NULL) {
-        np_settings_system_create(&view->system, view->root);
         np_settings_system_bind_row(&view->system, view->system_row);
         return true;
     }

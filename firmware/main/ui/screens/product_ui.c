@@ -23,7 +23,7 @@
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define SETTINGS_STAGE_INTERVAL_MS 80U
-#define SETTINGS_STAGE_COUNT 5U
+#define SETTINGS_STAGE_COUNT 1U
 
 typedef struct {
     enum {
