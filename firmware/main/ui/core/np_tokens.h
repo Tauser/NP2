@@ -119,6 +119,9 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_FONT_ICON_BADGE (&ui_font_np_material_48)
 #define NP_ICON_MENU          "\xEE\xA6\xB9"
 #define NP_ICON_WIFI          "\xEE\x98\xBE"
+#define NP_ICON_WIFI_LOW      "\xEE\x93\x8A"
+#define NP_ICON_WIFI_MEDIUM   "\xEE\x93\x99"
+#define NP_ICON_WIFI_OFF      "\xEE\x99\x88"
 #define NP_ICON_BLUETOOTH     "\xEE\x86\xA7"
 #define NP_ICON_NOTIFICATIONS "\xEE\x9F\xB4"
 #define NP_ICON_SETTINGS      "\xEE\xA2\xB8"
@@ -154,6 +157,9 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_FONT_ICON_BADGE (&lv_font_montserrat_48)
 #define NP_ICON_MENU          "M"
 #define NP_ICON_WIFI          "W"
+#define NP_ICON_WIFI_LOW      "1"
+#define NP_ICON_WIFI_MEDIUM   "2"
+#define NP_ICON_WIFI_OFF      "x"
 #define NP_ICON_BLUETOOTH     "B"
 #define NP_ICON_NOTIFICATIONS "N"
 #define NP_ICON_SETTINGS      "S"

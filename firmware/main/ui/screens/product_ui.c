@@ -89,6 +89,7 @@ static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
 static void discard_wifi_password(void);
 static void discard_wifi_confirmation(void);
+static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -99,6 +100,24 @@ static np_data_state_t data_state(bool available, bool stale)
 {
     if (!available) return NP_DATA_UNAVAILABLE;
     return stale ? NP_DATA_STALE : NP_DATA_LIVE;
+}
+
+static np_wifi_status_t wifi_status_for(const app_network_projection_t *network)
+{
+    if (network == NULL) return NP_WIFI_STATUS_OFFLINE;
+    if (network->online) return NP_WIFI_STATUS_ONLINE;
+    if (network->connected_ssid[0] != '\0') {
+        return NP_WIFI_STATUS_ASSOCIATED_PENDING_IP;
+    }
+    switch (network->state) {
+    case APP_NETWORK_STATE_ASSOCIATING:
+    case APP_NETWORK_STATE_WAITING_FOR_IP:
+        return NP_WIFI_STATUS_CONNECTING;
+    case APP_NETWORK_STATE_FAILED:
+        return NP_WIFI_STATUS_FAILED;
+    default:
+        return NP_WIFI_STATUS_OFFLINE;
+    }
 }
 
 static void settings_set_percent(lv_obj_t *slider, lv_obj_t *value_label,
@@ -333,7 +352,7 @@ static void settings_modal_row_event_cb(lv_event_t *event)
             s_ui.settings_wifi_callbacks_initialized = true;
         }
         app_ui_projection_t projection = {0}; app_state_get_ui_projection(&projection);
-        np_settings_wifi_sync(&s_ui.settings.wifi, projection.network.online,
+        np_settings_wifi_sync(&s_ui.settings.wifi, wifi_status_for(&projection.network),
                               projection.network.connected_ssid,
                               projection.network.scan_results_count, projection.network.scan_results);
         np_settings_wifi_show(&s_ui.settings.wifi);
@@ -1207,7 +1226,7 @@ static void update_settings(const app_ui_projection_t *projection)
                               projection->onboarding.timezone_index);
     np_set_text(s_ui.settings.timezone_value,
                 np_settings_timezone_selected_label(&s_ui.settings.timezone));
-    np_settings_wifi_sync(&s_ui.settings.wifi, projection->network.online,
+    np_settings_wifi_sync(&s_ui.settings.wifi, wifi_status_for(&projection->network),
                           projection->network.connected_ssid,
                           projection->network.scan_results_count,
                           projection->network.scan_results);

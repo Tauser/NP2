@@ -72,15 +72,19 @@
 ## 2026-09-28 — Lista e indicador de sinal Wi-Fi
 
 - Cada rede visível mostra somente SSID, cadeado vetorial quando protegida e
-  indicador Wi-Fi de um, dois ou três níveis. As faixas usam o RSSI real do
-  scan: abaixo de -67 dBm, -67 a -56 dBm e -55 dBm ou melhor. Não há dBm ou
-  rótulo de segurança na linha.
-- O cabeçalho reutiliza o mesmo indicador quando o SSID associado aparece no
-  resultado do scan. Sem essa leitura medida, ele fica neutro; a UI não estima
-  nem publica RSSI de conexão. O divisor inferior sem função no modal foi
-  removido.
+  um glifo Material Wi-Fi de um, dois ou três níveis. As faixas usam o RSSI
+  real do scan: abaixo de -67 dBm, -67 a -56 dBm e -55 dBm ou melhor. Não há
+  dBm ou rótulo de segurança na linha.
+- O cabeçalho reutiliza os mesmos glifos quando o SSID associado aparece no
+  resultado do scan. Sem essa leitura medida, ele mostra o Wi-Fi genérico; a
+  UI não estima nem publica RSSI de conexão. O divisor inferior sem função no
+  modal foi removido.
+- O card Status mostra o SSID ao lado de um único ícone: Wi-Fi verde após IP,
+  Wi-Fi indisponível em âmbar enquanto aguarda IP, lupa ao associar, aviso na
+  falha e Wi-Fi indisponível cinza sem associação. O serviço não valida acesso
+  à internet, portanto a UI não anuncia nem diagnostica internet.
 - `idf.py build` passou com IDF 5.5.4/`esp32p4`; aplicação `0x2a2550` B,
-  67% livres no slot OTA. SHA-256 P4: `A7E62F153AF93D86F46FF97D42637EF01E096ED1817A82CA882BFB8D4502615D`.
+  67% livres no slot OTA. SHA-256 P4: `06F8AE5170410FB8CA643B2518E02ED0E1E75B973D698B8B4BCA6AD04F437642`.
 
 ## Imagem final para flash manual
 
@@ -110,8 +114,10 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
    apresentar associação antiga. Com IP e sem internet, não afirmar internet.
 4. Gerenciar redes e lupa usam busca limitada, sem abrir o setup legado.
 5. Conferir a lista de redes: cada linha deve conter somente SSID, cadeado
-   quando protegida e intensidade de sinal compatível com o RSSI do scan; o
-   cabeçalho usa o mesmo desenho para o SSID conectado quando o scan o mediu.
+   quando protegida e glifo Material compatível com o RSSI do scan; o cabeçalho
+   usa a mesma família de glifos para o SSID conectado quando o scan o mediu.
+   Conferir também o card Status com SSID e um ícone para associação, IP obtido,
+   associação em curso, falha e ausência de associação.
 6. Selecionar rede protegida → Conectar rede: verificar que o diálogo fica
    inteiramente acima do teclado e que o teclado compartilhado aparece na
    frente dele; tocar novamente no campo deve reabri-lo após recolher. Verificar

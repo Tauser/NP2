@@ -1,5 +1,6 @@
 #include "np_settings_wifi.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define SETTINGS_WIFI_MODAL_X 160
@@ -81,7 +82,8 @@ static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
     wifi->network_names[index] = np_label(row, "", NP_FONT_SM, np_c_text(),
                                           14, 16, 224, LV_TEXT_ALIGN_LEFT);
     wifi->network_locks[index] = network_lock(row);
-    wifi->network_signals[index] = np_wifi_signal_create(row, 278, 10, 28);
+    wifi->network_signals[index] = np_label(row, "", NP_FONT_ICON, np_c_text_2(),
+                                            278, 12, 28, LV_TEXT_ALIGN_CENTER);
     lv_obj_add_event_cb(row, network_event_cb, LV_EVENT_CLICKED, wifi);
     return row;
 }
@@ -102,14 +104,14 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
     lv_obj_t *const status = np_fill(content, 24, 20, 316, 306,
                                      np_c_surface_raised(), LV_OPA_COVER, NP_RADIUS_SURFACE);
     np_label(status, "Status", NP_FONT_SM, np_c_text_3(), 28, 28, 220, LV_TEXT_ALIGN_LEFT);
-    wifi->status_value = np_label(status, "--", NP_FONT_MD, np_c_text(),
-                                  28, 69, 240, LV_TEXT_ALIGN_LEFT);
-    wifi->detail_value = np_label(status, "Aguardando estado da rede", NP_FONT_SM,
-                                  np_c_text_2(), 28, 112, 260, LV_TEXT_ALIGN_LEFT);
-    np_hline(status, 28, 155, 260);
+    wifi->status_icon = np_label(status, NP_ICON_WIFI_OFF, NP_FONT_ICON, np_c_text_3(),
+                                 28, 64, 28, LV_TEXT_ALIGN_CENTER);
+    wifi->detail_value = np_label(status, "Nenhuma rede associada", NP_FONT_MD,
+                                  np_c_text_2(), 68, 69, 220, LV_TEXT_ALIGN_LEFT);
+    np_hline(status, 28, 119, 260);
     np_label(status, "Credenciais protegidas pelo servico", NP_FONT_SM,
-             np_c_text_3(), 28, 181, 260, LV_TEXT_ALIGN_LEFT);
-    wifi->manage_button = np_button(status, 28, 224, 260, 52, "Gerenciar redes", false);
+             np_c_text_3(), 28, 145, 260, LV_TEXT_ALIGN_LEFT);
+    wifi->manage_button = np_button(status, 28, 204, 260, 52, "Gerenciar redes", false);
     wifi->forget_button = np_button(content, 24, 342, 316, 52, "Esquecer rede", false);
 
     lv_obj_t *const networks = np_fill(content, 360, 20, 320, 306,
@@ -143,14 +145,46 @@ void np_settings_wifi_bind_row(np_settings_wifi_t *wifi, lv_obj_t *row)
     }
 }
 
-void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *connected_ssid,
+void np_settings_wifi_sync(np_settings_wifi_t *wifi, np_wifi_status_t status,
+                           const char *connected_ssid,
                            uint8_t scan_results_count,
                            const connectivity_scan_result_t *scan_results)
 {
     if (wifi == NULL) return;
-    np_set_text(wifi->status_value, online ? "Conectado" : "Sem conexao");
-    np_set_text(wifi->detail_value, connected_ssid != NULL && connected_ssid[0] != '\0'
-                                       ? connected_ssid : "Nenhuma rede associada");
+    const char *status_icon = NP_ICON_WIFI_OFF;
+    const char *status_text = "Nenhuma rede associada";
+    lv_color_t status_color = np_c_text_3();
+    switch (status) {
+    case NP_WIFI_STATUS_ONLINE:
+        status_icon = NP_ICON_WIFI;
+        status_text = connected_ssid != NULL && connected_ssid[0] != '\0'
+                          ? connected_ssid : "Conectado";
+        status_color = np_c_positive();
+        break;
+    case NP_WIFI_STATUS_ASSOCIATED_PENDING_IP:
+        status_icon = NP_ICON_WIFI_OFF;
+        status_text = connected_ssid != NULL && connected_ssid[0] != '\0'
+                          ? connected_ssid : "Aguardando IP";
+        status_color = np_c_warning();
+        break;
+    case NP_WIFI_STATUS_CONNECTING:
+        status_icon = NP_ICON_SEARCH;
+        status_text = "Conectando";
+        status_color = np_c_accent();
+        break;
+    case NP_WIFI_STATUS_FAILED:
+        status_icon = NP_ICON_WARNING;
+        status_text = "Conexao indisponivel";
+        status_color = np_c_negative();
+        break;
+    case NP_WIFI_STATUS_OFFLINE:
+    default:
+        break;
+    }
+    np_set_text(wifi->status_icon, status_icon);
+    np_set_text_color(wifi->status_icon, status_color);
+    np_set_text(wifi->detail_value, status_text);
+    np_set_text_color(wifi->detail_value, status_color);
 
     /* Settings projects network state before this lazy modal exists. */
     if (wifi->network_rows[0] == NULL) return;
@@ -166,8 +200,7 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *co
 
         np_set_text(wifi->network_names[i], scan_results[i].ssid);
         np_set_visible(wifi->network_locks[i], scan_results[i].secure);
-        np_wifi_signal_set(&wifi->network_signals[i], scan_results[i].rssi,
-                           true, np_c_text_2());
+        np_set_text(wifi->network_signals[i], np_wifi_signal_icon(scan_results[i].rssi));
         wifi->network_secure[i] = scan_results[i].secure;
         if (strcmp(wifi->selected_ssid, scan_results[i].ssid) == 0) selected = i;
     }

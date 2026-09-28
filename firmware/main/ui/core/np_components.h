@@ -141,17 +141,7 @@ void np_clock_set(np_clock_t *clock, const char *hhmm);
 lv_obj_t *np_button(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
                     const char *text, bool primary);
 
-typedef struct {
-    lv_obj_t *root;
-    lv_obj_t *outer_arc;
-    lv_obj_t *inner_arc;
-    lv_obj_t *dot;
-} np_wifi_signal_t;
-
-np_wifi_signal_t np_wifi_signal_create(lv_obj_t *parent, int32_t x, int32_t y,
-                                       int32_t size);
-void np_wifi_signal_set(np_wifi_signal_t *signal, int8_t rssi, bool measured,
-                        lv_color_t color);
+const char *np_wifi_signal_icon(int8_t rssi);
 
 typedef struct {
     lv_obj_t *menu_button;
@@ -159,7 +149,6 @@ typedef struct {
     lv_obj_t *drawer_settings_button;
     lv_obj_t *settings_button;
     lv_obj_t *wifi_button;
-    np_wifi_signal_t wifi_signal;
     lv_obj_t *bluetooth_button;
     lv_obj_t *notifications_button;
     lv_obj_t *alert_dot;
