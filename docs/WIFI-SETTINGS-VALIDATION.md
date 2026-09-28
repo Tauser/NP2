@@ -22,8 +22,10 @@
 
 ## 2026-09-28 — Diálogo compacto de senha
 
-- Diálogo filho lazy de 640 × 500, com um teclado matricial sem textarea.
-  Abertura e liberação anterior ocorrem após o callback de toque.
+- Diálogo filho lazy de 384 × 258, acima do teclado persistente de tela. O
+  teclado compartilhado é trazido para frente do diálogo quando a senha é
+  solicitada e pode ser reaberto ao tocar no campo; não há segundo teclado nem
+  textarea na árvore do modal.
 - Senha somente no serviço; Mostrar/Ocultar usa caracteres transitórios no
   desenho (autorização do responsável, ADR-040). Cancelar/fechar/sair/submeter
   zeram o buffer e revogam a exibição. Rede aberta exige senha vazia;
@@ -47,14 +49,25 @@
   mantém o prompt aberto para tentar novamente. Senha e confirmação nunca
   coexistem como diálogos filhos alocados.
 - O fluxo de senha foi versionado em `71c1eef` após build e teste host.
-- Revisão do teclado: as células de cursor sem uso agora oferecem `|` e crase
-  em abc/ABC, e `~`/`^` em símbolos, completando o ASCII imprimível. A seleção
-  de rede só atualiza bordas/fundo quando muda, sem invalidar linhas em cada
-  projeção de relógio.
+- A seleção de rede só atualiza bordas/fundo quando muda, sem invalidar linhas
+  em cada projeção de relógio.
 - `idf.py build` passou com IDF 5.5.4/`esp32p4`, aplicação `0x2a1fe0` B,
   67% livres no slot OTA; sem novos warnings de compilação. SHA-256 P4:
   `9FB13EEE395FA25E6A58B2FD175C109B31482D44F8756325939BDAAE1A809BE9`.
   O descritor da imagem pré-commit identifica `71c1eef-dirty`.
+
+## 2026-09-28 — Correção do teclado compartilhado
+
+- O diálogo de senha não instancia mais um teclado interno. O componente
+  persistente de tela recebe somente rótulos públicos das teclas e encaminha-os
+  para a ponte existente; sua ordem é movida para frente do diálogo ao abrir.
+  Recolher o teclado não fecha o diálogo, e tocar no campo o abre novamente.
+- O texto temporário do campo passou a usar a altura da fonte para centralização
+  vertical e mostra os últimos caracteres que ainda cabem. Nenhuma senha é
+  armazenada ou concatenada na UI.
+- `tools/run_provisioning_touch_host_test.ps1` passou com GCC e `-Werror`.
+  `idf.py build` passou com IDF 5.5.4/`esp32p4`; aplicação `0x2a2070` B,
+  67% livres no slot OTA. SHA-256 P4: `6081228A809E9B660CCD7BD621DBDA669D4E1A3FF3418E0A1878097B5A1DE502`.
 
 ## Imagem final para flash manual
 
@@ -83,12 +96,14 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
 3. Conferir SSID com o AP real; desligar AP e verificar que Status deixa de
    apresentar associação antiga. Com IP e sem internet, não afirmar internet.
 4. Gerenciar redes e lupa usam busca limitada, sem abrir o setup legado.
-5. Selecionar rede protegida → Conectar rede: verificar SSID, teclado, letras
-   maiúsculas/minúsculas, símbolos e espaço, apagar, máscara e Mostrar/Ocultar.
+5. Selecionar rede protegida → Conectar rede: verificar que o diálogo fica
+   inteiramente acima do teclado e que o teclado compartilhado aparece na
+   frente dele; tocar novamente no campo deve reabri-lo após recolher. Verificar
+   SSID, letras maiúsculas/minúsculas, símbolos e espaço, apagar, máscara e
+   Mostrar/Ocultar.
    Com 7 caracteres Conectar deve estar desabilitado; com 8 e 63 habilitado;
    a 64ª tecla deve ser recusada. Cancelar e X devem voltar ao Wi-Fi e uma
    nova entrada começa vazia/mascarada. Repetir 100 ciclos para avaliar heap.
-   Conferir também `|`, crase, `~` e `^` ao alternar os modos de teclado.
 6. Submeter senha incorreta e correta; UI continua operável e só apresenta
    associação/SSID quando o rádio confirmar. Testar rede aberta sem senha.
    Confirmar ausência de segredo em logs e projeções; não exportar dump bruto

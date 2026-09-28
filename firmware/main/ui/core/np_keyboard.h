@@ -19,6 +19,8 @@ typedef enum {
 #define NP_KEYBOARD_MAX_BINDINGS 8U
 
 typedef struct np_keyboard np_keyboard_t;
+/* Keys are public labels from the keyboard matrix, never entered text. */
+typedef void (*np_keyboard_input_cb_t)(void *user_data, const char *key);
 
 typedef struct {
     np_keyboard_t *owner;
@@ -34,6 +36,9 @@ struct np_keyboard {
     bool interaction_inside_keyboard;
     bool reconcile_pending;
     bool keyboard_events_registered;
+    bool private_input_active;
+    np_keyboard_input_cb_t private_input;
+    void *private_input_user_data;
     uint32_t lifecycle_generation;
 };
 
@@ -42,6 +47,8 @@ void np_keyboard_bind(np_keyboard_t *keyboard, lv_obj_t *textarea,
                       np_keyboard_mode_t mode);
 void np_keyboard_focus(np_keyboard_t *keyboard, lv_obj_t *textarea,
                        np_keyboard_mode_t mode);
+void np_keyboard_open(np_keyboard_t *keyboard, np_keyboard_mode_t mode,
+                      np_keyboard_input_cb_t input, void *user_data);
 void np_keyboard_hide(np_keyboard_t *keyboard);
 void np_keyboard_clear_target(np_keyboard_t *keyboard);
 bool np_keyboard_is_visible(const np_keyboard_t *keyboard);

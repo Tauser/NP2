@@ -436,6 +436,7 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
 
 static void discard_wifi_password(void)
 {
+    np_keyboard_hide(&s_ui.keyboard);
     provisioning_service_touch_cancel();
     if (s_ui.wifi_password.modal.scrim != NULL) {
         lv_obj_delete(s_ui.wifi_password.modal.scrim);
@@ -513,15 +514,21 @@ static void wifi_password_draw(lv_event_t *event)
     provisioning_service_get_status(&status);
     /* Draw individual glyphs only. No password string, textarea or label;
      * each descriptor lives only for the current rendering pass. */
-    for (uint8_t i = 0U; i < status.touch_password_length && i < 63U; ++i) {
+    const int32_t advance = 12;
+    const uint8_t max_visible = (uint8_t)((lv_area_get_width(&area) - 32) / advance);
+    const uint8_t first = status.touch_password_length > max_visible ?
+                          status.touch_password_length - max_visible : 0U;
+    const int32_t baseline = area.y1 +
+                             (lv_area_get_height(&area) - NP_FONT_SM->line_height) / 2;
+    for (uint8_t i = first; i < status.touch_password_length && i < 63U; ++i) {
         lv_draw_letter_dsc_t glyph;
         lv_draw_letter_dsc_init(&glyph);
         glyph.font = NP_FONT_SM;
         glyph.color = np_c_text();
         glyph.unicode = provisioning_service_touch_display_character(i);
         if (glyph.unicode == 0U) break;
-        const lv_point_t point = {.x = area.x1 + 12 + (i % 32U) * 17,
-                                  .y = area.y1 + 8 + (i / 32U) * 26};
+        const lv_point_t point = {.x = area.x1 + 16 + (i - first) * advance,
+                                  .y = baseline};
         lv_draw_letter(layer, &glyph, &point);
         glyph.unicode = 0U;
     }
@@ -540,6 +547,7 @@ static void wifi_password_open_async(void *user_data)
     if (result == ESP_OK) {
         np_keyboard_hide(&s_ui.keyboard);
         np_wifi_password_create(&s_ui.wifi_password, s_ui.settings.wifi.modal.scrim,
+                                 &s_ui.keyboard,
                                  s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure,
                                  wifi_password_action, wifi_password_draw);
     } else {

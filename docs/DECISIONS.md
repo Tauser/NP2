@@ -1013,7 +1013,8 @@ Wi-Fi criar sob demanda apenas um diálogo filho compacto. Gerenciar redes
 faz scan no próprio modal. Seleção segue o SSID público, e o Status recebe
 somente a associação real publicada pelo rádio → serviço → `app_loop` → UI.
 
-O diálogo de senha usa teclado matricial sem textarea. A UI guarda apenas
+O diálogo de senha usa o teclado matricial persistente da tela, que é trazido
+para frente do diálogo durante a entrada, sem textarea. A UI guarda apenas
 SSID público, comprimento e visibilidade; `product_ui` faz a ponte das teclas
 para o buffer privado do `provisioning_service`. O responsável autorizou em
 2026-09-28 Mostrar senha por desenho temporário sem texto em widgets: cada

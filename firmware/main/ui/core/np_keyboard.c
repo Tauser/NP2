@@ -1,5 +1,7 @@
 #include "np_keyboard.h"
 
+#include <string.h>
+
 #define NP_KEYBOARD_Y 370
 #define NP_KEYBOARD_H 230
 
@@ -65,9 +67,52 @@ static void keyboard_event_cb(lv_event_t *event)
     const lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_PRESSED) {
         keyboard->interaction_inside_keyboard = true;
-    } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        np_keyboard_hide(keyboard);
+        return;
     }
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        if (!keyboard->private_input_active) np_keyboard_hide(keyboard);
+        return;
+    }
+    if (code != LV_EVENT_VALUE_CHANGED || !keyboard->private_input_active ||
+        keyboard->private_input == NULL) return;
+
+    const uint32_t index = lv_keyboard_get_selected_button(keyboard->keyboard);
+    if (index == LV_BUTTONMATRIX_BUTTON_NONE) return;
+    const char *const key = lv_keyboard_get_button_text(keyboard->keyboard, index);
+    if (key == NULL) return;
+    if (strcmp(key, "abc") == 0) {
+        lv_keyboard_set_mode(keyboard->keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    } else if (strcmp(key, "ABC") == 0) {
+        lv_keyboard_set_mode(keyboard->keyboard, LV_KEYBOARD_MODE_TEXT_UPPER);
+    } else if (strcmp(key, "1#") == 0) {
+        lv_keyboard_set_mode(keyboard->keyboard, LV_KEYBOARD_MODE_SPECIAL);
+    } else if (strcmp(key, LV_SYMBOL_KEYBOARD) == 0 ||
+               strcmp(key, LV_SYMBOL_CLOSE) == 0) {
+        np_keyboard_hide(keyboard);
+    } else {
+        keyboard->private_input(keyboard->private_input_user_data, key);
+    }
+}
+
+static void stop_private_input(np_keyboard_t *keyboard)
+{
+    if (keyboard == NULL || !keyboard->private_input_active) return;
+    keyboard->private_input_active = false;
+    keyboard->private_input = NULL;
+    keyboard->private_input_user_data = NULL;
+    if (keyboard->keyboard != NULL) {
+        lv_obj_add_event_cb(keyboard->keyboard, lv_keyboard_def_event_cb,
+                            LV_EVENT_VALUE_CHANGED, NULL);
+    }
+}
+
+static void ensure_keyboard_events(np_keyboard_t *keyboard)
+{
+    if (keyboard == NULL || keyboard->keyboard == NULL ||
+        keyboard->keyboard_events_registered) return;
+    lv_obj_add_event_cb(keyboard->keyboard, keyboard_event_cb, LV_EVENT_ALL,
+                        keyboard);
+    keyboard->keyboard_events_registered = true;
 }
 
 static lv_keyboard_mode_t lv_mode(np_keyboard_mode_t mode)
@@ -113,11 +158,7 @@ void np_keyboard_bind(np_keyboard_t *keyboard, lv_obj_t *textarea,
                       np_keyboard_mode_t mode)
 {
     if (keyboard == NULL || keyboard->keyboard == NULL || textarea == NULL) return;
-    if (!keyboard->keyboard_events_registered) {
-        lv_obj_add_event_cb(keyboard->keyboard, keyboard_event_cb, LV_EVENT_ALL,
-                            keyboard);
-        keyboard->keyboard_events_registered = true;
-    }
+    ensure_keyboard_events(keyboard);
     if (mode == NP_KEYBOARD_MODE_PASSWORD) {
         lv_textarea_set_password_mode(textarea, true);
     }
@@ -143,10 +184,31 @@ void np_keyboard_focus(np_keyboard_t *keyboard, lv_obj_t *textarea,
 {
     if (keyboard == NULL || keyboard->root == NULL ||
         keyboard->keyboard == NULL || textarea == NULL) return;
+    stop_private_input(keyboard);
     keyboard->target = textarea;
     keyboard->interaction_inside_keyboard = false;
     lv_keyboard_set_mode(keyboard->keyboard, lv_mode(mode));
     lv_keyboard_set_textarea(keyboard->keyboard, textarea);
+    lv_obj_move_foreground(keyboard->root);
+    np_set_visible(keyboard->root, true);
+}
+
+void np_keyboard_open(np_keyboard_t *keyboard, np_keyboard_mode_t mode,
+                      np_keyboard_input_cb_t input, void *user_data)
+{
+    if (keyboard == NULL || keyboard->root == NULL || keyboard->keyboard == NULL ||
+        input == NULL) return;
+    ensure_keyboard_events(keyboard);
+    np_keyboard_clear_target(keyboard);
+    stop_private_input(keyboard);
+    /* The standard callback sends text to a textarea and closes on OK. This
+     * private session intentionally has neither; its caller owns the input. */
+    lv_obj_remove_event_cb(keyboard->keyboard, lv_keyboard_def_event_cb);
+    keyboard->private_input_active = true;
+    keyboard->private_input = input;
+    keyboard->private_input_user_data = user_data;
+    lv_keyboard_set_mode(keyboard->keyboard, lv_mode(mode));
+    lv_keyboard_set_textarea(keyboard->keyboard, NULL);
     lv_obj_move_foreground(keyboard->root);
     np_set_visible(keyboard->root, true);
 }
@@ -164,6 +226,7 @@ void np_keyboard_hide(np_keyboard_t *keyboard)
 {
     if (keyboard == NULL) return;
     np_keyboard_clear_target(keyboard);
+    stop_private_input(keyboard);
     if (keyboard->root != NULL) np_set_visible(keyboard->root, false);
 }
 

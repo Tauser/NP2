@@ -1,5 +1,6 @@
 #pragma once
 
+#include "np_keyboard.h"
 #include "np_modal.h"
 
 typedef enum {
@@ -20,15 +21,14 @@ typedef struct {
     lv_obj_t *hint;
     lv_obj_t *reveal;
     lv_obj_t *connect;
-    lv_obj_t *keyboard;
-    /* Public key labels only; no entered text. */
-    const char *key_map[64];
+    np_keyboard_t *keyboard;
     bool secure;
     bool visible;
     np_wifi_password_action_cb_t action;
 } np_wifi_password_t;
 
 void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
+                              np_keyboard_t *keyboard,
                               const char *ssid, bool secure,
                               np_wifi_password_action_cb_t action,
                               lv_event_cb_t draw);
