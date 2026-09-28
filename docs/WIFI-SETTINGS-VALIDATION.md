@@ -69,6 +69,19 @@
   `idf.py build` passou com IDF 5.5.4/`esp32p4`; aplicação `0x2a2070` B,
   67% livres no slot OTA. SHA-256 P4: `6081228A809E9B660CCD7BD621DBDA669D4E1A3FF3418E0A1878097B5A1DE502`.
 
+## 2026-09-28 — Lista e indicador de sinal Wi-Fi
+
+- Cada rede visível mostra somente SSID, cadeado vetorial quando protegida e
+  indicador Wi-Fi de um, dois ou três níveis. As faixas usam o RSSI real do
+  scan: abaixo de -67 dBm, -67 a -56 dBm e -55 dBm ou melhor. Não há dBm ou
+  rótulo de segurança na linha.
+- O cabeçalho reutiliza o mesmo indicador quando o SSID associado aparece no
+  resultado do scan. Sem essa leitura medida, ele fica neutro; a UI não estima
+  nem publica RSSI de conexão. O divisor inferior sem função no modal foi
+  removido.
+- `idf.py build` passou com IDF 5.5.4/`esp32p4`; aplicação `0x2a2550` B,
+  67% livres no slot OTA. SHA-256 P4: `A7E62F153AF93D86F46FF97D42637EF01E096ED1817A82CA882BFB8D4502615D`.
+
 ## Imagem final para flash manual
 
 - Base da revisão final: `62d04ba`. `idf.py build` passou para `esp32p4`
@@ -96,7 +109,10 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
 3. Conferir SSID com o AP real; desligar AP e verificar que Status deixa de
    apresentar associação antiga. Com IP e sem internet, não afirmar internet.
 4. Gerenciar redes e lupa usam busca limitada, sem abrir o setup legado.
-5. Selecionar rede protegida → Conectar rede: verificar que o diálogo fica
+5. Conferir a lista de redes: cada linha deve conter somente SSID, cadeado
+   quando protegida e intensidade de sinal compatível com o RSSI do scan; o
+   cabeçalho usa o mesmo desenho para o SSID conectado quando o scan o mediu.
+6. Selecionar rede protegida → Conectar rede: verificar que o diálogo fica
    inteiramente acima do teclado e que o teclado compartilhado aparece na
    frente dele; tocar novamente no campo deve reabri-lo após recolher. Verificar
    SSID, letras maiúsculas/minúsculas, símbolos e espaço, apagar, máscara e
@@ -104,11 +120,11 @@ RGB565/180°/TRIPLE_PARTIAL/três framebuffers, auto-suspend desativado.
    Com 7 caracteres Conectar deve estar desabilitado; com 8 e 63 habilitado;
    a 64ª tecla deve ser recusada. Cancelar e X devem voltar ao Wi-Fi e uma
    nova entrada começa vazia/mascarada. Repetir 100 ciclos para avaliar heap.
-6. Submeter senha incorreta e correta; UI continua operável e só apresenta
+7. Submeter senha incorreta e correta; UI continua operável e só apresenta
    associação/SSID quando o rádio confirmar. Testar rede aberta sem senha.
    Confirmar ausência de segredo em logs e projeções; não exportar dump bruto
    enquanto existirem credenciais ou pixels da revelação.
-7. Esquecer rede → Cancelar e X: associação e credencial devem permanecer.
+8. Esquecer rede → Cancelar e X: associação e credencial devem permanecer.
    Esquecer rede → confirmar: um único pedido, desconexão e SSID limpo após
    processamento; reboot não deve reassociar com a credencial removida.
    Em recusa por serviço ocupado, manter confirmação aberta sem anunciar

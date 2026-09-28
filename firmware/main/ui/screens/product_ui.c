@@ -740,10 +740,24 @@ static void update_header(np_header_t *header,
 {
     if (header == NULL || projection == NULL) return;
 
+    int8_t connected_rssi = 0;
+    bool connected_rssi_measured = false;
+    for (uint8_t i = 0; i < projection->network.scan_results_count; ++i) {
+        const connectivity_scan_result_t *const network = &projection->network.scan_results[i];
+        if (projection->network.connected_ssid[0] != '\0' &&
+            strcmp(network->ssid, projection->network.connected_ssid) == 0) {
+            connected_rssi = network->rssi;
+            connected_rssi_measured = true;
+            break;
+        }
+    }
+
     np_header_set_drawer_active(header, settings_active);
     np_header_set_connections(
         header,
         projection->network.online,
+        connected_rssi,
+        connected_rssi_measured,
         false,
         projection->network.state == APP_NETWORK_STATE_FAILED ||
             projection->storage.last_result != ESP_OK);

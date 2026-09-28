@@ -1,6 +1,5 @@
 #include "np_settings_wifi.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #define SETTINGS_WIFI_MODAL_X 160
@@ -52,6 +51,25 @@ static void network_event_cb(lv_event_t *event)
     }
 }
 
+static lv_obj_t *network_lock(lv_obj_t *parent)
+{
+    lv_obj_t *const root = np_group(parent, 246, 12, 20, 24);
+    lv_obj_t *const shackle = lv_arc_create(root);
+    lv_obj_remove_style_all(shackle);
+    lv_obj_set_pos(shackle, 4, 1);
+    lv_obj_set_size(shackle, 12, 14);
+    lv_obj_set_style_pad_all(shackle, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(shackle, 2, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(shackle, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(shackle, np_c_text_2(), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(shackle, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(shackle, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_arc_set_bg_angles(shackle, 180, 360);
+    lv_obj_remove_flag(shackle, LV_OBJ_FLAG_CLICKABLE);
+    (void)np_fill(root, 3, 11, 14, 10, np_c_text_2(), LV_OPA_COVER, 2);
+    return root;
+}
+
 static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
 {
     lv_obj_t *const row = np_fill(wifi->modal.content, 360, 70 + index * 49,
@@ -60,12 +78,10 @@ static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, np_c_hairline(), 0);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    np_label(row, NP_ICON_WIFI, NP_FONT_ICON, np_c_text(), 14, 14, 28, LV_TEXT_ALIGN_CENTER);
     wifi->network_names[index] = np_label(row, "", NP_FONT_SM, np_c_text(),
-                                          58, 6, 190, LV_TEXT_ALIGN_LEFT);
-    wifi->network_details[index] = np_label(row, "", NP_FONT_SM, np_c_text_2(),
-                                            58, 29, 206, LV_TEXT_ALIGN_LEFT);
-    np_label(row, NP_ICON_WIFI, NP_FONT_ICON, np_c_text_2(), 278, 14, 28, LV_TEXT_ALIGN_CENTER);
+                                          14, 16, 224, LV_TEXT_ALIGN_LEFT);
+    wifi->network_locks[index] = network_lock(row);
+    wifi->network_signals[index] = np_wifi_signal_create(row, 278, 10, 28);
     lv_obj_add_event_cb(row, network_event_cb, LV_EVENT_CLICKED, wifi);
     return row;
 }
@@ -105,7 +121,6 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
         wifi->network_rows[i] = network_row(wifi, i);
         np_set_visible(wifi->network_rows[i], false);
     }
-    np_hline(content, 24, 418, 656);
     wifi->connect_button = np_button(content, 360, 342, 320, 52, "Selecione uma rede", true);
     lv_obj_add_state(wifi->connect_button, LV_STATE_DISABLED);
     lv_obj_set_style_opa(wifi->connect_button, LV_OPA_40, LV_STATE_DISABLED);
@@ -149,12 +164,10 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *co
         np_set_visible(wifi->network_rows[i], visible);
         if (!visible) continue;
 
-        char detail[32] = {0};
-        (void)snprintf(detail, sizeof(detail), "%d dBm · %s",
-                       (int)scan_results[i].rssi,
-                       scan_results[i].secure ? "Protegida" : "Aberta");
         np_set_text(wifi->network_names[i], scan_results[i].ssid);
-        np_set_text(wifi->network_details[i], detail);
+        np_set_visible(wifi->network_locks[i], scan_results[i].secure);
+        np_wifi_signal_set(&wifi->network_signals[i], scan_results[i].rssi,
+                           true, np_c_text_2());
         wifi->network_secure[i] = scan_results[i].secure;
         if (strcmp(wifi->selected_ssid, scan_results[i].ssid) == 0) selected = i;
     }

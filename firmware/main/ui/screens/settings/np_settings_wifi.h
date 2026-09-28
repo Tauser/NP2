@@ -19,7 +19,8 @@ typedef struct {
     lv_obj_t *connect_button;
     lv_obj_t *network_rows[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     lv_obj_t *network_names[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
-    lv_obj_t *network_details[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
+    lv_obj_t *network_locks[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
+    np_wifi_signal_t network_signals[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     uint8_t selected_index;
     char selected_ssid[33];
     bool network_secure[NP_SETTINGS_WIFI_VISIBLE_RESULTS];

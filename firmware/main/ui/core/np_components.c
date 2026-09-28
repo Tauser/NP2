@@ -215,6 +215,59 @@ lv_obj_t *np_icon_button(lv_obj_t *parent, int32_t x, int32_t y,
     return button;
 }
 
+static lv_obj_t *wifi_arc(lv_obj_t *parent, int32_t x, int32_t y,
+                          int32_t size, int32_t width)
+{
+    lv_obj_t *arc = lv_arc_create(parent);
+    lv_obj_remove_style_all(arc);
+    lv_obj_set_pos(arc, x, y);
+    lv_obj_set_size(arc, size, size);
+    lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, width, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(arc, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_arc_set_bg_angles(arc, 222, 318);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    return arc;
+}
+
+static void set_wifi_arc_color(lv_obj_t *arc, lv_color_t color)
+{
+    if (arc != NULL && !lv_color_eq(lv_obj_get_style_arc_color(arc, LV_PART_MAIN), color)) {
+        lv_obj_set_style_arc_color(arc, color, LV_PART_MAIN);
+    }
+}
+
+np_wifi_signal_t np_wifi_signal_create(lv_obj_t *parent, int32_t x, int32_t y,
+                                       int32_t size)
+{
+    np_wifi_signal_t signal = {0};
+    if (parent == NULL || size < 12) return signal;
+    signal.root = np_group(parent, x, y, size, size);
+    const int32_t width = size >= 26 ? 3 : 2;
+    const int32_t inset = size / 6;
+    signal.outer_arc = wifi_arc(signal.root, 1, 1, size - 2, width);
+    signal.inner_arc = wifi_arc(signal.root, inset, inset, size - 2 * inset, width);
+    const int32_t dot_size = size >= 26 ? 4 : 3;
+    signal.dot = np_dot(signal.root, (size - dot_size) / 2,
+                        size - dot_size - 2, dot_size, np_c_text_3());
+    return signal;
+}
+
+void np_wifi_signal_set(np_wifi_signal_t *signal, int8_t rssi, bool measured,
+                        lv_color_t color)
+{
+    if (signal == NULL || signal->root == NULL) return;
+    const uint8_t bars = !measured ? 3U : rssi >= -55 ? 3U : rssi >= -67 ? 2U : 1U;
+    np_set_visible(signal->outer_arc, bars >= 3U);
+    np_set_visible(signal->inner_arc, bars >= 2U);
+    np_set_visible(signal->dot, bars >= 1U);
+    set_wifi_arc_color(signal->outer_arc, color);
+    set_wifi_arc_color(signal->inner_arc, color);
+    np_set_bg_color(signal->dot, color);
+}
+
 /* ---------------- compostos legados ---------------- */
 
 np_metric_t np_metric(lv_obj_t *parent, int32_t x, int32_t y, int32_t w,
@@ -581,7 +634,8 @@ np_header_t np_header(lv_obj_t *parent)
 
     /* Grupo de ações encostado ao bloco exclusivo do relógio. */
     header.wifi_button =
-        np_icon_button(parent, 650, 12, NP_TOUCH_TARGET, NP_ICON_WIFI);
+        np_icon_button(parent, 650, 12, NP_TOUCH_TARGET, "");
+    header.wifi_signal = np_wifi_signal_create(header.wifi_button, 10, 10, 28);
     header.notifications_button =
         np_icon_button(parent, 706, 12, NP_TOUCH_TARGET, NP_ICON_NOTIFICATIONS);
     header.settings_button =
@@ -649,12 +703,14 @@ void np_header_set_drawer_active(np_header_t *header, bool settings_active)
 }
 
 void np_header_set_connections(np_header_t *header, bool wifi_online,
+                               int8_t wifi_rssi, bool wifi_rssi_measured,
                                bool bluetooth_online, bool has_alert)
 {
     if (header == NULL) return;
 
-    np_set_text_color(icon_label(header->wifi_button),
-                      wifi_online ? np_c_positive() : np_c_text_3());
+    np_wifi_signal_set(&header->wifi_signal, wifi_rssi,
+                       wifi_online && wifi_rssi_measured,
+                       wifi_online && wifi_rssi_measured ? np_c_positive() : np_c_text_3());
 
     if (header->bluetooth_button != NULL) {
         np_set_text_color(icon_label(header->bluetooth_button),
