@@ -71,8 +71,9 @@ void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
     view->field = np_fill(content, 20, 38, 344, 48, np_c_surface_raised(),
                            LV_OPA_COVER, NP_RADIUS_CONTROL);
     lv_obj_add_flag(view->field, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_border_width(view->field, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(view->field, np_c_accent_bg(), LV_PART_MAIN);
+    np_apply_input_style(view->field);
+    lv_obj_set_style_border_width(view->field, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(view->field, np_c_accent(), LV_PART_MAIN);
     if (draw != NULL) lv_obj_add_event_cb(view->field, draw, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_event_cb(view->field, field_event, LV_EVENT_CLICKED, view);
     view->reveal = np_button(content, 20, 94, 170, 32, "Mostrar senha", false);

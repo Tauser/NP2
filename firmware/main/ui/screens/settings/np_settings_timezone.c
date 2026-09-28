@@ -177,43 +177,22 @@ void np_settings_timezone_create(np_settings_timezone_t *timezone, lv_obj_t *par
     timezone->region = lv_dropdown_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->region);
     lv_obj_set_pos(timezone->region, 134, 0);
-    lv_obj_set_size(timezone->region, TZ_W - 158, 44);
-    lv_obj_set_style_bg_color(timezone->region, np_c_surface_raised(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(timezone->region, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(timezone->region, NP_RADIUS_CONTROL, LV_PART_MAIN);
-    lv_obj_set_style_border_width(timezone->region, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(timezone->region, np_c_hairline(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(timezone->region, NP_FONT_SM, LV_PART_MAIN);
-    lv_obj_set_style_text_color(timezone->region, np_c_text(), LV_PART_MAIN);
+    lv_obj_set_size(timezone->region, TZ_W - 158, NP_INPUT_H);
+    np_apply_input_style(timezone->region);
     lv_obj_set_style_bg_color(timezone->region, np_c_surface_raised(), LV_PART_SELECTED);
-    lv_obj_set_style_text_font(timezone->region, NP_FONT_SM, LV_PART_SELECTED);
+    lv_obj_set_style_text_font(timezone->region, np_font_text_with_icons(), LV_PART_SELECTED);
     lv_obj_set_style_text_color(timezone->region, np_c_text(), LV_PART_SELECTED);
     lv_dropdown_set_options_static(timezone->region, s_region_options);
-    lv_dropdown_set_symbol(timezone->region, LV_SYMBOL_DOWN);
+    lv_dropdown_set_symbol(timezone->region, NP_ICON_ARROW_DOWN);
     np_label(timezone->modal.content, "Cidade", NP_FONT_SM, np_c_text_2(),
-             24, 67, 96, LV_TEXT_ALIGN_LEFT);
-    timezone->search = lv_textarea_create(timezone->modal.content);
-    lv_obj_remove_style_all(timezone->search);
-    lv_obj_set_pos(timezone->search, 134, 55);
-    lv_obj_set_size(timezone->search, TZ_W - 158, 44);
-    lv_obj_set_style_bg_color(timezone->search, np_c_surface_raised(), 0);
-    lv_obj_set_style_bg_opa(timezone->search, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(timezone->search, NP_RADIUS_CONTROL, 0);
-    lv_obj_set_style_border_width(timezone->search, 1, 0);
-    lv_obj_set_style_border_color(timezone->search, np_c_hairline(), 0);
-    lv_obj_set_style_text_font(timezone->search, NP_FONT_SM, 0);
-    lv_obj_set_style_text_color(timezone->search, np_c_text(), 0);
-    lv_obj_set_style_text_color(timezone->search, np_c_text_3(),
-                                LV_PART_TEXTAREA_PLACEHOLDER);
-    lv_obj_set_style_pad_left(timezone->search, 42, 0);
-    lv_textarea_set_one_line(timezone->search, true);
-    lv_textarea_set_placeholder_text(timezone->search, "Buscar cidade...");
-    np_label(timezone->modal.content, NP_ICON_SEARCH, NP_FONT_ICON,
-             np_c_text_2(), 146, 65, 24, LV_TEXT_ALIGN_CENTER);
+             24, 72, 96, LV_TEXT_ALIGN_LEFT);
+    timezone->search = np_text_input(timezone->modal.content, 134, 56,
+                                     TZ_W - 158, NP_INPUT_H,
+                                     "Buscar cidade...", NP_ICON_SEARCH);
     timezone->list = lv_obj_create(timezone->modal.content);
     lv_obj_remove_style_all(timezone->list);
-    lv_obj_set_pos(timezone->list, 24, 110);
-    lv_obj_set_size(timezone->list, TZ_W - 48, 280);
+    lv_obj_set_pos(timezone->list, 24, 120);
+    lv_obj_set_size(timezone->list, TZ_W - 48, 270);
     lv_obj_set_scroll_dir(timezone->list, LV_DIR_VER);
     timezone->spacer = np_fill(timezone->list, 0, 0, 1, 1, np_c_surface(), LV_OPA_TRANSP, 0);
     for (uint8_t i = 0; i < NP_SETTINGS_TIMEZONE_ROW_POOL; ++i) {

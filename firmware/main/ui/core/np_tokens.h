@@ -67,6 +67,7 @@ extern "C" {
 #define NP_RADIUS_CONTROL 12
 #define NP_RADIUS_TILE    16
 #define NP_RADIUS_SURFACE 20
+#define NP_INPUT_H        48
 
 /* ------------------------------------------------------------------ */
 /* Dark Graphite                                                       */
@@ -145,6 +146,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CHECK         "\xEE\x97\x8A"
 #define NP_ICON_CLOSE         "\xEE\x97\x8D"
 #define NP_ICON_SEARCH        "\xEE\xA2\xB6"
+#define NP_ICON_ARROW_DOWN    "\xEE\x8C\x93"
+#define NP_ICON_ARROW_LEFT    "\xEE\x8C\x94"
+#define NP_ICON_ARROW_RIGHT   "\xEE\x8C\x95"
+#define NP_ICON_ARROW_UP      "\xEE\x8C\x96"
 #else
 #define NP_FONT_HERO     (&lv_font_montserrat_48)
 #define NP_FONT_BRAND    (&lv_font_montserrat_48)
@@ -183,6 +188,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CHECK         "+"
 #define NP_ICON_CLOSE         "x"
 #define NP_ICON_SEARCH        "?"
+#define NP_ICON_ARROW_DOWN    "v"
+#define NP_ICON_ARROW_LEFT    "<"
+#define NP_ICON_ARROW_RIGHT   ">"
+#define NP_ICON_ARROW_UP      "^"
 #endif
 
 /* ------------------------------------------------------------------ */

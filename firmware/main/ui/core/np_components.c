@@ -3,6 +3,19 @@
 
 #include <string.h>
 
+static lv_font_t s_text_with_icons;
+static bool s_text_with_icons_ready;
+
+const lv_font_t *np_font_text_with_icons(void)
+{
+    if (!s_text_with_icons_ready) {
+        s_text_with_icons = *NP_FONT_SM;
+        s_text_with_icons.fallback = NP_FONT_ICON;
+        s_text_with_icons_ready = true;
+    }
+    return &s_text_with_icons;
+}
+
 /* ---------------- escrita guardada ---------------- */
 
 void np_set_text(lv_obj_t *label, const char *text)
@@ -213,6 +226,56 @@ lv_obj_t *np_icon_button(lv_obj_t *parent, int32_t x, int32_t y,
     np_label(button, symbol, NP_FONT_ICON, np_c_text_2(),
              0, top, size, LV_TEXT_ALIGN_CENTER);
     return button;
+}
+
+void np_apply_input_style(lv_obj_t *input)
+{
+    if (input == NULL) return;
+    lv_obj_set_style_bg_color(input, np_c_surface_raised(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(input, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(input, NP_RADIUS_CONTROL, LV_PART_MAIN);
+    lv_obj_set_style_border_width(input, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(input, np_c_hairline(), LV_PART_MAIN);
+    lv_obj_set_style_outline_width(input, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(input, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_font(input, np_font_text_with_icons(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(input, np_c_text(), LV_PART_MAIN);
+    lv_obj_set_style_pad_left(input, NP_SP_16, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(input, NP_SP_16, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(input, (NP_INPUT_H - NP_FONT_SM->line_height) / 2,
+                             LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(input, (NP_INPUT_H - NP_FONT_SM->line_height) / 2,
+                                LV_PART_MAIN);
+    lv_obj_set_style_border_width(input, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(input, np_c_accent(),
+                                  LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_text_color(input, np_c_text_3(),
+                                LV_PART_TEXTAREA_PLACEHOLDER);
+}
+
+lv_obj_t *np_text_input(lv_obj_t *parent, int32_t x, int32_t y,
+                        int32_t w, int32_t h, const char *placeholder,
+                        const char *leading_icon)
+{
+    if (parent == NULL) return NULL;
+    lv_obj_t *const input = lv_textarea_create(parent);
+    if (input == NULL) return NULL;
+    lv_obj_remove_style_all(input);
+    lv_obj_set_pos(input, x, y);
+    lv_obj_set_size(input, w, h);
+    np_apply_input_style(input);
+    lv_textarea_set_one_line(input, true);
+    lv_textarea_set_placeholder_text(input, placeholder != NULL ? placeholder : "");
+    if (leading_icon != NULL && leading_icon[0] != '\0') {
+        lv_obj_set_style_pad_left(input, NP_SP_48, LV_PART_MAIN);
+        lv_obj_t *const icon = np_label(input, leading_icon, NP_FONT_ICON,
+                                        np_c_text_2(), NP_SP_16,
+                                        (h - NP_FONT_ICON->line_height) / 2,
+                                        NP_FONT_ICON->line_height,
+                                        LV_TEXT_ALIGN_CENTER);
+        if (icon != NULL) lv_obj_remove_flag(icon, LV_OBJ_FLAG_CLICKABLE);
+    }
+    return input;
 }
 
 const char *np_wifi_signal_icon(int8_t rssi)
