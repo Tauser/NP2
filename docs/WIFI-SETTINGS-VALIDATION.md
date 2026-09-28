@@ -16,6 +16,19 @@
 - Regressão host cobre storage ocupado, corrida de enqueue, nova seleção
   durante escrita e falha de persistência. Resultado físico do fuso/layout
   corrigidos permanece pendente de flash manual.
+- Correção de fuso: `8740e9b`; teste host passou com GCC/`-Werror` e
+  `idf.py build` passou no P4/IDF 5.5.4, aplicação `0x2a5cc0` B (67% livres).
+- Teclado mantém mapas e comportamento oficiais do LVGL, com destaque azul
+  de repouso somente em OK. Pontuação, navegação e troca de modo usam teclas
+  neutras. O destaque transitório ao pressionar continua padronizado.
+- Build do teclado passou: aplicação `0x2a5dc0` B, 67% livres, sem novos
+  warnings de compilação. Imagem `firmware/build/np2_p4.bin`, descritor
+  `8740e9b-dirty`, SHA-256
+  `0DA4F655D2A5979A413841F1C03AC30CA536CF5D826149EA5055BD6E5901A998`.
+  Configuração efetiva conserva P4, RGB565, três FB e reset54 ativo baixo.
+  Flash continua manual. Validar toque no centro e no radio de cada linha,
+  relógio em fusos de offsets diferentes, retorno ao modal e reboot; conferir
+  campos alinhados e cores do teclado em letras/símbolos.
 
 ## 2026-09-28 — Status e seleção
 
