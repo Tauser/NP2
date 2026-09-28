@@ -78,6 +78,10 @@ static void target_event_cb(lv_event_t *event)
         break;
     case LV_EVENT_DELETE:
         if (keyboard->target == target) np_keyboard_hide(keyboard);
+        /* Lazy modals destroy their inputs. Return the binding slot to the
+         * bounded pool so repeated navigation cannot exhaust it or leave a
+         * stale textarea pointer attached to a newly allocated widget. */
+        *binding = (np_keyboard_binding_t){0};
         break;
     default:
         break;

@@ -116,7 +116,10 @@
 - `idf.py build` passou com IDF 5.5.4/`esp32p4`; aplicação `0x2a2550` B,
   67% livres no slot OTA. SHA-256 P4: `06F8AE5170410FB8CA643B2518E02ED0E1E75B973D698B8B4BCA6AD04F437642`.
 
-## Imagem final para flash manual
+## Imagem da etapa Wi-Fi para flash manual (histórico)
+
+A imagem mais recente da entrega de Settings está registrada em
+[`SETTINGS-VALIDATION.md`](SETTINGS-VALIDATION.md).
 
 - Base da revisão final: `62d04ba`. `idf.py build` passou para `esp32p4`
   com IDF 5.5.4; aplicação `0x2a20f0` B, 67% livres no slot OTA de 8 MiB,

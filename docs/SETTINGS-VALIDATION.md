@@ -39,6 +39,29 @@ temperatura ou persistência física nesta entrega.
 - `idf.py build` passou no P4/IDF 5.5.4: aplicação `0x2a9480` B, 67% livres,
   sem novos warnings de compilação. Modo noturno foi versionado em `3358453`.
 
+## 2026-09-28 — Ciclo de vida do teclado
+
+Ao apagar um input de modal lazy, o teclado devolve o vínculo ao pool
+limitado. Isso evita esgotar as vagas após alternar Wi-Fi/fuso repetidamente
+e manter ponteiros de campos já apagados. Confirmar 100 ciclos na placa,
+com teclado abrindo normalmente e sem tendência de perda de heap.
+
+## Imagem desta entrega
+
+- Modo noturno: `3358453`; Sistema: `b020b9f`.
+- `idf.py clean build` passou para `esp32p4` com ESP-IDF 5.5.4, aplicação
+  `0x2a9480` B, 67% livres no slot de 8 MiB. Sem novos warnings de compilação
+  observados. O primeiro comando foi impedido por acesso ao Python do IDF;
+  a repetição com permissão de execução concluiu a build limpa.
+- `firmware/build/np2_p4.bin`, descritor `b020b9f-dirty`, SHA-256
+  `69AEB070D1FE50AFEE875CBDA6A95179CB0BA2E5A91833E655265784FCAF8E62`.
+- Configuração efetiva preservada: P4, RGB565, três FB, reset C6 ativo baixo,
+  auto-suspend desabilitado. C6 não foi alterado nem regravado. Hash da imagem
+  C6 instalada e novos logs de bancada não foram capturados nesta entrega.
+- Flash manual pelo operador. A implementação restante de Settings está
+  entregue para aceite; estabilidade gráfica, persistência e os fluxos
+  novos não são declarados aprovados em hardware a partir desta build.
+
 ## Aceite após flash manual
 
 - Conferir o fuso em cidades com offsets diferentes, reabrir o modal e
