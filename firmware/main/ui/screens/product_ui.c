@@ -8,7 +8,6 @@
 #include "app_state.h"
 #include "device_control_service.h"
 #include "flash_coordinator.h"
-#include "diagnostic_ui.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "offline_value_format.h"
@@ -83,7 +82,6 @@ typedef struct {
 static product_ui_state_t s_ui;
 static const char *const TAG = "product_ui";
 
-static void diagnostics_button_event_cb(lv_event_t *event);
 static void settings_home_event_cb(lv_event_t *event);
 static void settings_stage_timer_cb(lv_timer_t *timer);
 static void settings_stage_async(void *user_data);
@@ -1502,6 +1500,9 @@ static void open_settings_async(void *user_data)
     }
     lv_obj_add_event_cb(s_ui.settings.header.drawer_home_button,
                         settings_home_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_ui.settings.header.settings_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
     lv_obj_t *const back = np_button(s_ui.settings.root, 250, 12, 180,
                                       NP_TOUCH_TARGET, "Preferências", false);
     lv_obj_add_event_cb(back, scene_navigation_event_cb, LV_EVENT_CLICKED,
@@ -1709,6 +1710,8 @@ static void scene_navigation_async(void *user_data)
                         LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
     lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
                         LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
+                        LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
     update_header(header, &projection, true);
@@ -1735,36 +1738,8 @@ static void install_home_navigation_callbacks(void)
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
     lv_obj_add_event_cb(s_ui.home.header.settings_button,
-                        diagnostics_button_event_cb,
-                        LV_EVENT_CLICKED,
-                        NULL);
-}
-
-static void diagnostics_button_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.navigation_pending) return;
-
-    (void)lv_async_call_cancel(scene_navigation_async, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
-    (void)lv_async_call_cancel(scene_navigation_async, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
-    (void)lv_async_call_cancel(scene_navigation_async, (void *)(uintptr_t)PRODUCT_SCREEN_SETTINGS);
-    (void)lv_async_call_cancel(scene_navigation_async, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
-
-    if (s_ui.refresh_timer != NULL) {
-        lv_timer_delete(s_ui.refresh_timer);
-    }
-    np_keyboard_destroy(&s_ui.keyboard);
-    discard_wifi_password();
-    discard_wifi_confirmation();
-    discard_system_confirmation();
-    np_feedback_destroy(&s_ui.feedback);
-
-    lv_display_t *display = s_ui.display;
-    lv_indev_t *touch_indev = s_ui.touch_indev;
-
-    s_ui = (product_ui_state_t){0};
-
-    lv_obj_clean(lv_screen_active());
-    (void)diagnostic_ui_create(display, touch_indev);
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
 }
 
 esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)

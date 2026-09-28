@@ -49,7 +49,7 @@ resultado de flash, boot, render, WDT ou persistência física foi capturado.
 ## Aceite por flash manual
 
 1. Home: abrir o drawer, entrar em Preferências e voltar para Home. Conferir
-   que clima/mercado/relógio continuam como antes; engrenagem mantém diagnóstico.
+   que clima/mercado/relógio continuam como antes; engrenagem abre Perfil.
 2. Preferências: abrir Perfil, conferir saudação, card Conta, avisos de edição,
    Tela inicial e Abrir preferências. Nenhum controle de saudação deve existir.
 3. Tocar as cinco linhas do hub, abrir os controles/modais correspondentes
@@ -62,3 +62,10 @@ resultado de flash, boot, render, WDT ou persistência física foi capturado.
 
 Registrar commit, hash P4, versão/hash C6 instalado, unidade/BOM, configuração,
 data e logs sanitizados. Sem flash ou evidência física novos nesta fase.
+
+## Ajuste de entrada — 2026-09-28
+
+Por solicitação do operador após o primeiro flash, a engrenagem do header
+abre Perfil em Home, Preferências e Settings anterior. Em Perfil ela mantém
+a mesma cena. Abrir preferências continua levando ao hub; o drawer mantém
+seu acesso direto ao hub. Diagnóstico deixa de ser o destino da engrenagem.
