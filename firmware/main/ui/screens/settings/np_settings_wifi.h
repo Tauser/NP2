@@ -22,6 +22,7 @@ typedef struct {
     lv_obj_t *network_details[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
     uint8_t selected_index;
     char selected_ssid[33];
+    bool network_secure[NP_SETTINGS_WIFI_VISIBLE_RESULTS];
 } np_settings_wifi_t;
 
 void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent);

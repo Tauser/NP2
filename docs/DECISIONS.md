@@ -1005,3 +1005,27 @@ responsável, sem cotação sintética ou token embutido.
 aceita registros v1 a v3 e promove os campos novos como indisponíveis até uma
 resposta válida. O payload v4 tem 169 bytes fixos, com limites e CRC do cache
 existente. A migração não formata armazenamento nem escreve a partir da UI.
+
+## ADR-040 — Settings Wi-Fi com senha privada e desenho temporário
+
+**Decisão:** manter somente um modal principal lazy de Settings, e no fluxo
+Wi-Fi criar sob demanda apenas um diálogo filho compacto. Gerenciar redes
+faz scan no próprio modal. Seleção segue o SSID público, e o Status recebe
+somente a associação real publicada pelo rádio → serviço → `app_loop` → UI.
+
+O diálogo de senha usa teclado matricial sem textarea. A UI guarda apenas
+SSID público, comprimento e visibilidade; `product_ui` faz a ponte das teclas
+para o buffer privado do `provisioning_service`. O responsável autorizou em
+2026-09-28 Mostrar senha por desenho temporário sem texto em widgets: cada
+caractere é consultado separadamente, convertido em um glyph no passe de
+render e nunca concatenado em label, evento, AppState ou log. Descritores de
+desenho e pixels necessariamente existem durante render/exibição; isto não
+torna dumps brutos de memória seguros para exportação.
+
+**Limites:** máscara por padrão, 8–63 ASCII imprimíveis para rede protegida,
+senha vazia somente para rede aberta indicada pelo scan. Cancelar, fechar,
+sair de Settings ou submeter zeram a sessão e revogam visibilidade. Transferência
+continua exclusivamente pela mailbox privada de conectividade; persistência
+usa a política de vault/FlashCoordinator existente. Sem mudança no schema
+offline, WDT, C6 ou configurações de hardware. Build/teste host não fecham
+validação de toque, render, recuperação ou estabilidade na placa.

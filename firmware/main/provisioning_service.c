@@ -45,6 +45,7 @@ static bool s_started;
 /* Secret-bearing buffers are owned here, never by an LVGL text widget. */
 static char s_touch_ssid[NP2_PROVISIONING_SSID_BYTES];
 static char s_touch_password[NP2_PROVISIONING_PASSWORD_BYTES];
+static bool s_touch_secure = true;
 
 static void secure_zero(void *buffer, size_t length)
 {
@@ -362,14 +363,21 @@ esp_err_t provisioning_service_touch_begin(void)
     secure_zero(s_touch_password, sizeof(s_touch_password));
     s_status.touch_active = true;
     s_status.touch_stage = PROVISIONING_TOUCH_STAGE_SSID;
+    s_touch_secure = true;
     s_status.touch_ssid_length = 0;
     s_status.touch_password_length = 0;
+    s_status.touch_password_visible = false;
     s_status.last_result = ESP_OK;
     taskEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;
 }
 
 esp_err_t provisioning_service_touch_begin_for_ssid(const char *ssid)
+{
+    return provisioning_service_touch_begin_for_network(ssid, true);
+}
+
+esp_err_t provisioning_service_touch_begin_for_network(const char *ssid, bool secure)
 {
     if (ssid == NULL || !s_started) return ESP_ERR_INVALID_ARG;
     const size_t length = strnlen(ssid, NP2_PROVISIONING_SSID_BYTES);
@@ -385,8 +393,10 @@ esp_err_t provisioning_service_touch_begin_for_ssid(const char *ssid)
     memcpy(s_touch_ssid, ssid, length);
     s_status.touch_active = true;
     s_status.touch_stage = PROVISIONING_TOUCH_STAGE_PASSWORD;
+    s_touch_secure = secure;
     s_status.touch_ssid_length = (uint8_t)length;
     s_status.touch_password_length = 0U;
+    s_status.touch_password_visible = false;
     s_status.last_result = ESP_OK;
     taskEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;
@@ -438,6 +448,7 @@ esp_err_t provisioning_service_touch_begin_password(void)
     } else {
         secure_zero(s_touch_password, sizeof(s_touch_password));
         s_status.touch_password_length = 0;
+        s_status.touch_password_visible = false;
         s_status.touch_stage = PROVISIONING_TOUCH_STAGE_PASSWORD;
     }
     s_status.last_result = result;
@@ -481,6 +492,28 @@ esp_err_t provisioning_service_touch_backspace_password(void)
     return result;
 }
 
+esp_err_t provisioning_service_touch_set_password_visible(bool visible)
+{
+    taskENTER_CRITICAL(&s_status_lock);
+    const bool active = s_status.touch_active &&
+                        s_status.touch_stage == PROVISIONING_TOUCH_STAGE_PASSWORD;
+    s_status.touch_password_visible = active && visible;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return active ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+uint32_t provisioning_service_touch_display_character(uint8_t index)
+{
+    uint32_t character = 0U;
+    taskENTER_CRITICAL(&s_status_lock);
+    if (s_status.touch_active && s_status.touch_stage == PROVISIONING_TOUCH_STAGE_PASSWORD &&
+        index < s_status.touch_password_length) {
+        character = s_status.touch_password_visible ? (uint8_t)s_touch_password[index] : '*';
+    }
+    taskEXIT_CRITICAL(&s_status_lock);
+    return character;
+}
+
 esp_err_t provisioning_service_touch_submit(void)
 {
     char ssid[NP2_PROVISIONING_SSID_BYTES] = {0};
@@ -489,7 +522,9 @@ esp_err_t provisioning_service_touch_submit(void)
 
     taskENTER_CRITICAL(&s_status_lock);
     if (!s_status.touch_active || s_status.touch_stage != PROVISIONING_TOUCH_STAGE_PASSWORD ||
-        s_status.touch_ssid_length == 0U || s_status.touch_password_length < 8U) {
+        s_status.touch_ssid_length == 0U ||
+        (s_touch_secure ? s_status.touch_password_length < 8U
+                        : s_status.touch_password_length != 0U)) {
         result = ESP_ERR_INVALID_ARG;
     } else {
         memcpy(ssid, s_touch_ssid, sizeof(ssid));
@@ -500,6 +535,7 @@ esp_err_t provisioning_service_touch_submit(void)
         s_status.touch_stage = PROVISIONING_TOUCH_STAGE_IDLE;
         s_status.touch_ssid_length = 0;
         s_status.touch_password_length = 0;
+        s_status.touch_password_visible = false;
     }
     s_status.last_result = result;
     taskEXIT_CRITICAL(&s_status_lock);
@@ -524,6 +560,7 @@ void provisioning_service_touch_cancel(void)
     s_status.touch_stage = PROVISIONING_TOUCH_STAGE_IDLE;
     s_status.touch_ssid_length = 0;
     s_status.touch_password_length = 0;
+    s_status.touch_password_visible = false;
     s_status.last_result = ESP_OK;
     taskEXIT_CRITICAL(&s_status_lock);
 }

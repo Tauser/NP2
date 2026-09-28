@@ -54,7 +54,7 @@ static void network_event_cb(lv_event_t *event)
 static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
 {
     lv_obj_t *const row = np_fill(wifi->modal.content, 360, 70 + index * 49,
-                                  320, 46, np_c_surface_raised(), LV_OPA_COVER,
+                                  320, 48, np_c_surface_raised(), LV_OPA_COVER,
                                   NP_RADIUS_CONTROL);
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, np_c_hairline(), 0);
@@ -107,6 +107,7 @@ void np_settings_wifi_create(np_settings_wifi_t *wifi, lv_obj_t *parent)
     np_hline(content, 24, 418, 656);
     wifi->connect_button = np_button(content, 360, 342, 320, 52, "Selecione uma rede", true);
     lv_obj_add_state(wifi->connect_button, LV_STATE_DISABLED);
+    lv_obj_set_style_opa(wifi->connect_button, LV_OPA_40, LV_STATE_DISABLED);
 }
 
 void np_settings_wifi_show(np_settings_wifi_t *wifi)
@@ -153,6 +154,7 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online, const char *co
                        scan_results[i].secure ? "Protegida" : "Aberta");
         np_set_text(wifi->network_names[i], scan_results[i].ssid);
         np_set_text(wifi->network_details[i], detail);
+        wifi->network_secure[i] = scan_results[i].secure;
         if (strcmp(wifi->selected_ssid, scan_results[i].ssid) == 0) selected = i;
     }
     select_row(wifi, selected);

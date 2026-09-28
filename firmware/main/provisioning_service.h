@@ -24,6 +24,7 @@ typedef struct {
     provisioning_touch_stage_t touch_stage;
     uint8_t touch_ssid_length;
     uint8_t touch_password_length;
+    bool touch_password_visible;
 } provisioning_service_status_t;
 
 /* Starts the physical USB maintenance service in its disarmed state. */
@@ -41,11 +42,18 @@ esp_err_t provisioning_service_touch_begin(void);
 /* Starts directly at password entry after copying a public SSID to the
  * service-owned RAM session. The password never crosses the UI boundary. */
 esp_err_t provisioning_service_touch_begin_for_ssid(const char *ssid);
+/* Open networks allow an empty password only; protected networks require 8..63. */
+esp_err_t provisioning_service_touch_begin_for_network(const char *ssid, bool secure);
 esp_err_t provisioning_service_touch_append_ssid(char character);
 esp_err_t provisioning_service_touch_backspace_ssid(void);
 esp_err_t provisioning_service_touch_begin_password(void);
 esp_err_t provisioning_service_touch_append_password(char character);
 esp_err_t provisioning_service_touch_backspace_password(void);
+/* Explicit local reveal consent, reset at every session boundary. */
+esp_err_t provisioning_service_touch_set_password_visible(bool visible);
+/* One character for an immediate glyph draw, never a text/string getter.
+ * Masked by default; returns zero outside the active session or its length. */
+uint32_t provisioning_service_touch_display_character(uint8_t index);
 esp_err_t provisioning_service_touch_submit(void);
 void provisioning_service_touch_cancel(void);
 

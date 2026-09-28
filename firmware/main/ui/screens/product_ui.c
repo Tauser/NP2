@@ -17,7 +17,8 @@
 #include "notification_service.h"
 #include "onboarding_service.h"
 #include "weather_condition.h"
-#include "wifi_setup_view.h"
+#include "provisioning_service.h"
+#include "settings/np_wifi_password.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
@@ -38,6 +39,10 @@ typedef struct {
     np_settings_view_t settings;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
+    np_wifi_password_t wifi_password;
+    char pending_wifi_ssid[33];
+    bool pending_wifi_secure;
+    bool wifi_password_pending;
     lv_timer_t *refresh_timer;
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
@@ -79,6 +84,7 @@ static void wifi_scan_event_cb(lv_event_t *event);
 static void wifi_forget_event_cb(lv_event_t *event);
 static void settings_modal_row_event_cb(lv_event_t *event);
 static void update_settings(const app_ui_projection_t *projection);
+static void discard_wifi_password(void);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -282,6 +288,7 @@ static void discard_settings_modals(uintptr_t keep)
 {
     np_keyboard_hide(&s_ui.keyboard);
     if (keep != 0U && s_ui.settings.wifi.modal.scrim != NULL) {
+        discard_wifi_password();
         lv_obj_delete(s_ui.settings.wifi.modal.scrim);
         s_ui.settings.wifi = (np_settings_wifi_t){0};
         s_ui.settings_wifi_callbacks_initialized = false;
@@ -422,6 +429,113 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
     return ESP_OK;
 }
 
+static void discard_wifi_password(void)
+{
+    provisioning_service_touch_cancel();
+    if (s_ui.wifi_password.modal.scrim != NULL) {
+        lv_obj_delete(s_ui.wifi_password.modal.scrim);
+    }
+    s_ui.wifi_password = (np_wifi_password_t){0};
+}
+
+static void sync_wifi_password(void)
+{
+    provisioning_service_status_t status = {0};
+    provisioning_service_get_status(&status);
+    np_wifi_password_sync(&s_ui.wifi_password, status.touch_password_length,
+                           status.touch_password_visible);
+}
+
+static bool wifi_password_action(np_wifi_password_action_t action, char character)
+{
+    esp_err_t result = ESP_OK;
+    switch (action) {
+    case NP_WIFI_PASSWORD_APPEND:
+        result = provisioning_service_touch_append_password(character);
+        break;
+    case NP_WIFI_PASSWORD_BACKSPACE:
+        result = provisioning_service_touch_backspace_password();
+        break;
+    case NP_WIFI_PASSWORD_REVEAL:
+        result = provisioning_service_touch_set_password_visible(character != 0);
+        break;
+    case NP_WIFI_PASSWORD_CANCEL:
+        provisioning_service_touch_cancel();
+        break;
+    case NP_WIFI_PASSWORD_SUBMIT:
+        result = provisioning_service_touch_submit();
+        if (result == ESP_OK) {
+            np_feedback_bring_to_front(&s_ui.feedback);
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                                   "Conexao solicitada", "Aguardando a rede", 2400U);
+        } else {
+            provisioning_service_status_t status = {0};
+            provisioning_service_get_status(&status);
+            /* A rejected mailbox transfer has already wiped the session. */
+            if (!status.touch_active) {
+                (void)provisioning_service_touch_begin_for_network(
+                    lv_label_get_text(s_ui.wifi_password.modal.subtitle),
+                    s_ui.wifi_password.secure);
+            }
+        }
+        break;
+    }
+    sync_wifi_password();
+    if (result != ESP_OK) {
+        np_feedback_bring_to_front(&s_ui.feedback);
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               action == NP_WIFI_PASSWORD_SUBMIT ? "Conexao nao solicitada" : "Entrada recusada",
+                               "Confira a senha ou tente novamente", 2400U);
+    }
+    return result == ESP_OK;
+}
+
+static void wifi_password_draw(lv_event_t *event)
+{
+    if (!np_modal_is_visible(&s_ui.wifi_password.modal)) return;
+    lv_area_t area;
+    lv_obj_get_coords(lv_event_get_target(event), &area);
+    lv_layer_t *const layer = lv_event_get_layer(event);
+    provisioning_service_status_t status = {0};
+    provisioning_service_get_status(&status);
+    /* Draw individual glyphs only. No password string, textarea or label;
+     * each descriptor lives only for the current rendering pass. */
+    for (uint8_t i = 0U; i < status.touch_password_length && i < 63U; ++i) {
+        lv_draw_letter_dsc_t glyph;
+        lv_draw_letter_dsc_init(&glyph);
+        glyph.font = NP_FONT_SM;
+        glyph.color = np_c_text();
+        glyph.unicode = provisioning_service_touch_display_character(i);
+        if (glyph.unicode == 0U) break;
+        const lv_point_t point = {.x = area.x1 + 12 + (i % 32U) * 17,
+                                  .y = area.y1 + 8 + (i / 32U) * 26};
+        lv_draw_letter(layer, &glyph, &point);
+        glyph.unicode = 0U;
+    }
+}
+
+static void wifi_password_open_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.wifi_password_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
+        !np_modal_is_visible(&s_ui.settings.wifi.modal)) return;
+    discard_wifi_password();
+    const esp_err_t result = provisioning_service_touch_begin_for_network(
+        s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure);
+    if (result == ESP_OK) {
+        np_keyboard_hide(&s_ui.keyboard);
+        np_wifi_password_create(&s_ui.wifi_password, s_ui.settings.wifi.modal.scrim,
+                                 s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure,
+                                 wifi_password_action, wifi_password_draw);
+    } else {
+        np_feedback_bring_to_front(&s_ui.feedback);
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Configuracao indisponivel", NULL, 2400U);
+    }
+    s_ui.pending_wifi_ssid[0] = '\0';
+}
+
 static void wifi_manage_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -429,20 +543,16 @@ static void wifi_manage_event_cb(lv_event_t *event)
         wifi_scan_event_cb(event);
         return;
     }
-    char ssid[33] = {0};
-    const bool selected_network = event != NULL &&
-                                  lv_event_get_target(event) == s_ui.settings.wifi.connect_button &&
-                                  np_settings_wifi_copy_selected_ssid(&s_ui.settings.wifi,
-                                                                      ssid, sizeof(ssid));
-    np_settings_wifi_hide(&s_ui.settings.wifi);
-    const esp_err_t result = selected_network
-                                 ? wifi_setup_view_open_for_ssid(s_ui.settings.root, ssid)
-                                 : wifi_setup_view_open(s_ui.settings.root);
-    memset(ssid, 0, sizeof(ssid));
-    if (result != ESP_OK) {
+    if (s_ui.wifi_password_pending ||
+        !np_settings_wifi_copy_selected_ssid(&s_ui.settings.wifi,
+                                             s_ui.pending_wifi_ssid,
+                                             sizeof(s_ui.pending_wifi_ssid))) return;
+    s_ui.pending_wifi_secure = s_ui.settings.wifi.network_secure[s_ui.settings.wifi.selected_index];
+    s_ui.wifi_password_pending = true;
+    if (lv_async_call(wifi_password_open_async, NULL) != LV_RESULT_OK) {
+        s_ui.wifi_password_pending = false;
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
-                               "Configuracao indisponivel",
-                               "Tente novamente em alguns instantes", 2600U);
+                               "Configuracao indisponivel", NULL, 2600U);
     }
 }
 
@@ -1277,6 +1387,7 @@ static void settings_home_async(void *user_data)
     np_keyboard_hide(&s_ui.keyboard);
     /* Free Settings before constructing Home to keep one scene's draw tree
      * active at a time on the LVGL task. */
+    discard_wifi_password();
     lv_obj_delete(settings_root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.settings_controls_initialized = false;
@@ -1325,6 +1436,7 @@ static void diagnostics_button_event_cb(lv_event_t *event)
         lv_timer_delete(s_ui.refresh_timer);
     }
     np_keyboard_destroy(&s_ui.keyboard);
+    discard_wifi_password();
     np_feedback_destroy(&s_ui.feedback);
 
     lv_display_t *display = s_ui.display;
