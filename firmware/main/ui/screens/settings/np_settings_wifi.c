@@ -23,15 +23,23 @@ static void select_row(np_settings_wifi_t *wifi, uint8_t selected)
         np_set_bg_color(wifi->network_rows[i], active ? np_c_accent_bg() : np_c_surface_raised());
         lv_obj_set_style_border_color(wifi->network_rows[i],
                                       active ? np_c_accent() : np_c_hairline(), 0);
+        lv_obj_set_style_border_width(wifi->network_rows[i], active ? 2 : 1, 0);
     }
+    np_set_text(wifi->connect_button, "Conectar rede");
 }
 
 static void network_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     np_settings_wifi_t *const wifi = lv_event_get_user_data(event);
-    const uint8_t index = (uint8_t)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(event));
-    if (wifi != NULL) select_row(wifi, index);
+    if (wifi == NULL) return;
+    lv_obj_t *const row = lv_event_get_target(event);
+    for (uint8_t i = 0; i < NP_SETTINGS_WIFI_VISIBLE_RESULTS; ++i) {
+        if (wifi->network_rows[i] == row) {
+            select_row(wifi, i);
+            return;
+        }
+    }
 }
 
 static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
@@ -42,7 +50,6 @@ static lv_obj_t *network_row(np_settings_wifi_t *wifi, uint8_t index)
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, np_c_hairline(), 0);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_user_data(row, (void *)(uintptr_t)index);
     np_label(row, NP_ICON_WIFI, NP_FONT_ICON, np_c_text(), 14, 14, 28, LV_TEXT_ALIGN_CENTER);
     wifi->network_names[index] = np_label(row, "", NP_FONT_SM, np_c_text(),
                                           58, 6, 190, LV_TEXT_ALIGN_LEFT);
@@ -135,7 +142,11 @@ void np_settings_wifi_sync(np_settings_wifi_t *wifi, bool online,
         np_set_text(wifi->network_names[i], scan_results[i].ssid);
         np_set_text(wifi->network_details[i], detail);
     }
-    if (count > 0U) select_row(wifi, wifi->selected_index < count ? wifi->selected_index : 0U);
+    if (count > 0U) {
+        select_row(wifi, wifi->selected_index < count ? wifi->selected_index : 0U);
+    } else {
+        np_set_text(wifi->connect_button, "Selecione uma rede");
+    }
 }
 
 bool np_settings_wifi_copy_selected_ssid(const np_settings_wifi_t *wifi,
