@@ -1158,3 +1158,19 @@ O cache limita custo de reentrada, mas mantém a árvore e buffers de Fuso em
 memória junto do cache de Sistema. Não modifica WDT, pipeline de display,
 persistência, schema offline ou contratos de credenciais. Build e testes
 LVGL host não substituem aceite físico de foco, reboot, memória e WDT.
+
+## ADR-046 — Identidade local do perfil principal
+
+**Decisão:** Perfil passa a editar um nome local de até 48 bytes UTF-8 e uma
+cor de avatar entre quatro tokens existentes. As iniciais são derivadas do
+nome; não há foto, conta remota, localização inferida, troca de perfil ou
+controle de saudação. O modal é criado somente ao primeiro uso, usa o teclado
+global e é descartado ao sair da cena.
+
+**Motivo e trade-off:** o AppState anterior não tinha fonte de identidade.
+`product_ui` envia somente um pedido pelo EventBus; `app_loop` é o escritor da
+identidade e publica nome, cor e estado de persistência na projeção. O
+FlashCoordinator serializa um registro pequeno de NVS em dois slots com CRC,
+sem alterar o schema offline nem iniciar escrita no callback LVGL. Uma falha
+de gravação fica visível no Perfil; build e teste host não comprovam retenção
+após reboot ou comportamento de WDT na placa, que exigem flash manual.
