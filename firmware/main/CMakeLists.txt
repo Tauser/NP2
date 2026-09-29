@@ -26,6 +26,7 @@ idf_component_register(
     REQUIRES esp_app_format esp_event esp_netif esp_psram esp_wifi espressif__esp_hosted
              espressif__esp_wifi_remote joltwallet__littlefs nvs_flash esp_driver_usb_serial_jtag
              esp_http_client mbedtls app_update bootloader_support esp_driver_tsens
+             esp_driver_sdmmc fatfs sdmmc
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_PRODUCT_FONTS=1)

@@ -6,9 +6,11 @@
 #include "bsp/esp32_p4_wifi6_touch_lcd_7b.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 
 #include "ui/assets/np_weather_background_assets.h"
 #include "ui/assets/np_weather_icon_assets.h"
@@ -16,6 +18,9 @@
 #define WEATHER_ASSET_TASK_STACK_BYTES (5U * 1024U)
 #define WEATHER_ASSET_TASK_PRIORITY 2U
 #define WEATHER_ASSET_WORKER_PERIOD_MS 100U
+#define WEATHER_SD_SETTLE_MS 750U
+#define WEATHER_SD_RETRY_DELAY_MS 1000U
+#define WEATHER_SD_MOUNT_ATTEMPTS 3U
 #define WEATHER_ASSET_SLOT_COUNT 2U
 #define WEATHER_ASSET_PATH_MAX 96U
 #define WEATHER_ICON_DIRECTORY "/np2/weather/icons"
@@ -46,6 +51,38 @@ static uint8_t s_next_slot;
 static bool s_last_attempt_valid;
 static bool s_last_attempt_day;
 static weather_condition_t s_last_attempt_condition;
+static sd_pwr_ctrl_handle_t s_sd_power;
+
+static esp_err_t mount_weather_sd(void)
+{
+    if (bsp_sdcard != NULL) return ESP_OK;
+
+    /* Match the Waveshare BSP slot and FAT policy. Keep one LDO handle across
+     * retries: bsp_sdcard_mount() creates a new one on every call, including
+     * failed calls, and cannot safely be retried without leaking channel 4. */
+    if (s_sd_power == NULL) {
+        const sd_pwr_ctrl_ldo_config_t ldo = {.ldo_chan_id = 4};
+        const esp_err_t power_result = sd_pwr_ctrl_new_on_chip_ldo(&ldo, &s_sd_power);
+        if (power_result != ESP_OK) return power_result;
+    }
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+    host.pwr_ctrl_handle = s_sd_power;
+    const sdmmc_slot_config_t slot = {
+        .cd = SDMMC_SLOT_NO_CD,
+        .wp = SDMMC_SLOT_NO_WP,
+        .width = 4,
+        .flags = 0,
+    };
+    const esp_vfs_fat_sdmmc_mount_config_t config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 64U * 1024U,
+    };
+    return esp_vfs_fat_sdmmc_mount(BSP_SD_MOUNT_POINT, &host, &slot,
+                                    &config, &bsp_sdcard);
+}
 
 static void allocate_icon_slots(void)
 {
@@ -172,11 +209,27 @@ static esp_err_t load_requested_icon(bool is_day, weather_condition_t condition,
 static void weather_asset_task(void *arg)
 {
     (void)arg;
-    /* The Waveshare BSP owns the SDMMC pin configuration. Its Kconfig keeps
-     * format_if_mount_failed disabled; this service never changes that policy. */
-    const esp_err_t result = bsp_sdcard_mount();
-    const bool mounted = result == ESP_OK ||
-                         (result == ESP_ERR_INVALID_STATE && bsp_sdcard != NULL);
+    /* Card power can lag behind the P4 on a warm reset. Delay and retry only
+     * transient init failures in this worker; LVGL and app_loop never wait. */
+    vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_SETTLE_MS));
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    for (uint8_t attempt = 0U; attempt < WEATHER_SD_MOUNT_ATTEMPTS; ++attempt) {
+        result = mount_weather_sd();
+        if (result == ESP_OK) break;
+        if ((result != ESP_ERR_TIMEOUT && result != ESP_ERR_INVALID_RESPONSE) ||
+            attempt + 1U == WEATHER_SD_MOUNT_ATTEMPTS) break;
+        ESP_LOGW(TAG, "microSD init attempt %u failed: %s; retrying",
+                 (unsigned int)(attempt + 1U), esp_err_to_name(result));
+        vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_RETRY_DELAY_MS));
+    }
+    const bool mounted = result == ESP_OK;
+    if (!mounted && s_sd_power != NULL) {
+        const esp_err_t release = sd_pwr_ctrl_del_on_chip_ldo(s_sd_power);
+        if (release != ESP_OK)
+            ESP_LOGW(TAG, "microSD power-controller release failed: %s",
+                     esp_err_to_name(release));
+        else s_sd_power = NULL;
+    }
     taskENTER_CRITICAL(&s_lock);
     s_status.ready = true;
     s_status.mounted = mounted;

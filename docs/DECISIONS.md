@@ -945,6 +945,16 @@ O profile P4 habilita `CONFIG_FATFS_LFN_HEAP=y` com `CONFIG_FATFS_MAX_LFN=64`:
 sem LFN, o FATFS reduz esses nomes a aliases 8.3 e a seleção deixa de encontrar
 o arquivo original.
 
+**Recuperação de boot (2026-09-29):** a inicialização opcional do microSD
+aguarda 750 ms no worker e faz até três tentativas apenas para timeout ou
+resposta inválida, com intervalo de 1 s. A montagem mantém o mesmo slot,
+frequência, LDO e política FAT do BSP, sem formatação. O worker cria o
+controlador da LDO uma única vez para todas as tentativas, pois a função de
+montagem do BSP cria outro controlador a cada chamada, mesmo se a montagem
+falhar. Em falha final, libera a LDO e conserva o ícone estático. Essa
+recuperação não atesta a causa elétrica do timeout nem substitui ensaios de
+reboot frio/quente e SD junto de Wi-Fi na placa.
+
 **Consequências:** cartão ausente, FAT inválido, arquivo ausente ou tamanho
 divergente preservam o card escuro sem formatar, gravar ou bloquear a Home. Os
 arquivos-fonte são provisionados por `tools/copy_weather_assets_to_sd.ps1`;
