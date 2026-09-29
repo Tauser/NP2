@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "offline_data_model.h"
+#include "user_profile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,11 +17,13 @@ extern "C" {
 typedef enum {
     APP_EVENT_REFRESH_PLATFORM = 0,
     APP_EVENT_PRODUCT_DATA_UPDATED,
+    APP_EVENT_USER_PROFILE_UPDATED,
 } app_event_type_t;
 
 typedef struct {
     app_event_type_t type;
     offline_data_snapshot_t offline_data;
+    user_profile_t user_profile;
 } app_event_t;
 
 typedef struct {

@@ -96,6 +96,9 @@ static const char *const LITTLEFS_FULL_PROBE_TAIL_PATH = "/lfsdiag/full-probe.ta
 
 typedef struct {
     cache_record_header_t header;
+static const char *const USER_PROFILE_NAMESPACE = "np2_profile";
+static const char *const USER_PROFILE_SLOT_ZERO_KEY = "usr0";
+static const char *const USER_PROFILE_SLOT_ONE_KEY = "usr1";
     uint32_t value;
 } config_record_t;
 
@@ -123,6 +126,7 @@ typedef enum {
     FLASH_REQUEST_CONFIG_CORRUPT_NEWEST,
     FLASH_REQUEST_UPDATE_JOURNAL_WRITE,
     FLASH_REQUEST_P4_OTA_BEGIN,
+    FLASH_REQUEST_USER_PROFILE_WRITE,
     FLASH_REQUEST_P4_OTA_APPEND,
     FLASH_REQUEST_P4_OTA_FINISH,
     FLASH_REQUEST_P4_OTA_ABORT,
@@ -154,6 +158,7 @@ typedef struct {
     uint32_t written_bytes;
     bool active;
     bool finished;
+    user_profile_t user_profile;
 } p4_ota_session_t;
 
 static QueueHandle_t s_request_queue;
@@ -186,6 +191,7 @@ static size_t bounded_length(const char *value, size_t limit)
     size_t length = 0U;
     while (length < limit && value[length] != '\0') {
         ++length;
+static void refresh_user_profile_status(void);
     }
     return length;
 }
@@ -1242,6 +1248,96 @@ static esp_err_t read_device_control_profile_slot(
     esp_err_t result = nvs_open_from_partition(NVS_PARTITION, DEVICE_CONTROL_NAMESPACE,
                                                NVS_READONLY, &handle);
     if (result != ESP_OK) return result;
+typedef struct {
+    cache_record_header_t header;
+    user_profile_t profile;
+} user_profile_record_t;
+
+static esp_err_t read_user_profile_slot(const char *key, user_profile_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, USER_PROFILE_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+    user_profile_record_t record = {0};
+    size_t size = sizeof(record);
+    result = nvs_get_blob(handle, key, &record, &size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    if (size != sizeof(record) ||
+        !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
+        record.header.payload_size != sizeof(record.profile) ||
+        record.header.payload_crc32 != cache_record_crc32(
+            (const uint8_t *)&record.profile, sizeof(record.profile)) ||
+        !user_profile_is_valid(&record.profile)) return ESP_ERR_INVALID_CRC;
+    if (out_record != NULL) *out_record = record;
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_user_profile(user_profile_record_t *out_record)
+{
+    user_profile_record_t first = {0}, second = {0};
+    const esp_err_t a = read_user_profile_slot(USER_PROFILE_SLOT_ZERO_KEY, &first);
+    const esp_err_t b = read_user_profile_slot(USER_PROFILE_SLOT_ONE_KEY, &second);
+    if (a != ESP_OK && b != ESP_OK)
+        return a == ESP_ERR_NVS_NOT_FOUND && b == ESP_ERR_NVS_NOT_FOUND
+                   ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_CRC;
+    if (out_record != NULL)
+        *out_record = b == ESP_OK && (a != ESP_OK || second.header.generation > first.header.generation)
+                          ? second : first;
+    return ESP_OK;
+}
+
+static void refresh_user_profile_status(void)
+{
+    user_profile_record_t selected = {0};
+    const esp_err_t result = select_latest_user_profile(&selected);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.user_profile_result = result;
+    s_status.user_profile_valid = result == ESP_OK;
+    s_status.user_profile_generation = result == ESP_OK ? selected.header.generation : 0U;
+    s_status.user_profile = result == ESP_OK ? selected.profile : (user_profile_t){0};
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+static esp_err_t write_user_profile(const user_profile_t *profile)
+{
+    if (!user_profile_is_valid(profile)) return ESP_ERR_INVALID_ARG;
+    user_profile_record_t latest = {0};
+    const esp_err_t latest_result = select_latest_user_profile(&latest);
+    if (latest_result == ESP_OK && latest.header.generation == UINT32_MAX)
+        return ESP_ERR_INVALID_STATE;
+    const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
+    user_profile_record_t record = {
+        .header = {.magic = NP2_CACHE_RECORD_MAGIC,
+                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .header_size = sizeof(cache_record_header_t),
+                   .generation = generation,
+                   .payload_size = sizeof(profile[0])},
+        .profile = *profile,
+    };
+    record.header.payload_crc32 = cache_record_crc32((const uint8_t *)&record.profile,
+                                                      sizeof(record.profile));
+    record.header.header_crc32 = cache_record_crc32((const uint8_t *)&record.header,
+                                                    offsetof(cache_record_header_t, header_crc32));
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, USER_PROFILE_NAMESPACE,
+                                                NVS_READWRITE, &handle), TAG,
+                        "User profile open failed");
+    const char *target = (generation & 1U) == 0U
+                             ? USER_PROFILE_SLOT_ZERO_KEY : USER_PROFILE_SLOT_ONE_KEY;
+    esp_err_t result = nvs_set_blob(handle, target, &record, sizeof(record));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result == ESP_OK) {
+        refresh_user_profile_status();
+        user_profile_record_t selected = {0};
+        result = select_latest_user_profile(&selected);
+        if (result == ESP_OK && selected.header.generation != generation) result = ESP_FAIL;
+    }
+    return result;
+}
+
 
     device_control_profile_record_t record = {0};
     size_t record_size = sizeof(record);
@@ -1903,6 +1999,7 @@ static void flash_worker_task(void *arg)
         if (request.kind == FLASH_REQUEST_RESTART) {
             /* Restart is serialized after earlier writes, with a final check
              * for changes accepted after the UI's confirmation snapshot. */
+    refresh_user_profile_status();
             if (restart_requests_safe(true)) esp_restart();
             portENTER_CRITICAL(&s_status_lock);
             s_status.restart_pending = false;
@@ -1945,6 +2042,9 @@ static void flash_worker_task(void *arg)
                                            &littlefs_verified_bytes);
             break;
         case FLASH_REQUEST_LITTLEFS_FORMAT:
+        case FLASH_REQUEST_USER_PROFILE_WRITE:
+            result = write_user_profile(&request.user_profile);
+            break;
             littlefs_format = true;
             result = format_and_mount_littlefs();
             break;
@@ -2035,6 +2135,8 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_LITTLEFS_FORMAT) {
                 ESP_LOGI(TAG, "LittleFS explicit format %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
+                ESP_LOGI(TAG, "local profile saved in %lums", (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CACHE_CORRUPT_NEWEST) {
                 ESP_LOGW(TAG, "cache newest-generation corruption %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
@@ -2077,6 +2179,7 @@ static void flash_worker_task(void *arg)
                      esp_err_to_name(result));
         }
         if (request.kind == FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE) {
+                       request.kind != FLASH_REQUEST_USER_PROFILE_WRITE &&
             portENTER_CRITICAL(&s_status_lock);
             s_status.notification_profile_completed_sequence = request.sequence;
             s_status.notification_profile_last_write_result = result;
@@ -2103,6 +2206,12 @@ esp_err_t flash_coordinator_start(void)
 
     s_request_queue = xQueueCreate(FLASH_COORDINATOR_QUEUE_LENGTH, sizeof(flash_request_t));
     ESP_RETURN_ON_FALSE(s_request_queue != NULL, ESP_ERR_NO_MEM, TAG, "Flash queue allocation failed");
+        if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.user_profile_completed_sequence = request.sequence;
+            s_status.user_profile_last_write_result = result;
+            portEXIT_CRITICAL(&s_status_lock);
+        }
 
     portENTER_CRITICAL(&s_status_lock);
     s_status.init_result = ESP_ERR_INVALID_STATE;
@@ -2122,6 +2231,7 @@ esp_err_t flash_coordinator_start(void)
         vQueueDelete(s_request_queue);
         s_request_queue = NULL;
         return ESP_ERR_NO_MEM;
+    s_status.user_profile_result = ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
 }
@@ -2389,6 +2499,35 @@ bool flash_coordinator_credential_vault_ready(void)
 esp_err_t flash_coordinator_request_credential_vault_write(const char *ssid,
                                                                         const char *password)
 {
+esp_err_t flash_coordinator_request_user_profile_write(
+    const user_profile_t *profile, uint32_t *out_sequence)
+{
+    if (!user_profile_is_valid(profile) || s_request_queue == NULL ||
+        s_p4_ota_submission_lock == NULL) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* The queue envelope includes a 4 KiB OTA chunk; it must never be a
+     * temporary on app_loop's stack for this small identity record. */
+    s_p4_ota_request = (flash_request_t){
+        .kind = FLASH_REQUEST_USER_PROFILE_WRITE,
+        .sequence = status.last_sequence + 1U,
+        .user_profile = *profile,
+    };
+    if (xQueueSend(s_request_queue, &s_p4_ota_request, 0) != pdPASS) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    if (out_sequence != NULL) *out_sequence = s_p4_ota_request.sequence;
+    set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return ESP_OK;
+}
+
     if (!flash_coordinator_credential_vault_ready() || ssid == NULL ||
         password == NULL || s_request_queue == NULL) {
         return ESP_ERR_NOT_SUPPORTED;

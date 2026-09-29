@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "offline_data_model.h"
 #include "connectivity_diagnostic.h"
+#include "user_profile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,6 +125,15 @@ typedef struct {
 } app_system_projection_t;
 
 typedef struct {
+    bool ready;
+    bool configured;
+    bool persistence_pending;
+    uint32_t persisted_generation;
+    esp_err_t last_result;
+    user_profile_t profile;
+} app_user_profile_projection_t;
+
+typedef struct {
     uint32_t revision;
     bool ready;
     app_storage_projection_t storage;
@@ -133,6 +143,7 @@ typedef struct {
     app_notification_projection_t notifications;
     app_device_control_projection_t device_controls;
     app_system_projection_t system;
+    app_user_profile_projection_t user_profile;
     bool time_trusted;
     uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;
@@ -152,6 +163,8 @@ esp_err_t app_state_start(void);
 
 /* Coalescible notification for a consumer that has published new platform state. */
 esp_err_t app_state_request_refresh(void);
+/* Posts a bounded non-secret identity update to the app_loop writer. */
+esp_err_t app_state_request_user_profile_update(const user_profile_t *profile);
 
 /* Lock-protected copy for the LVGL task; no service I/O is performed here. */
 void app_state_get_ui_projection(app_ui_projection_t *out_projection);

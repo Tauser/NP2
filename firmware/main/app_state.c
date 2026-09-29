@@ -38,6 +38,65 @@ static bool s_started;
 /* Written only by app_loop after receiving a validated provider result. */
 static offline_data_snapshot_t s_live_offline_data;
 static bool s_live_offline_data_valid;
+/* The app_loop alone mutates identity. FlashCoordinator owns its NVS records. */
+static user_profile_t s_user_profile;
+static user_profile_t s_profile_submitted;
+static bool s_user_profile_configured;
+static bool s_profile_restored;
+static bool s_profile_dirty;
+static bool s_profile_inflight;
+static uint32_t s_profile_sequence;
+static uint32_t s_profile_persisted_generation;
+static esp_err_t s_profile_result = ESP_OK;
+
+static bool user_profiles_equal(const user_profile_t *a, const user_profile_t *b)
+{
+    return a->avatar_color == b->avatar_color &&
+           memcmp(a->name, b->name, sizeof(a->name)) == 0;
+}
+
+static void refresh_user_profile(const flash_coordinator_status_t *storage)
+{
+    if (!storage->ready || storage->user_profile_result == ESP_ERR_INVALID_STATE) return;
+    if (!s_profile_restored) {
+        if (storage->user_profile_valid) {
+            if (!s_profile_dirty) {
+                s_user_profile = storage->user_profile;
+                s_user_profile_configured = true;
+            }
+            s_profile_persisted_generation = storage->user_profile_generation;
+        } else if (storage->user_profile_result != ESP_ERR_NOT_FOUND) {
+            s_profile_result = storage->user_profile_result;
+        }
+        s_profile_restored = true;
+    }
+    if (s_profile_inflight &&
+        storage->user_profile_completed_sequence == s_profile_sequence) {
+        s_profile_inflight = false;
+        if (storage->user_profile_last_write_result == ESP_OK &&
+            storage->user_profile_valid &&
+            user_profiles_equal(&storage->user_profile, &s_profile_submitted)) {
+            s_profile_persisted_generation = storage->user_profile_generation;
+            s_profile_result = ESP_OK;
+        } else {
+            s_profile_result = storage->user_profile_last_write_result == ESP_OK
+                                   ? ESP_FAIL : storage->user_profile_last_write_result;
+        }
+    }
+    if (!s_profile_dirty || s_profile_inflight || storage->busy || storage->pending) return;
+    uint32_t sequence = 0U;
+    const esp_err_t result = flash_coordinator_request_user_profile_write(
+        &s_user_profile, &sequence);
+    if (result == ESP_OK) {
+        s_profile_submitted = s_user_profile;
+        s_profile_sequence = sequence;
+        s_profile_inflight = true;
+        s_profile_dirty = false;
+    } else if (result != ESP_ERR_INVALID_STATE && result != ESP_ERR_TIMEOUT) {
+        s_profile_result = result;
+        s_profile_dirty = false;
+    }
+}
 
 static app_network_state_t map_network_state(connectivity_diagnostic_state_t state)
 {
@@ -161,6 +220,7 @@ static void refresh_projection(void)
     connectivity_diagnostic_get_status(&network);
     time_service_get_status(&time_status);
     onboarding_service_refresh();
+    refresh_user_profile(&storage);
     onboarding_service_get_status(&onboarding);
     notification_service_get_status(&notifications);
     device_control_get_status(&controls);
@@ -217,6 +277,14 @@ static void refresh_projection(void)
         .timezone_persistence_pending = onboarding.timezone_persistence_pending,
         .stage = (uint8_t)onboarding.stage,
         .last_result = onboarding.last_result,
+    };
+    candidate.user_profile = (app_user_profile_projection_t){
+        .ready = s_profile_restored,
+        .configured = s_user_profile_configured,
+        .persistence_pending = s_profile_dirty || s_profile_inflight,
+        .persisted_generation = s_profile_persisted_generation,
+        .last_result = s_profile_result,
+        .profile = s_user_profile,
     };
     candidate.notifications = (app_notification_projection_t){
         .ready = notifications.ready,
@@ -332,6 +400,15 @@ static void app_loop_task(void *arg)
         if (result == ESP_OK && event.type == APP_EVENT_PRODUCT_DATA_UPDATED) {
             s_live_offline_data = event.offline_data;
             s_live_offline_data_valid = true;
+        } else if (result == ESP_OK && event.type == APP_EVENT_USER_PROFILE_UPDATED) {
+            if (!s_user_profile_configured ||
+                !user_profiles_equal(&s_user_profile, &event.user_profile) ||
+                s_profile_result != ESP_OK || s_profile_persisted_generation == 0U) {
+                s_user_profile = event.user_profile;
+                s_user_profile_configured = true;
+                s_profile_dirty = true;
+                s_profile_result = ESP_OK;
+            }
         } else if (result == ESP_OK && event.type != APP_EVENT_REFRESH_PLATFORM) {
             ESP_LOGW(TAG, "discarded unknown app event %u", (unsigned int)event.type);
         }
@@ -369,6 +446,16 @@ esp_err_t app_state_start(void)
 esp_err_t app_state_request_refresh(void)
 {
     const app_event_t event = {.type = APP_EVENT_REFRESH_PLATFORM};
+    return app_event_bus_post(&event);
+}
+
+esp_err_t app_state_request_user_profile_update(const user_profile_t *profile)
+{
+    if (!user_profile_is_valid(profile)) return ESP_ERR_INVALID_ARG;
+    const app_event_t event = {
+        .type = APP_EVENT_USER_PROFILE_UPDATED,
+        .user_profile = *profile,
+    };
     return app_event_bus_post(&event);
 }
 

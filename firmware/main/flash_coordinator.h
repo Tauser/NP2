@@ -9,6 +9,7 @@
 #include "offline_data_model.h"
 #include "update_journal.h"
 #include "device_control_profile.h"
+#include "user_profile.h"
 
 /*
  * The coordinator is the sole owner of normal flash writes. Callers only
@@ -81,6 +82,12 @@ typedef struct {
     esp_err_t device_control_profile_last_write_result;
     /* Credential-vault presence only. Credential data is never exposed here. */
     bool credential_vault_valid;
+    bool user_profile_valid;
+    uint32_t user_profile_generation;
+    user_profile_t user_profile;
+    esp_err_t user_profile_result;
+    uint32_t user_profile_completed_sequence;
+    esp_err_t user_profile_last_write_result;
     uint32_t credential_vault_generation;
     esp_err_t credential_vault_result;
     bool update_journal_valid;
@@ -162,6 +169,8 @@ esp_err_t flash_coordinator_request_device_control_profile_write(
     const device_control_profile_t *profile, uint32_t *out_sequence);
 
 /*
+esp_err_t flash_coordinator_request_user_profile_write(
+    const user_profile_t *profile, uint32_t *out_sequence);
  * Credential-vault storage. Production requires NVS Encryption and active
  * Flash Encryption. An explicitly compiled development profile may retain
  * credentials in local NVS on an unlocked P4. The driver keeps
