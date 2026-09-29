@@ -64,6 +64,8 @@ typedef struct {
     uint32_t transport_failures;
     bool online;
     char connected_ssid[33];
+    char ip_address[16];
+    char gateway[16];
     esp_err_t last_result;
 } app_network_projection_t;
 

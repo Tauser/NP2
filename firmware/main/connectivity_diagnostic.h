@@ -55,6 +55,9 @@ typedef struct {
     bool online;
     /* Public association identity, captured from STA_CONNECTED, never a credential. */
     char connected_ssid[33];
+    /* Public IPv4 data received from DHCP, cleared at association boundaries. */
+    char ip_address[16];
+    char gateway[16];
 } connectivity_diagnostic_status_t;
 
 /* Starts the worker and returns without waiting for SDIO, Wi-Fi or scan work. */

@@ -10,6 +10,7 @@
 #include "connectivity_diagnostic.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "esp_event.h"
 #include "esp_hosted.h"
@@ -222,6 +223,8 @@ static void clear_active_credentials(void)
     s_status.reconnect_attempts = 0;
     s_status.online = false;
     memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+    memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+    memset(s_status.gateway, 0, sizeof(s_status.gateway));
     s_status.station_credentials_in_ram = false;
     s_status.credential_vault_saved = false;
     s_status.credential_vault_save_pending = false;
@@ -248,6 +251,8 @@ static void request_station_retry(esp_err_t result)
     s_station_deadline_us = 0;
     s_status.online = false;
     memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+    memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+    memset(s_status.gateway, 0, sizeof(s_status.gateway));
     s_status.last_result = result;
     if (s_status.station_credentials_in_ram) {
         s_retry_pending = true;
@@ -277,6 +282,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         const wifi_event_sta_connected_t *const connected = event_data;
         taskENTER_CRITICAL(&s_status_lock);
         memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+        memset(s_status.gateway, 0, sizeof(s_status.gateway));
         if (connected != NULL) {
             const size_t length = connected->ssid_len < sizeof(s_status.connected_ssid)
                                       ? connected->ssid_len : sizeof(s_status.connected_ssid) - 1U;
@@ -288,9 +295,32 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         return;
     }
 
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
+        taskENTER_CRITICAL(&s_status_lock);
+        const bool associated = s_status.connected_ssid[0] != '\0';
+        s_status.online = false;
+        memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+        memset(s_status.gateway, 0, sizeof(s_status.gateway));
+        taskEXIT_CRITICAL(&s_status_lock);
+        if (associated) set_station_deadline(CONNECTIVITY_DIAGNOSTIC_STATE_WAITING_FOR_IP,
+                                             ESP_OK, NP2_WIFI_DHCP_TIMEOUT_MS);
+        return;
+    }
+
     if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *const got_ip = event_data;
+        char ip[16] = {0};
+        char gateway[16] = {0};
+        if (got_ip != NULL && got_ip->ip_info.ip.addr != 0U) {
+            snprintf(ip, sizeof(ip), IPSTR, IP2STR(&got_ip->ip_info.ip));
+        }
+        if (got_ip != NULL && got_ip->ip_info.gw.addr != 0U) {
+            snprintf(gateway, sizeof(gateway), IPSTR, IP2STR(&got_ip->ip_info.gw));
+        }
         bool dhcp_silence_recovered = false;
         taskENTER_CRITICAL(&s_status_lock);
+        memcpy(s_status.ip_address, ip, sizeof(ip));
+        memcpy(s_status.gateway, gateway, sizeof(gateway));
         s_retry_pending = false;
         s_station_deadline_us = 0;
         s_status.reconnect_attempts = 0;
@@ -323,6 +353,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_station_deadline_us = 0;
             s_status.online = false;
             memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+            memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+            memset(s_status.gateway, 0, sizeof(s_status.gateway));
             s_status.last_result = ESP_OK;
             s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_BACKOFF;
             s_retry_pending = s_status.station_credentials_in_ram;
@@ -332,6 +364,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
         s_status.online = false;
         memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+        memset(s_status.gateway, 0, sizeof(s_status.gateway));
         s_station_deadline_us = 0;
         s_status.last_disconnect_reason = reason;
         /* AUTH_EXPIRE and handshake timeouts occur after an AP restart or a
@@ -391,6 +425,8 @@ static void hosted_event_handler(void *arg, esp_event_base_t event_base,
         s_status.wifi_ready = false;
         s_status.online = false;
         memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+        memset(s_status.gateway, 0, sizeof(s_status.gateway));
         s_station_deadline_us = 0;
         s_retry_pending = false;
         s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_LINK_DOWN;
@@ -430,6 +466,8 @@ static esp_err_t configure_station_from_request(const connectivity_request_t *re
     s_status.reconnect_attempts = 0;
     s_status.online = false;
     memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+    memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+    memset(s_status.gateway, 0, sizeof(s_status.gateway));
     s_status.station_credentials_in_ram = true;
     s_status.credential_vault_saved = false;
     s_status.credential_vault_save_pending = false;
@@ -626,7 +664,11 @@ static void process_request(connectivity_request_t *request)
                 set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE, ESP_OK);
             }
         }
-        if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi scan request failed: %s", esp_err_to_name(err));
+        if (err != ESP_OK) {
+            /* Complete failed scans too, so management can request another. */
+            set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE, err);
+            ESP_LOGW(TAG, "Wi-Fi scan request failed: %s", esp_err_to_name(err));
+        }
     } else if (request->type == CONNECTIVITY_REQUEST_RECOVER_HOSTED) {
         err = recover_hosted_link();
         if (err != ESP_OK) {
@@ -912,7 +954,7 @@ static esp_err_t start_ram_only_wifi(void)
     if (err != ESP_OK) {
         return err;
     }
-    err = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL);
+    err = esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL);
     if (err != ESP_OK) {
         (void)esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler);
         return err;
@@ -947,7 +989,7 @@ static esp_err_t stop_ram_only_wifi(void)
 {
     if (s_wifi_events_registered) {
         (void)esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler);
-        (void)esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler);
+        (void)esp_event_handler_unregister(IP_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler);
         s_wifi_events_registered = false;
     }
 
@@ -1000,6 +1042,8 @@ static bool begin_hosted_recovery_cycle(void)
         s_status.wifi_ready = false;
         s_status.online = false;
         memset(s_status.connected_ssid, 0, sizeof(s_status.connected_ssid));
+        memset(s_status.ip_address, 0, sizeof(s_status.ip_address));
+        memset(s_status.gateway, 0, sizeof(s_status.gateway));
         s_station_deadline_us = 0;
         s_retry_pending = false;
         s_hosted_recovery_in_progress = true;

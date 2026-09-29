@@ -250,6 +250,8 @@ static void refresh_projection(void)
     candidate.system.restart_result = storage.restart_result;
     memcpy(candidate.network.connected_ssid, network.connected_ssid,
            sizeof(candidate.network.connected_ssid));
+    memcpy(candidate.network.ip_address, network.ip_address, sizeof(candidate.network.ip_address));
+    memcpy(candidate.network.gateway, network.gateway, sizeof(candidate.network.gateway));
     candidate.time_trusted = time_status.trusted;
     const time_t now = time(NULL);
     candidate.current_unix_s = candidate.time_trusted && now >= (time_t)APP_VALID_EPOCH_SECONDS &&
