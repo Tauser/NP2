@@ -30,6 +30,57 @@ static np_wifi_password_t password;
 static np_keyboard_t keyboard;
 static np_settings_wifi_add_t add;
 static uint8_t pixels[1024 * 600 * 2];
+static void keyboard_focus_tests(void)
+{
+    lv_obj_t *a = lv_textarea_create(lv_screen_active());
+    lv_obj_t *b = lv_textarea_create(lv_screen_active());
+    np_keyboard_bind(&keyboard, a, NP_KEYBOARD_MODE_TEXT);
+    np_keyboard_bind(&keyboard, b, NP_KEYBOARD_MODE_TEXT);
+    lv_obj_add_state(a, LV_STATE_FOCUSED);
+    lv_obj_send_event(a, LV_EVENT_FOCUSED, NULL);
+    lv_obj_remove_state(a, LV_STATE_FOCUSED);
+    lv_obj_send_event(a, LV_EVENT_DEFOCUSED, NULL);
+    assert(keyboard.reconcile_pending && np_keyboard_is_visible(&keyboard));
+    /* Reconcile must discover B even before its focus callback is delivered. */
+    lv_obj_add_state(b, LV_STATE_FOCUSED);
+    lv_tick_inc(10); lv_timer_handler();
+    assert(keyboard.target == b && np_keyboard_is_visible(&keyboard));
+    lv_obj_remove_state(b, LV_STATE_FOCUSED);
+    lv_obj_send_event(keyboard.keyboard, LV_EVENT_PRESSED, NULL);
+    lv_obj_send_event(b, LV_EVENT_DEFOCUSED, NULL);
+    lv_tick_inc(10); lv_timer_handler();
+    assert(keyboard.target == b && np_keyboard_is_visible(&keyboard));
+    lv_obj_send_event(keyboard.keyboard, LV_EVENT_RELEASED, NULL);
+    lv_obj_send_event(b, LV_EVENT_DEFOCUSED, NULL);
+    lv_tick_inc(10); lv_timer_handler();
+    assert(!np_keyboard_is_visible(&keyboard) && keyboard.target == NULL);
+    lv_obj_delete(a);
+    const uint32_t callbacks = lv_obj_get_event_count(b);
+    np_keyboard_bind(&keyboard, b, NP_KEYBOARD_MODE_TEXT);
+    assert(callbacks == lv_obj_get_event_count(b));
+    lv_obj_add_state(b, LV_STATE_FOCUSED);
+    lv_obj_send_event(b, LV_EVENT_FOCUSED, NULL);
+    lv_obj_remove_state(b, LV_STATE_FOCUSED);
+    lv_obj_send_event(b, LV_EVENT_DEFOCUSED, NULL);
+    np_keyboard_hide(&keyboard);
+    lv_obj_delete(b);
+    lv_tick_inc(10); lv_timer_handler();
+    assert(!np_keyboard_is_visible(&keyboard) && !keyboard.reconcile_pending);
+    /* Destroying the global owner must detach callbacks from surviving fields. */
+    a = lv_textarea_create(lv_screen_active());
+    np_keyboard_bind(&keyboard, a, NP_KEYBOARD_MODE_TEXT);
+    lv_obj_send_event(a, LV_EVENT_FOCUSED, NULL);
+    lv_obj_send_event(a, LV_EVENT_DEFOCUSED, NULL);
+    np_keyboard_destroy(&keyboard);
+    lv_tick_inc(10); lv_timer_handler();
+    lv_obj_send_event(a, LV_EVENT_FOCUSED, NULL);
+    assert(keyboard.root == NULL);
+    lv_obj_delete(a);
+    keyboard = np_keyboard_create(lv_screen_active());
+    lv_obj_update_layout(keyboard.root);
+    assert(lv_obj_get_x(keyboard.root) == 0 && lv_obj_get_width(keyboard.root) == 1024);
+    assert(lv_obj_get_y(keyboard.root) + lv_obj_get_height(keyboard.root) == 600);
+}
 int main(int argc, char **argv)
 {
     lv_init();
@@ -45,6 +96,7 @@ int main(int argc, char **argv)
     lv_display_set_buffers(display, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(display, flush);
     keyboard = np_keyboard_create(lv_screen_active());
+    keyboard_focus_tests();
     connectivity_scan_result_t results[40] = {0};
     for (unsigned i = 0; i < 40; ++i) {
         snprintf(results[i].ssid, sizeof(results[i].ssid), "Rede de teste %02u", i);

@@ -36,9 +36,25 @@ static void keyboard_reconcile_async(void *user_data)
     keyboard->reconcile_pending = false;
     if (!np_keyboard_is_visible(keyboard)) return;
 
+    /* Bindings are cleared synchronously by DELETE. Inspect only live,
+     * registered fields, including a focus transfer queued before this call. */
+    for (uint8_t i = 0; i < NP_KEYBOARD_MAX_BINDINGS; ++i) {
+        const np_keyboard_binding_t *binding = &keyboard->bindings[i];
+        if (binding->textarea != NULL &&
+            lv_obj_has_state(binding->textarea, LV_STATE_FOCUSED) &&
+            lv_obj_is_visible(binding->textarea)) {
+            if (keyboard->target != binding->textarea)
+                np_keyboard_focus(keyboard, binding->textarea, binding->mode);
+            keyboard->interaction_inside_keyboard = false;
+            return;
+        }
+    }
+
     /* A press on a key may create a transient defocus on the textarea. The
      * first reconciliation following that interaction keeps the session. */
-    if (keyboard->interaction_inside_keyboard) {
+    if (keyboard->target != NULL &&
+        (keyboard->interaction_inside_keyboard ||
+         lv_obj_has_state(keyboard->keyboard, LV_STATE_FOCUSED))) {
         keyboard->interaction_inside_keyboard = false;
         return;
     }
@@ -110,6 +126,9 @@ static void keyboard_event_cb(lv_event_t *event)
     if (code == LV_EVENT_CANCEL) {
         np_keyboard_hide(keyboard);
         return;
+    }
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        keyboard->interaction_inside_keyboard = false;
     }
     if (code == LV_EVENT_READY) {
         if (keyboard->private_input_active && keyboard->private_input != NULL) {
@@ -231,6 +250,10 @@ void np_keyboard_bind(np_keyboard_t *keyboard, lv_obj_t *textarea,
             binding->mode = mode;
             return;
         }
+    }
+    /* Search all occupied slots before using a gap left by a lazy scene. */
+    for (uint8_t i = 0; i < NP_KEYBOARD_MAX_BINDINGS; ++i) {
+        np_keyboard_binding_t *const binding = &keyboard->bindings[i];
         if (binding->textarea != NULL) continue;
         *binding = (np_keyboard_binding_t){
             .owner = keyboard,
@@ -303,6 +326,11 @@ void np_keyboard_destroy(np_keyboard_t *keyboard)
 {
     if (keyboard == NULL) return;
     np_keyboard_hide(keyboard);
+    for (uint8_t i = 0; i < NP_KEYBOARD_MAX_BINDINGS; ++i) {
+        np_keyboard_binding_t *binding = &keyboard->bindings[i];
+        if (binding->textarea != NULL)
+            lv_obj_remove_event_cb_with_user_data(binding->textarea, target_event_cb, binding);
+    }
     if (keyboard->root != NULL) lv_obj_delete(keyboard->root);
     *keyboard = (np_keyboard_t){0};
 }
