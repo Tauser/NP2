@@ -38,6 +38,7 @@ typedef struct {
         PRODUCT_SCREEN_PREFERENCES,
         PRODUCT_SCREEN_DISPLAY_SOUND,
         PRODUCT_SCREEN_SYSTEM,
+        PRODUCT_SCREEN_NOTIFICATIONS,
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
@@ -48,6 +49,7 @@ typedef struct {
     np_preferences_view_t preferences;
     np_settings_display_sound_view_t display_sound;
     np_settings_system_view_t system_scene;
+    np_settings_notifications_view_t notifications_scene;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
@@ -240,6 +242,22 @@ static void settings_control_event_cb(lv_event_t *event)
     }
 }
 
+static void install_notification_callbacks(np_settings_notifications_t *notifications)
+{
+    if (s_ui.settings_notification_callbacks_initialized || notifications->general_switch == NULL) return;
+    lv_obj_add_event_cb(notifications->general_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)0U);
+    lv_obj_add_event_cb(notifications->sound_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)1U);
+    lv_obj_add_event_cb(notifications->system_switch, notification_switch_event_cb,
+                        LV_EVENT_VALUE_CHANGED, (void *)2U);
+    if (notifications->test_button != NULL) {
+        lv_obj_add_event_cb(notifications->test_button, notifications_test_event_cb,
+                            LV_EVENT_CLICKED, NULL);
+    }
+    s_ui.settings_notification_callbacks_initialized = true;
+}
+
 static void install_settings_control_callbacks(void)
 {
     if (!s_ui.settings_controls_initialized) {
@@ -288,21 +306,7 @@ static void install_settings_control_callbacks(void)
         }
     }
 
-    if (!s_ui.settings_notification_callbacks_initialized &&
-        s_ui.settings.notifications.general_switch != NULL) {
-        lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb,
-                            LV_EVENT_VALUE_CHANGED, (void *)0U);
-        lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb,
-                            LV_EVENT_VALUE_CHANGED, (void *)1U);
-        lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb,
-                            LV_EVENT_VALUE_CHANGED, (void *)2U);
-        if (s_ui.settings.notifications.test_button != NULL) {
-            lv_obj_add_event_cb(s_ui.settings.notifications.test_button,
-                                notifications_test_event_cb,
-                                LV_EVENT_CLICKED, NULL);
-        }
-        s_ui.settings_notification_callbacks_initialized = true;
-    }
+    install_notification_callbacks(&s_ui.settings.notifications);
 
     if (!s_ui.settings_timezone_callbacks_initialized &&
         s_ui.settings.timezone.search != NULL) {
@@ -401,11 +405,7 @@ static void settings_modal_row_event_cb(lv_event_t *event)
     } else if (type == 2U) {
         if (s_ui.settings.notifications.modal.scrim == NULL) {
             np_settings_notifications_create(&s_ui.settings.notifications, s_ui.settings.root);
-            lv_obj_add_event_cb(s_ui.settings.notifications.general_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)0U);
-            lv_obj_add_event_cb(s_ui.settings.notifications.sound_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)1U);
-            lv_obj_add_event_cb(s_ui.settings.notifications.system_switch, notification_switch_event_cb, LV_EVENT_VALUE_CHANGED, (void *)2U);
-            lv_obj_add_event_cb(s_ui.settings.notifications.test_button, notifications_test_event_cb, LV_EVENT_CLICKED, NULL);
-            s_ui.settings_notification_callbacks_initialized = true;
+            install_notification_callbacks(&s_ui.settings.notifications);
         }
         np_settings_notifications_show(&s_ui.settings.notifications);
     } else {
@@ -1364,6 +1364,37 @@ static void update_system_information(np_settings_system_t *system,
                              chip_temperature, projection->system.restart_pending);
 }
 
+static void update_notification_controls(np_settings_notifications_t *notifications,
+                                          const app_ui_projection_t *projection)
+{
+    if (!projection->notifications.ready) return;
+    s_ui.syncing_notification_controls = true;
+    np_settings_notifications_sync(notifications,
+                                   projection->notifications.general_enabled,
+                                   projection->notifications.sound_enabled,
+                                   projection->notifications.system_alerts_enabled);
+    s_ui.syncing_notification_controls = false;
+}
+
+static void update_notifications_scene(const app_ui_projection_t *projection)
+{
+    np_settings_notifications_t *notifications = &s_ui.notifications_scene.notifications;
+    update_header(&s_ui.notifications_scene.header, projection, true);
+    update_notification_controls(notifications, projection);
+    lv_obj_t *controls[] = {notifications->general_switch, notifications->sound_switch,
+                            notifications->system_switch, notifications->test_button};
+    for (unsigned i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i) {
+        if (projection->notifications.ready) lv_obj_remove_state(controls[i], LV_STATE_DISABLED);
+        else lv_obj_add_state(controls[i], LV_STATE_DISABLED);
+    }
+    np_set_text(s_ui.notifications_scene.persistence_status,
+        !projection->notifications.ready ? "Carregando preferências..."
+        : projection->notifications.persistence_pending ? "Salvando preferências..."
+        : projection->notifications.last_result != ESP_OK ? "Não foi possível ler ou salvar as preferências"
+        : projection->notifications.persisted_generation != 0U ? "Preferências salvas automaticamente"
+        : "Salvamento automático ao alterar");
+}
+
 static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
@@ -1386,12 +1417,7 @@ static void update_settings(const app_ui_projection_t *projection)
 
     if (!projection->notifications.ready) return;
 
-    s_ui.syncing_notification_controls = true;
-    np_settings_notifications_sync(&s_ui.settings.notifications,
-                                   projection->notifications.general_enabled,
-                                   projection->notifications.sound_enabled,
-                                   projection->notifications.system_alerts_enabled);
-    s_ui.syncing_notification_controls = false;
+    update_notification_controls(&s_ui.settings.notifications, projection);
     np_set_text(s_ui.settings.notifications_value,
                 projection->notifications.persistence_pending
                     ? "Atualizando..."
@@ -1497,6 +1523,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
                s_ui.active_screen == PRODUCT_SCREEN_SYSTEM) {
         update_header(&s_ui.system_scene.header, &projection, true);
         update_system_information(&s_ui.system_scene.system, &projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_NOTIFICATIONS) {
+        update_notifications_scene(&projection);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                (s_ui.active_screen == PRODUCT_SCREEN_PROFILE ||
@@ -1650,11 +1680,13 @@ static void release_current_scene(void)
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
     if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
     if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
+    if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
     s_ui.display_sound = (np_settings_display_sound_view_t){0};
+    s_ui.notifications_scene = (np_settings_notifications_view_t){0};
     s_ui.settings_controls_initialized = false;
     s_ui.settings_notification_callbacks_initialized = false;
     s_ui.settings_timezone_callbacks_initialized = false;
@@ -1731,7 +1763,8 @@ static void scene_navigation_async(void *user_data)
     if (destination != PRODUCT_SCREEN_PROFILE &&
         destination != PRODUCT_SCREEN_PREFERENCES &&
         destination != PRODUCT_SCREEN_DISPLAY_SOUND &&
-        destination != PRODUCT_SCREEN_SYSTEM) return;
+        destination != PRODUCT_SCREEN_SYSTEM &&
+        destination != PRODUCT_SCREEN_NOTIFICATIONS) return;
 
     release_current_scene();
     np_header_t *header;
@@ -1761,6 +1794,14 @@ static void scene_navigation_async(void *user_data)
         root = s_ui.display_sound.root;
         install_settings_control_callbacks();
         lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    } else if (destination == PRODUCT_SCREEN_NOTIFICATIONS) {
+        s_ui.notifications_scene = np_settings_notifications_scene_build(lv_screen_active());
+        header = &s_ui.notifications_scene.header;
+        root = s_ui.notifications_scene.root;
+        s_ui.active_screen = PRODUCT_SCREEN_NOTIFICATIONS;
+        install_notification_callbacks(&s_ui.notifications_scene.notifications);
+        lv_obj_add_event_cb(s_ui.notifications_scene.back_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
     } else if (destination == PRODUCT_SCREEN_SYSTEM) {
         install_header_callbacks = s_ui.system_scene.root == NULL;
@@ -1796,7 +1837,8 @@ static void scene_navigation_async(void *user_data)
             lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
                                     ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
-                                    ? PRODUCT_SCREEN_SYSTEM : PRODUCT_SCREEN_SETTINGS));
+                                    ? PRODUCT_SCREEN_SYSTEM : i == 3U
+                                    ? PRODUCT_SCREEN_NOTIFICATIONS : PRODUCT_SCREEN_SETTINGS));
         }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
@@ -1813,6 +1855,7 @@ static void scene_navigation_async(void *user_data)
     update_header(header, &projection, true);
     if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
     if (destination == PRODUCT_SCREEN_SYSTEM) update_system_information(&s_ui.system_scene.system, &projection);
+    if (destination == PRODUCT_SCREEN_NOTIFICATIONS) update_notifications_scene(&projection);
     s_ui.rendered_revision = projection.revision;
     np_set_visible(root, true);
     lv_obj_move_foreground(root);
