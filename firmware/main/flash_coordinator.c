@@ -2309,15 +2309,26 @@ esp_err_t flash_coordinator_request_offline_data_write(const offline_data_snapsh
 
 esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_profile_t *profile)
 {
-    if (!onboarding_profile_is_valid(profile) || s_request_queue == NULL) return ESP_ERR_INVALID_ARG;
+    if (!onboarding_profile_is_valid(profile) || s_request_queue == NULL ||
+        s_p4_ota_submission_lock == NULL) return ESP_ERR_INVALID_ARG;
+    /* flash_request_t includes the 4 KiB OTA chunk. Share the existing
+     * serialized submission buffer instead of placing it on app_loop's stack. */
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
     flash_coordinator_status_t status = {0};
     flash_coordinator_get_status(&status);
-    if (!status.ready || status.busy || status.pending) return ESP_ERR_INVALID_STATE;
-    const flash_request_t request = {.kind = FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
-                                     .sequence = status.last_sequence + 1U,
-                                     .onboarding_profile = *profile};
-    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) return ESP_ERR_TIMEOUT;
+    if (!status.ready || status.busy || status.pending) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
+                                         .sequence = status.last_sequence + 1U,
+                                         .onboarding_profile = *profile};
+    if (xQueueSend(s_request_queue, &s_p4_ota_request, 0) != pdPASS) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_TIMEOUT;
+    }
     set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
     return ESP_OK;
 }
 
