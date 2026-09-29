@@ -953,6 +953,30 @@ static void update_header(np_header_t *header,
 {
     if (header == NULL || projection == NULL) return;
 
+    const char *const name = projection->user_profile.profile.name;
+    const bool has_name = projection->user_profile.ready &&
+                          projection->user_profile.configured && name[0] != '\0';
+    if (has_name) {
+        char first_name[USER_PROFILE_NAME_BYTES] = {0};
+        size_t length = 0U;
+        while (length + 1U < sizeof(first_name) && name[length] != '\0' &&
+               name[length] != ' ') {
+            first_name[length] = name[length];
+            ++length;
+        }
+        np_set_text(header->brand_nova, first_name);
+    } else {
+        np_set_text(header->brand_nova, "Nova");
+    }
+    /* Profile has a Home action at x=250; keep long first names within the
+     * brand area instead of wrapping over that button. */
+    const int32_t brand_width = has_name ? 150 : 64;
+    if (lv_obj_get_width(header->brand_nova) != brand_width) {
+        lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(header->brand_nova, brand_width);
+    }
+    np_set_visible(header->brand_panel, !has_name);
+
     int8_t connected_rssi = 0;
     bool connected_rssi_measured = false;
     for (uint8_t i = 0; i < projection->network.scan_results_count; ++i) {
