@@ -46,15 +46,17 @@ static void initials_for(const char *name, char out[4])
 /* Identity has no source in the current application model. Do not borrow
  * the weather provider's location or manufacture a user from the mockup. */
 static lv_obj_t *profile_row(lv_obj_t *parent, int32_t y,
-                              const char *title, const char *detail,
+                              const char *icon, const char *title, const char *detail,
                               lv_obj_t **out_detail)
 {
     lv_obj_t *row = np_fill(parent, NP_SP_24, y, 428, 76,
                              np_c_surface_raised(), LV_OPA_COVER,
                              NP_RADIUS_CONTROL);
-    np_label(row, title, NP_FONT_MD, np_c_text(), 16, 10, 352, LV_TEXT_ALIGN_LEFT);
+    np_label(row, icon, NP_FONT_ICON, np_c_text_2(),
+              16, 25, 28, LV_TEXT_ALIGN_CENTER);
+    np_label(row, title, NP_FONT_MD, np_c_text(), 60, 10, 300, LV_TEXT_ALIGN_LEFT);
     lv_obj_t *value = np_label(row, detail, NP_FONT_SM, np_c_text_2(),
-                               16, 42, 352, LV_TEXT_ALIGN_LEFT);
+                               60, 42, 300, LV_TEXT_ALIGN_LEFT);
     if (out_detail != NULL) *out_detail = value;
     np_label(row, NP_ICON_ARROW_RIGHT, NP_FONT_ICON, np_c_text_2(),
               380, 26, 24, LV_TEXT_ALIGN_CENTER);
@@ -90,16 +92,19 @@ np_profile_view_t np_profile_build(lv_obj_t *parent)
               24, 20, 428, LV_TEXT_ALIGN_LEFT);
     np_label(account, "Identidade do usuário", NP_FONT_SM, np_c_text_2(),
               24, 54, 428, LV_TEXT_ALIGN_LEFT);
-    view.name_row = profile_row(account, 100, "Nome", "Não informado", &view.name_value);
-    view.avatar_row = profile_row(account, 188, "Avatar", "Iniciais do nome", &view.avatar_value);
+    view.name_row = profile_row(account, 100, NP_ICON_ACCOUNT,
+                                "Nome", "Não informado", &view.name_value);
+    view.avatar_row = profile_row(account, 188, NP_ICON_IMAGE,
+                                  "Avatar", "Iniciais do nome", &view.avatar_value);
 
     lv_obj_t *personal = np_panel(view.root, 524, 284, 476, 292);
     np_label(personal, "Preferências pessoais", NP_FONT_LG, np_c_text(),
               24, 20, 428, LV_TEXT_ALIGN_LEFT);
     np_label(personal, "Seu painel", NP_FONT_SM, np_c_text_2(),
               24, 54, 428, LV_TEXT_ALIGN_LEFT);
-    view.initial_screen_row = profile_row(personal, 100, "Tela inicial", "Home", NULL);
-    view.preferences_row = profile_row(personal, 188, "Abrir preferências",
+    view.initial_screen_row = profile_row(personal, 100, NP_ICON_HOME,
+                                           "Tela inicial", "Home", NULL);
+    view.preferences_row = profile_row(personal, 188, NP_ICON_SETTINGS, "Abrir preferências",
                                        "Configurações do sistema", NULL);
     return view;
 }
@@ -144,9 +149,12 @@ static void preview_editor(np_profile_view_t *view)
     initials_for(lv_textarea_get_text(view->name_input), initials);
     np_set_text(view->editor_initials, initials);
     np_set_bg_color(view->editor_avatar, avatar_color(view->draft_color));
-    for (uint8_t i = 0; i < USER_PROFILE_COLOR_COUNT; ++i)
+    for (uint8_t i = 0; i < USER_PROFILE_COLOR_COUNT; ++i) {
         lv_obj_set_style_border_color(view->color_buttons[i],
             i == view->draft_color ? np_c_text() : np_c_hairline(), 0);
+        lv_label_set_text(lv_obj_get_child(view->color_buttons[i], 0),
+                          i == view->draft_color ? NP_ICON_CHECK : "");
+    }
 }
 
 static void editor_input_changed(lv_event_t *event)
@@ -180,7 +188,7 @@ void np_profile_open_editor(np_profile_view_t *view, np_keyboard_t *keyboard,
         np_label(view->editor.content, "Nome", NP_FONT_SM, np_c_text_2(),
                  24, 2, 400, LV_TEXT_ALIGN_LEFT);
         view->name_input = np_form_text_input(view->editor.content, 24, 24,
-                                              400, 48, "Seu nome", NULL);
+                                              400, 48, "Seu nome", NP_ICON_ACCOUNT);
         lv_textarea_set_max_length(view->name_input, USER_PROFILE_NAME_BYTES - 1U);
         np_keyboard_bind(keyboard, view->name_input, NP_KEYBOARD_MODE_TEXT);
         lv_obj_add_event_cb(view->name_input, editor_input_changed,
@@ -193,18 +201,24 @@ void np_profile_open_editor(np_profile_view_t *view, np_keyboard_t *keyboard,
                                           np_c_text_on_accent(), 0, 11, 44,
                                           LV_TEXT_ALIGN_CENTER);
         for (uint8_t i = 0; i < USER_PROFILE_COLOR_COUNT; ++i) {
-            view->color_buttons[i] = np_fill(view->editor.content,
-                108 + i * 72, 110, 44, 44, avatar_color(i), LV_OPA_COVER,
-                LV_RADIUS_CIRCLE);
+            view->color_buttons[i] = np_form_icon_button(view->editor.content,
+                108 + i * 72, 110, 44, NP_ICON_CHECK);
+            lv_obj_set_style_bg_color(view->color_buttons[i], avatar_color(i), 0);
+            lv_obj_set_style_bg_opa(view->color_buttons[i], LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(view->color_buttons[i], 3, 0);
-            lv_obj_add_flag(view->color_buttons[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_text_color(view->color_buttons[i],
+                                         np_c_text_on_accent(), 0);
+            lv_obj_set_style_text_color(lv_obj_get_child(view->color_buttons[i], 0),
+                                         np_c_text_on_accent(), 0);
             lv_obj_add_event_cb(view->color_buttons[i], editor_color_clicked,
                                 LV_EVENT_CLICKED, view);
         }
-        view->cancel_button = np_button(view->editor.content, 24, 158,
-                                         190, 44, "Cancelar", false);
-        view->save_button = np_button(view->editor.content, 234, 158,
-                                       190, 44, "Salvar", true);
+        view->cancel_button = np_form_button(view->editor.content, 24, 158,
+                                              190, 44, "Cancelar",
+                                              NP_FORM_BUTTON_SECONDARY);
+        view->save_button = np_form_button(view->editor.content, 234, 158,
+                                            190, 44, "Salvar",
+                                            NP_FORM_BUTTON_PRIMARY);
     }
     view->draft_color = view->current_color;
     lv_textarea_set_text(view->name_input,

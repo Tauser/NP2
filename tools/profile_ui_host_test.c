@@ -40,6 +40,12 @@ int main(void)
     assert(np_modal_is_visible(&view.editor));
     assert(np_keyboard_is_visible(&keyboard) && keyboard.target == view.name_input);
     assert(!strcmp(lv_textarea_get_text(view.name_input), saved.name));
+    assert(view.color_buttons[0] != NULL);
+    lv_obj_send_event(view.color_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(view.draft_color == 1U);
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(view.color_buttons[1], 0)),
+                   NP_ICON_CHECK));
+    assert(!strcmp(lv_label_get_text(lv_obj_get_child(view.color_buttons[2], 0)), ""));
     const unsigned edited = objects(view.root);
     assert(edited > initial);
     for (unsigned i = 0; i < 50; ++i) {
