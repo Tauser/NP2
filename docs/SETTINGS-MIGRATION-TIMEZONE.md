@@ -108,3 +108,30 @@ aplicação `0x800000`, 66% livres. Bootloader `0x5a50`. SHA256:
 `944f54716e2498e56a84cf363a8ead395e29994c692b954ccab73580403210d0`.
 Descrição de origem `50a39d4-dirty`, incluindo as alterações de UI deste
 commit. Nenhum flash foi executado, conforme preferência de flash manual.
+
+## Ajuste temporário — somente Brasil (29/09/2026)
+
+Por decisão de produto, a lista e a busca agora oferecem somente as 17
+escolhas brasileiras do catálogo, incluindo o alias legado Brasília. O
+mesmo filtro vale para a cena dedicada e o modal legado; o dropdown legado
+mostra somente Brasil. O texto de busca passa a “Buscar cidade ou GMT”.
+
+O catálogo de 462 registros e seus índices persistidos permanecem intactos.
+Apagá-lo agora exigiria migrar os índices de perfis já gravados; os 15 KiB do
+CSV estão em flash mapeada, sem 462 objetos LVGL. Uma preferência estrangeira
+já gravada não é substituída automaticamente; continua ativa até aplicar uma
+escolha brasileira. O buffer da lista foi reduzido de 462 para 24 índices
+(17 usados hoje), e o mapeamento de regiões obsoleto foi removido.
+
+A mensagem “Preferência indisponível no momento” vinha do serviço de
+onboarding: ele recusava o pedido quando ainda não havia perfil concluído,
+situação possível em instalações já configuradas. Agora a primeira escolha
+em Preferências gera esse perfil pelo mesmo FlashCoordinator, sem NVS na UI
+nem mudança de schema; a conclusão só é confirmada após a gravação. Selecionar
+um fuso fecha o teclado global para expor o botão Aplicar. O teste host cobre
+primeira gravação, restauração simulada após reboot e teclado aberto na
+seleção. Persistência e WDT em placa ainda precisam de validação após flash.
+
+Teste LVGL atualizado passou: subset brasileiro, cidades, GMT-5, rejeição
+de Londres/GMT+5:45, seleção/Aplicar, scroll até a última escolha e 100
+ciclos com 103 objetos constantes. Validação física aguarda flash manual.

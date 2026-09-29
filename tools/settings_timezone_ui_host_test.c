@@ -65,7 +65,9 @@ int main(int argc, char **argv)
     np_settings_timezone_scene_create(&view, lv_screen_active(), &keyboard, apply, NULL);
     np_set_visible(view.root, true);
     const unsigned count = objects(view.root), callbacks = lv_obj_get_event_count(view.apply_button);
-    assert(view.timezone.filtered_count == 462);
+    assert(view.timezone.filtered_count == 17);
+    for (uint16_t i = 0; i < view.timezone.filtered_count; ++i)
+        assert(!strcmp(timezone_catalog_country(view.timezone.filtered[i]), "Brasil"));
     assert(lv_obj_get_child_count(view.timezone.list) == 8); /* spacer + seven */
     for (unsigned cycle = 0; cycle < 100; ++cycle) {
         np_settings_timezone_scene_create(&view, lv_screen_active(), &keyboard, apply, NULL);
@@ -74,7 +76,7 @@ int main(int argc, char **argv)
         np_settings_timezone_scene_sync(&view, 0, false, ESP_OK, true);
         click(view.apply_button);
         assert(applies == 0); /* Current preference does not enqueue another write. */
-        for (unsigned first = 0; first < 450; first += 17) {
+        for (unsigned first = 0; first < 12; ++first) {
             lv_obj_scroll_to_y(view.timezone.list, first * 54, LV_ANIM_OFF);
             lv_obj_update_layout(view.timezone.list);
             lv_obj_send_event(view.timezone.list, LV_EVENT_SCROLL, NULL);
@@ -85,23 +87,31 @@ int main(int argc, char **argv)
         lv_obj_scroll_to_y(view.timezone.list, 100000, LV_ANIM_OFF);
         lv_obj_update_layout(view.timezone.list);
         lv_obj_send_event(view.timezone.list, LV_EVENT_SCROLL, NULL);
-        assert(view.timezone.rows[5].catalog_index == 461);
+        assert(view.timezone.rows[5].catalog_index == view.timezone.filtered[16]);
         lv_textarea_set_text(view.timezone.search, "São Paulo");
         assert(view.timezone.filtered_count == 2);
         lv_textarea_set_text(view.timezone.search, "Brasil");
-        assert(view.timezone.filtered_count > 10);
+        assert(view.timezone.filtered_count == 17);
         lv_textarea_set_text(view.timezone.search, "GMT+5:45");
+        assert(view.timezone.filtered_count == 0);
+        lv_textarea_set_text(view.timezone.search, "GMT-5");
         assert(view.timezone.filtered_count > 0);
         int16_t offset;
-        assert(timezone_catalog_standard_offset(view.timezone.filtered[0], &offset) && offset == 345);
+        assert(timezone_catalog_standard_offset(view.timezone.filtered[0], &offset) && offset == -300);
         lv_textarea_set_text(view.timezone.search, "not_a_real_city");
         assert(view.timezone.filtered_count == 0 && !lv_obj_has_flag(view.empty_label, LV_OBJ_FLAG_HIDDEN));
         lv_textarea_set_text(view.timezone.search, "London");
-        assert(view.timezone.filtered_count >= 1);
+        assert(view.timezone.filtered_count == 0);
+        lv_textarea_set_text(view.timezone.search, "Rio Branco");
+        assert(view.timezone.filtered_count == 1);
+        const uint16_t chosen = view.timezone.filtered[0];
+        click(view.timezone.search);
+        assert(np_keyboard_is_visible(&keyboard));
         click(view.timezone.rows[0].root);
-        assert(view.timezone.selected_index == 4 && !applies);
+        assert(view.timezone.selected_index == chosen && !applies);
+        assert(!np_keyboard_is_visible(&keyboard) && keyboard.target == NULL);
         click(view.apply_button);
-        assert(applies == 1 && submitted == 4 && view.awaiting_projection);
+        assert(applies == 1 && submitted == chosen && view.awaiting_projection);
         /* A new local draft while the previous request is being projected
          * must neither be overwritten nor hold the keyboard/apply forever. */
         lv_textarea_set_text(view.timezone.search, "São Paulo");
@@ -109,15 +119,15 @@ int main(int argc, char **argv)
         assert(view.timezone.selected_index == 0);
         np_settings_timezone_scene_sync(&view, 0, false, ESP_OK, true);
         assert(view.awaiting_projection); /* stale projection cannot undo submit */
-        np_settings_timezone_scene_sync(&view, 4, true, ESP_OK, true);
+        np_settings_timezone_scene_sync(&view, chosen, true, ESP_OK, true);
         assert(view.pending && !view.awaiting_projection);
         assert(view.timezone.selected_index == 0);
-        lv_textarea_set_text(view.timezone.search, "London");
+        lv_textarea_set_text(view.timezone.search, "Rio Branco");
         click(view.timezone.rows[0].root);
-        np_settings_timezone_scene_sync(&view, 4, false, ESP_FAIL, true);
+        np_settings_timezone_scene_sync(&view, chosen, false, ESP_FAIL, true);
         assert(!lv_obj_has_state(view.apply_button, LV_STATE_DISABLED));
         click(view.apply_button);
-        np_settings_timezone_scene_sync(&view, 4, false, ESP_OK, true);
+        np_settings_timezone_scene_sync(&view, chosen, false, ESP_OK, true);
         assert(!view.pending && !strcmp(lv_label_get_text(view.persistence_status), "Preferência salva"));
         click(view.timezone.search);
         assert(np_keyboard_is_visible(&keyboard) && keyboard.target == view.timezone.search);
@@ -147,6 +157,6 @@ int main(int argc, char **argv)
     tick(); assert(!np_keyboard_is_visible(&keyboard) && keyboard.target == NULL);
     np_keyboard_destroy(&keyboard);
     lv_display_delete(display); lv_deinit();
-    puts("Timezone UI: 462 records, fixed pool, search, apply, async and 100 cached cycles PASS");
+    puts("Timezone UI: 462 stable records, Brazil-only list/search, fixed pool and 100 cached cycles PASS");
     return 0;
 }

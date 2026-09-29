@@ -183,7 +183,10 @@ esp_err_t onboarding_service_request_timezone_update(uint16_t timezone_index)
 {
     if (!timezone_catalog_is_valid(timezone_index)) return ESP_ERR_INVALID_ARG;
     taskENTER_CRITICAL(&s_lock);
-    if (!s_started || !s_status.completed) {
+    /* Existing installations can reach Settings without ever creating an
+     * onboarding profile. Their first timezone choice creates that profile
+     * through the same coalesced FlashCoordinator path. */
+    if (!s_started || s_editing) {
         taskEXIT_CRITICAL(&s_lock);
         return ESP_ERR_INVALID_STATE;
     }

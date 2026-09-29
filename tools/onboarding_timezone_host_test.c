@@ -29,6 +29,7 @@ static void expect(uint16_t index, bool pending)
 static void finish_write(void)
 {
     storage.onboarding_profile = queued;
+    storage.onboarding_profile_valid = true;
     storage.pending = false;
     storage.busy = false;
     onboarding_service_refresh();
@@ -87,8 +88,10 @@ int main(void)
     s_status = (onboarding_service_status_t){0};
     assert(onboarding_service_start() == ESP_OK);
     expect(2, false);
-    /* Simulated process restart: hydrate the existing stored profile. This
-     * verifies the service contract, not physical NVS/power-loss behavior. */
+    /* Existing devices may have Wi-Fi configured but no onboarding profile.
+     * Their first Settings change must create one and survive restart. */
+    storage.onboarding_profile_valid = false;
+    storage.onboarding_profile = (onboarding_profile_t){0};
     s_started = false;
     s_editing = false;
     s_timezone_update_pending = false;
@@ -96,7 +99,21 @@ int main(void)
     s_timezone_selected = false;
     s_status = (onboarding_service_status_t){0};
     assert(onboarding_service_start() == ESP_OK);
-    expect(2, false);
+    assert(!s_status.completed);
+    assert(onboarding_service_request_timezone_update(1) == ESP_OK);
+    onboarding_service_refresh();
+    assert(queued.completed && queued.timezone_index == 1);
+    finish_write();
+    onboarding_service_refresh();
+    assert(s_status.completed && !s_status.timezone_persistence_pending);
+    s_started = false;
+    s_editing = false;
+    s_timezone_update_pending = false;
+    s_timezone_write_enqueued = false;
+    s_timezone_selected = false;
+    s_status = (onboarding_service_status_t){0};
+    assert(onboarding_service_start() == ESP_OK);
+    expect(1, false);
     puts("Onboarding timezone regression: PASS");
     return 0;
 }

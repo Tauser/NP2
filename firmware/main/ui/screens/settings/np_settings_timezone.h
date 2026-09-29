@@ -6,6 +6,7 @@
 #include "np_keyboard.h"
 
 #define NP_SETTINGS_TIMEZONE_ROW_POOL 7U
+#define NP_SETTINGS_TIMEZONE_RESULT_CAPACITY 24U
 
 typedef esp_err_t (*np_settings_timezone_select_cb_t)(void *user_data, uint16_t index);
 
@@ -25,11 +26,9 @@ typedef struct np_settings_timezone {
     lv_obj_t *list;
     lv_obj_t *spacer;
     np_settings_timezone_row_t rows[NP_SETTINGS_TIMEZONE_ROW_POOL];
-    uint16_t filtered[TIMEZONE_CATALOG_COUNT];
-    uint8_t region_by_index[TIMEZONE_CATALOG_COUNT];
+    uint16_t filtered[NP_SETTINGS_TIMEZONE_RESULT_CAPACITY];
     uint16_t filtered_count;
     uint16_t selected_index;
-    uint8_t selected_region;
     uint8_t row_height;
     uint16_t viewport_start;
     struct np_settings_timezone_view *scene;
