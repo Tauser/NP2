@@ -30,6 +30,19 @@ idf_component_register(
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_PRODUCT_FONTS=1)
 
+# Reject stale lookup data while keeping the persisted catalog order.
+idf_build_get_property(np2_catalog_python PYTHON)
+execute_process(COMMAND "${np2_catalog_python}"
+    "${CMAKE_CURRENT_LIST_DIR}/../../tools/generate_timezone_index.py" --check
+    RESULT_VARIABLE np2_catalog_check OUTPUT_QUIET)
+if(NOT np2_catalog_check EQUAL 0)
+    message(FATAL_ERROR "Timezone index stale: run tools/generate_timezone_index.py")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/timezone_catalog.csv"
+    "${CMAKE_CURRENT_LIST_DIR}/timezone_catalog_index.inc"
+    "${CMAKE_CURRENT_LIST_DIR}/../../tools/generate_timezone_index.py")
+
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_WEATHER_BACKGROUNDS_EMBEDDED=0)
 
 if(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION)

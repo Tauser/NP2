@@ -1,0 +1,2 @@
+# Embedded catalog byte offsets must be identical on all checkouts.
+firmware/main/timezone_catalog.csv text eol=lf

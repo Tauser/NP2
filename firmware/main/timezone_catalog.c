@@ -5,11 +5,16 @@
 /* Source: nayarsystems/posix_tz_db zones.csv, commit
  * 93447c0ddac304ca6672a5fd905261c7e8905159 (MIT; see
  * timezone_catalog.LICENSE). The CSV remains in flash and is parsed only when
- * a selection is applied or a bounded UI list is populated. */
+ * a selection is applied or a bounded UI list is populated. The generated
+ * flash index avoids rescanning the CSV from its beginning for every row. */
 extern const uint8_t timezone_catalog_csv_start[]
     asm("_binary_timezone_catalog_csv_start");
 extern const uint8_t timezone_catalog_csv_end[]
     asm("_binary_timezone_catalog_csv_end");
+
+#include "timezone_catalog_index.inc"
+_Static_assert(sizeof(s_catalog_offsets) / sizeof(s_catalog_offsets[0]) ==
+               TIMEZONE_CATALOG_COUNT - 5U, "Timezone catalog index count mismatch");
 
 typedef struct {
     const char *iana;
@@ -70,22 +75,6 @@ static bool parse_next(const uint8_t **cursor, timezone_catalog_entry_t *out_ent
     return true;
 }
 
-static bool same_iana(const timezone_catalog_entry_t *entry, const char *iana)
-{
-    const size_t length = strlen(iana);
-    return entry->iana_length == length && memcmp(entry->iana, iana, length) == 0;
-}
-
-static bool duplicates_primary(const timezone_catalog_entry_t *entry)
-{
-    /* America/Brasilia is retained as a friendly legacy choice; the other
-     * four entries are already present in the upstream IANA catalog. */
-    return same_iana(entry, "America/Sao_Paulo") ||
-           same_iana(entry, "America/Argentina/Buenos_Aires") ||
-           same_iana(entry, "America/New_York") ||
-           same_iana(entry, "Europe/London");
-}
-
 static bool primary_entry(uint16_t index, timezone_catalog_entry_t *out_entry)
 {
     if (index >= sizeof(s_primary) / sizeof(s_primary[0])) return false;
@@ -104,17 +93,10 @@ bool timezone_catalog_get(uint16_t index, timezone_catalog_entry_t *out_entry)
     if (out_entry == NULL || index >= TIMEZONE_CATALOG_COUNT) return false;
     if (primary_entry(index, out_entry)) return true;
 
-    uint16_t remaining = index - (uint16_t)(sizeof(s_primary) / sizeof(s_primary[0]));
-    const uint8_t *cursor = timezone_catalog_csv_start;
-    timezone_catalog_entry_t candidate = {0};
-    while (parse_next(&cursor, &candidate)) {
-        if (duplicates_primary(&candidate)) continue;
-        if (remaining-- == 0U) {
-            *out_entry = candidate;
-            return true;
-        }
-    }
-    return false;
+    const size_t offset = s_catalog_offsets[index - 5U];
+    if (offset >= (size_t)(timezone_catalog_csv_end - timezone_catalog_csv_start)) return false;
+    const uint8_t *cursor = timezone_catalog_csv_start + offset;
+    return parse_next(&cursor, out_entry);
 }
 
 bool timezone_catalog_is_valid(uint16_t index)
@@ -147,4 +129,38 @@ bool timezone_catalog_copy_iana(uint16_t index, char *out, size_t out_size)
 bool timezone_catalog_copy_posix(uint16_t index, char *out, size_t out_size)
 {
     return copy_entry_value(index, true, out, out_size);
+}
+
+const char *timezone_catalog_country(uint16_t index)
+{
+    return timezone_catalog_is_valid(index) ? s_country_names[s_country_ids[index]] : "";
+}
+
+bool timezone_catalog_standard_offset(uint16_t index, int16_t *minutes)
+{
+    timezone_catalog_entry_t entry = {0};
+    if (minutes == NULL || !timezone_catalog_get(index, &entry)) return false;
+    const char *p = entry.posix, *end = p + entry.posix_length;
+    if (p < end && *p == '<') {
+        while (p < end && *p != '>') ++p;
+        if (p == end) return false;
+        ++p;
+    } else {
+        while (p < end && ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z'))) ++p;
+    }
+    int sign = 1;
+    if (p < end && (*p == '-' || *p == '+')) { if (*p == '-') sign = -1; ++p; }
+    if (p == end || *p < '0' || *p > '9') return false;
+    unsigned hour = 0, minute = 0;
+    while (p < end && *p >= '0' && *p <= '9') hour = hour * 10U + (unsigned)(*p++ - '0');
+    if (p < end && *p == ':') {
+        ++p;
+        if (p == end || *p < '0' || *p > '9') return false;
+        while (p < end && *p >= '0' && *p <= '9') minute = minute * 10U + (unsigned)(*p++ - '0');
+    }
+    if (hour > 24U || minute > 59U) return false;
+    /* POSIX signs are opposite to geographical UTC offsets. DST is not
+     * guessed here: this is explicitly the standard offset for the zone. */
+    *minutes = (int16_t)(-sign * (int)(hour * 60U + minute));
+    return true;
 }

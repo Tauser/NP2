@@ -31,6 +31,11 @@ bool timezone_catalog_get(uint16_t index, timezone_catalog_entry_t *out_entry);
 bool timezone_catalog_is_valid(uint16_t index);
 size_t timezone_catalog_count(void);
 
+/* Public static metadata, no allocation/I/O. Empty country for non-geographical zones. */
+const char *timezone_catalog_country(uint16_t index);
+/* Standard UTC offset, minutes east; does not claim the current DST offset. */
+bool timezone_catalog_standard_offset(uint16_t index, int16_t *minutes);
+
 /* Copy helpers make it safe for callers to create a terminated value for APIs
  * such as setenv() without modifying the embedded catalog. */
 bool timezone_catalog_copy_iana(uint16_t index, char *out, size_t out_size);
