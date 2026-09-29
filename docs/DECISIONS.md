@@ -1073,3 +1073,26 @@ adiados conhecidos dos modais e da construção de Settings antes do descarte.
 Não são criadas antecipadamente as cinco futuras telas. WDT, display, C6,
 partições e os contratos de persistência permanecem no baseline existente.
 Build não comprova estabilidade física; o flash é manual pelo operador.
+
+## ADR-043 — Sistema com uma cena lazy reutilizada
+
+**Decisão:** a migração de Sistema mantém o modal legado compilado e adiciona
+uma cena específica em `np_settings_system.c/.h`. Labels, handles de firmware,
+temperatura e reinício e a sincronização existente são compartilhados. O
+callback de reinício continua pedindo confirmação e enfileirando o comando
+pelo `FlashCoordinator`; nenhuma operação lenta foi transferida para a UI.
+
+**Motivo e trade-off:** por solicitação do produto, Sistema é construído só
+na primeira visita e conserva uma única árvore oculta entre entradas. Os
+callbacks são instalados uma vez. A saída cancela o trabalho adiado e descarta
+a confirmação de reinício, fecha o drawer e oculta a raiz. Esse cache é
+limitado a uma cena, custa heap LVGL residente após a primeira visita e não
+autoriza construir todas as telas futuras. As demais cenas mantêm o lifecycle
+da migração anterior. Tempo e contagem de objetos são instrumentados para
+bancada; a retenção real de heap e WDT dependem do flash manual.
+
+Display e tipo de touch representam o baseline real, sem afirmar saúde do
+touch por texto "OK". Firmware e temperatura vêm da projeção atual; sem leitura,
+a temperatura permanece indisponível. Uptime, IP e RSSI não são inventados.
+Atualizar sistema fica desabilitado e mantém a indicação de manutenção,
+pois não existe fluxo de atualização de produto aprovado nesta tela.

@@ -37,6 +37,7 @@ typedef struct {
         PRODUCT_SCREEN_PROFILE,
         PRODUCT_SCREEN_PREFERENCES,
         PRODUCT_SCREEN_DISPLAY_SOUND,
+        PRODUCT_SCREEN_SYSTEM,
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
@@ -46,6 +47,7 @@ typedef struct {
     np_profile_view_t profile;
     np_preferences_view_t preferences;
     np_settings_display_sound_view_t display_sound;
+    np_settings_system_view_t system_scene;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
@@ -79,6 +81,7 @@ typedef struct {
     bool settings_rows_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
+    uint32_t system_scene_object_count;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -450,10 +453,16 @@ static void system_restart_open_async(void *user_data)
 {
     (void)user_data;
     s_ui.system_confirmation_pending = false;
-    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
-        !np_modal_is_visible(&s_ui.settings.system.modal)) return;
+    lv_obj_t *parent = NULL;
+    if (s_ui.active_screen == PRODUCT_SCREEN_SYSTEM) {
+        parent = s_ui.system_scene.root;
+    } else if (s_ui.active_screen == PRODUCT_SCREEN_SETTINGS &&
+               np_modal_is_visible(&s_ui.settings.system.modal)) {
+        parent = s_ui.settings.system.modal.scrim;
+    }
+    if (parent == NULL) return;
     discard_system_confirmation();
-    np_confirm_create(&s_ui.system_confirmation, s_ui.settings.system.modal.scrim,
+    np_confirm_create(&s_ui.system_confirmation, parent,
                        "Reiniciar painel?", "O painel sera reiniciado.\nSuas configuracoes serao mantidas.",
                        "Reiniciar", system_restart_confirmed, NULL);
 }
@@ -1343,18 +1352,24 @@ static void update_display_sound_controls(const app_ui_projection_t *projection)
 
 }
 
-static void update_settings(const app_ui_projection_t *projection)
+static void update_system_information(np_settings_system_t *system,
+                                       const app_ui_projection_t *projection)
 {
-    if (projection == NULL) return;
-
-    update_header(&s_ui.settings.header, projection, true);
     char chip_temperature[24] = "Nao disponivel";
     if (projection->system.temperature_available) {
         format_temperature_deci(projection->system.chip_temperature_deci_c,
                                   chip_temperature, sizeof(chip_temperature));
     }
-    np_settings_system_sync(&s_ui.settings.system, projection->system.firmware_version,
+    np_settings_system_sync(system, projection->system.firmware_version,
                              chip_temperature, projection->system.restart_pending);
+}
+
+static void update_settings(const app_ui_projection_t *projection)
+{
+    if (projection == NULL) return;
+
+    update_header(&s_ui.settings.header, projection, true);
+    update_system_information(&s_ui.settings.system, projection);
 
     np_settings_timezone_sync(&s_ui.settings.timezone,
                               projection->onboarding.timezone_index);
@@ -1477,6 +1492,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
                s_ui.active_screen == PRODUCT_SCREEN_DISPLAY_SOUND) {
         update_header(&s_ui.display_sound.header, &projection, true);
         update_display_sound_controls(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_SYSTEM) {
+        update_header(&s_ui.system_scene.header, &projection, true);
+        update_system_information(&s_ui.system_scene.system, &projection);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                (s_ui.active_screen == PRODUCT_SCREEN_PROFILE ||
@@ -1621,6 +1641,10 @@ static void release_current_scene(void)
     discard_wifi_password();
     discard_wifi_confirmation();
     discard_system_confirmation();
+    /* One bounded lazy cache: System is reused across entries. No deferred
+     * confirmation survives hiding this scene; its header drawer is reset. */
+    np_set_visible(s_ui.system_scene.header.drawer_scrim, false);
+    np_set_visible(s_ui.system_scene.root, false);
     if (s_ui.settings.root != NULL) lv_obj_delete(s_ui.settings.root);
     if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
@@ -1676,6 +1700,17 @@ static void profile_identity_event_cb(lv_event_t *event)
                            "Edição de nome e avatar em uma próxima fase", 2600U);
 }
 
+static uint32_t scene_object_count(lv_obj_t *root)
+{
+    if (root == NULL) return 0U;
+    uint32_t count = 1U;
+    const uint32_t children = lv_obj_get_child_count(root);
+    for (uint32_t i = 0; i < children; ++i) {
+        count += scene_object_count(lv_obj_get_child(root, i));
+    }
+    return count;
+}
+
 static void scene_navigation_async(void *user_data)
 {
     const uintptr_t destination = (uintptr_t)user_data;
@@ -1695,11 +1730,13 @@ static void scene_navigation_async(void *user_data)
     }
     if (destination != PRODUCT_SCREEN_PROFILE &&
         destination != PRODUCT_SCREEN_PREFERENCES &&
-        destination != PRODUCT_SCREEN_DISPLAY_SOUND) return;
+        destination != PRODUCT_SCREEN_DISPLAY_SOUND &&
+        destination != PRODUCT_SCREEN_SYSTEM) return;
 
     release_current_scene();
     np_header_t *header;
     lv_obj_t *root;
+    bool install_header_callbacks = true;
     if (destination == PRODUCT_SCREEN_PROFILE) {
         s_ui.profile = np_profile_build(lv_screen_active());
         header = &s_ui.profile.header;
@@ -1725,6 +1762,30 @@ static void scene_navigation_async(void *user_data)
         install_settings_control_callbacks();
         lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    } else if (destination == PRODUCT_SCREEN_SYSTEM) {
+        install_header_callbacks = s_ui.system_scene.root == NULL;
+        const uint32_t started = lv_tick_get();
+        np_settings_system_scene_create(&s_ui.system_scene, lv_screen_active());
+        header = &s_ui.system_scene.header;
+        root = s_ui.system_scene.root;
+        s_ui.active_screen = PRODUCT_SCREEN_SYSTEM;
+        if (install_header_callbacks) {
+            lv_obj_add_event_cb(s_ui.system_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.system_scene.system.restart_button, system_restart_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            s_ui.system_scene_object_count = scene_object_count(root);
+            ESP_LOGI(TAG, "System scene built: %lu objects, %lu ms",
+                     (unsigned long)s_ui.system_scene_object_count,
+                     (unsigned long)lv_tick_elaps(started));
+        } else {
+            const uint32_t count = scene_object_count(root);
+            if (count != s_ui.system_scene_object_count) {
+                ESP_LOGW(TAG, "System scene object count changed: %lu -> %lu",
+                         (unsigned long)s_ui.system_scene_object_count,
+                         (unsigned long)count);
+            }
+        }
     } else {
         s_ui.preferences = np_preferences_build(lv_screen_active());
         header = &s_ui.preferences.header;
@@ -1734,22 +1795,27 @@ static void scene_navigation_async(void *user_data)
         for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
             lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
-                                    ? PRODUCT_SCREEN_DISPLAY_SOUND : PRODUCT_SCREEN_SETTINGS));
+                                    ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
+                                    ? PRODUCT_SCREEN_SYSTEM : PRODUCT_SCREEN_SETTINGS));
         }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
-    lv_obj_add_event_cb(header->drawer_home_button, scene_navigation_event_cb,
-                        LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
-    lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
-                        LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
-    lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
-                        LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+    if (install_header_callbacks) {
+        lv_obj_add_event_cb(header->drawer_home_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+        lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+    }
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
     update_header(header, &projection, true);
     if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
+    if (destination == PRODUCT_SCREEN_SYSTEM) update_system_information(&s_ui.system_scene.system, &projection);
     s_ui.rendered_revision = projection.revision;
     np_set_visible(root, true);
+    lv_obj_move_foreground(root);
     np_feedback_bring_to_front(&s_ui.feedback);
 }
 
