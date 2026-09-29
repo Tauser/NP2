@@ -7,6 +7,7 @@ static void closing(void *user_data)
     np_wifi_password_t *const view = user_data;
     view->visible = false;
     np_keyboard_hide(view->keyboard);
+    lv_textarea_set_text(view->field, "");
     if (view->action != NULL) (void)view->action(NP_WIFI_PASSWORD_CANCEL, 0);
     lv_obj_invalidate(view->field);
 }
@@ -45,6 +46,12 @@ static void keyboard_input(void *user_data, const char *key)
     }
 }
 
+static void reject_widget_input(lv_event_t *event)
+{
+    np_wifi_password_t *const view = lv_event_get_user_data(event);
+    if (!view->syncing_mask) lv_textarea_set_insert_replace(view->field, "");
+}
+
 static void field_event(lv_event_t *event)
 {
     np_wifi_password_t *const view = lv_event_get_user_data(event);
@@ -68,8 +75,16 @@ void np_wifi_password_create(np_wifi_password_t *view, lv_obj_t *parent,
     view->hint = np_label(content, secure ? "Digite a senha para conectar" :
                           "Rede aberta: nenhuma senha necessaria",
                           NP_FONT_SM, np_c_text_2(), 20, 10, 344, LV_TEXT_ALIGN_LEFT);
-    view->field = np_fill(content, 20, 38, 344, 48, np_c_surface_raised(),
-                           LV_OPA_COVER, NP_RADIUS_CONTROL);
+    /* The textarea is presentation-only: it retains mask characters, never
+     * the secret. Global keyboard keys go straight to provisioning through
+     * the existing private-input contract. Reveal uses immediate glyphs. */
+    view->field = np_form_text_input(content, 20, 38, 344, 48, "", NULL);
+    lv_textarea_set_password_mode(view->field, true);
+    lv_textarea_set_password_show_time(view->field, 0);
+    lv_textarea_set_max_length(view->field, 63);
+    lv_obj_add_event_cb(view->field, reject_widget_input, LV_EVENT_INSERT, view);
+    np_set_visible(lv_textarea_get_label(view->field), false);
+    lv_obj_set_style_bg_opa(view->field, LV_OPA_TRANSP, LV_PART_CURSOR);
     lv_obj_add_flag(view->field, LV_OBJ_FLAG_CLICKABLE);
     np_form_apply_field_style(view->field);
     lv_obj_set_style_border_width(view->field, 2, LV_PART_MAIN);
@@ -94,6 +109,13 @@ void np_wifi_password_sync(np_wifi_password_t *view, uint8_t length, bool visibl
 {
     if (view == NULL || view->field == NULL) return;
     view->visible = visible;
+    char mask[64] = {0};
+    const uint8_t count = length < sizeof(mask) ? length : sizeof(mask) - 1U;
+    memset(mask, '*', count);
+    view->syncing_mask = true;
+    lv_textarea_set_text(view->field, mask);
+    lv_textarea_set_password_mode(view->field, !visible);
+    view->syncing_mask = false;
     np_set_text(lv_obj_get_child(view->reveal, 0),
                 visible ? NP_ICON_VISIBILITY_OFF : NP_ICON_VISIBILITY);
     if (!view->secure || length >= 8U) lv_obj_remove_state(view->connect, LV_STATE_DISABLED);

@@ -39,6 +39,7 @@ typedef struct {
         PRODUCT_SCREEN_DISPLAY_SOUND,
         PRODUCT_SCREEN_SYSTEM,
         PRODUCT_SCREEN_NOTIFICATIONS,
+        PRODUCT_SCREEN_WIFI,
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
@@ -50,9 +51,12 @@ typedef struct {
     np_settings_display_sound_view_t display_sound;
     np_settings_system_view_t system_scene;
     np_settings_notifications_view_t notifications_scene;
+    np_settings_wifi_view_t wifi_scene;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
+    np_settings_wifi_add_t wifi_add;
+    bool wifi_add_pending;
     np_confirm_t wifi_confirmation;
     np_confirm_t system_confirmation;
     bool system_confirmation_pending;
@@ -100,6 +104,10 @@ static void notifications_test_event_cb(lv_event_t *event);
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void keyboard_modal_close_cb(void *user_data);
 static void wifi_manage_event_cb(lv_event_t *event);
+static void wifi_modal_closed(void *user_data);
+static void wifi_add_open_async(void *user_data);
+static void wifi_password_open_async(void *user_data);
+static void wifi_forget_open_async(void *user_data);
 static void wifi_scan_event_cb(lv_event_t *event);
 static void wifi_forget_event_cb(lv_event_t *event);
 static void settings_modal_row_event_cb(lv_event_t *event);
@@ -377,6 +385,7 @@ static void settings_modal_row_event_cb(lv_event_t *event)
     if (type == 0U) {
         if (s_ui.settings.wifi.modal.scrim == NULL) {
             np_settings_wifi_create(&s_ui.settings.wifi, s_ui.settings.root);
+            np_modal_set_close_callback(&s_ui.settings.wifi.modal, wifi_modal_closed, NULL);
             lv_obj_add_event_cb(s_ui.settings.wifi.manage_button, wifi_manage_event_cb,
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.settings.wifi.scan_button, wifi_scan_event_cb,
@@ -550,6 +559,28 @@ static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
     return ESP_OK;
 }
 
+static np_settings_wifi_t *active_wifi(void)
+{
+    return s_ui.active_screen == PRODUCT_SCREEN_WIFI ? &s_ui.wifi_scene.wifi : &s_ui.settings.wifi;
+}
+
+static lv_obj_t *wifi_dialog_parent(void)
+{
+    if (s_ui.active_screen == PRODUCT_SCREEN_WIFI) return s_ui.wifi_scene.root;
+    if (s_ui.active_screen == PRODUCT_SCREEN_SETTINGS && np_modal_is_visible(&s_ui.settings.wifi.modal))
+        return s_ui.settings.wifi.modal.scrim;
+    return NULL;
+}
+
+static void discard_wifi_add(void)
+{
+    if (s_ui.wifi_add.modal.scrim != NULL) {
+        np_modal_hide(&s_ui.wifi_add.modal);
+        lv_obj_delete(s_ui.wifi_add.modal.scrim);
+    }
+    s_ui.wifi_add = (np_settings_wifi_add_t){0};
+}
+
 static void discard_wifi_password(void)
 {
     np_keyboard_hide(&s_ui.keyboard);
@@ -651,19 +682,34 @@ static void wifi_password_draw(lv_event_t *event)
     }
 }
 
+static void wifi_modal_closed(void *user_data)
+{
+    (void)user_data;
+    (void)lv_async_call_cancel(wifi_add_open_async, NULL);
+    s_ui.wifi_add_pending = false;
+    (void)lv_async_call_cancel(wifi_password_open_async, NULL);
+    (void)lv_async_call_cancel(wifi_forget_open_async, NULL);
+    s_ui.wifi_password_pending = false;
+    s_ui.wifi_confirmation_pending = false;
+    s_ui.pending_wifi_ssid[0] = '\0';
+    discard_wifi_password();
+    discard_wifi_confirmation();
+}
+
 static void wifi_password_open_async(void *user_data)
 {
     (void)user_data;
     s_ui.wifi_password_pending = false;
-    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
-        !np_modal_is_visible(&s_ui.settings.wifi.modal)) return;
+    lv_obj_t *const parent = wifi_dialog_parent();
+    if (parent == NULL || s_ui.navigation_pending) return;
+    discard_wifi_add();
     discard_wifi_password();
     discard_wifi_confirmation();
     const esp_err_t result = provisioning_service_touch_begin_for_network(
         s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure);
     if (result == ESP_OK) {
         np_keyboard_hide(&s_ui.keyboard);
-        np_wifi_password_create(&s_ui.wifi_password, s_ui.settings.wifi.modal.scrim,
+        np_wifi_password_create(&s_ui.wifi_password, parent,
                                  &s_ui.keyboard,
                                  s_ui.pending_wifi_ssid, s_ui.pending_wifi_secure,
                                  wifi_password_action, wifi_password_draw);
@@ -675,18 +721,61 @@ static void wifi_password_open_async(void *user_data)
     s_ui.pending_wifi_ssid[0] = '\0';
 }
 
+static void wifi_add_submit_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *ssid = lv_textarea_get_text(s_ui.wifi_add.ssid);
+    const size_t length = strnlen(ssid, sizeof(s_ui.pending_wifi_ssid));
+    if (length == 0U || length >= sizeof(s_ui.pending_wifi_ssid)) {
+        np_feedback_bring_to_front(&s_ui.feedback);
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+            "Informe um nome de rede", "O SSID deve ter até 32 bytes", 2400U);
+        return;
+    }
+    if (s_ui.wifi_password_pending || s_ui.navigation_pending) return;
+    memcpy(s_ui.pending_wifi_ssid, ssid, length + 1U);
+    s_ui.pending_wifi_secure = lv_obj_has_state(s_ui.wifi_add.secure_switch, LV_STATE_CHECKED);
+    s_ui.wifi_password_pending = true;
+    if (lv_async_call(wifi_password_open_async, NULL) == LV_RESULT_OK) {
+        np_modal_hide(&s_ui.wifi_add.modal);
+    } else {
+        s_ui.wifi_password_pending = false;
+        s_ui.pending_wifi_ssid[0] = '\0';
+    }
+}
+
+static void wifi_add_open_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.wifi_add_pending = false;
+    if (s_ui.active_screen != PRODUCT_SCREEN_WIFI || s_ui.navigation_pending) return;
+    discard_wifi_add();
+    discard_wifi_password();
+    discard_wifi_confirmation();
+    np_settings_wifi_add_create(&s_ui.wifi_add, s_ui.wifi_scene.root, &s_ui.keyboard);
+    lv_obj_add_event_cb(s_ui.wifi_add.continue_button, wifi_add_submit_event_cb, LV_EVENT_CLICKED, NULL);
+}
+
+static void wifi_add_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_ui.wifi_add_pending || s_ui.navigation_pending) return;
+    s_ui.wifi_add_pending = true;
+    if (lv_async_call(wifi_add_open_async, NULL) != LV_RESULT_OK) s_ui.wifi_add_pending = false;
+}
+
 static void wifi_manage_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    if (lv_event_get_target(event) == s_ui.settings.wifi.manage_button) {
+    if (lv_event_get_target(event) == active_wifi()->manage_button) {
         wifi_scan_event_cb(event);
         return;
     }
     if (s_ui.wifi_password_pending ||
-        !np_settings_wifi_copy_selected_ssid(&s_ui.settings.wifi,
+        !np_settings_wifi_copy_selected_ssid(active_wifi(),
                                              s_ui.pending_wifi_ssid,
                                              sizeof(s_ui.pending_wifi_ssid))) return;
-    s_ui.pending_wifi_secure = s_ui.settings.wifi.network_secure[s_ui.settings.wifi.selected_index];
+    s_ui.pending_wifi_secure = active_wifi()->network_secure[active_wifi()->selected_index];
     s_ui.wifi_password_pending = true;
     if (lv_async_call(wifi_password_open_async, NULL) != LV_RESULT_OK) {
         s_ui.wifi_password_pending = false;
@@ -726,11 +815,11 @@ static void wifi_forget_open_async(void *user_data)
 {
     (void)user_data;
     s_ui.wifi_confirmation_pending = false;
-    if (s_ui.active_screen != PRODUCT_SCREEN_SETTINGS ||
-        !np_modal_is_visible(&s_ui.settings.wifi.modal)) return;
+    lv_obj_t *const parent = wifi_dialog_parent();
+    if (parent == NULL || s_ui.navigation_pending) return;
     discard_wifi_password();
     discard_wifi_confirmation();
-    np_confirm_create(&s_ui.wifi_confirmation, s_ui.settings.wifi.modal.scrim,
+    np_confirm_create(&s_ui.wifi_confirmation, parent,
                         "Esquecer rede?",
                         "A conexao sera encerrada e a credencial salva removida.\n"
                         "Para reconectar, sera preciso configurar a rede novamente.",
@@ -1395,6 +1484,19 @@ static void update_notifications_scene(const app_ui_projection_t *projection)
         : "Salvamento automático ao alterar");
 }
 
+static void update_wifi_scene(const app_ui_projection_t *projection)
+{
+    update_header(&s_ui.wifi_scene.header, projection, true);
+    np_settings_wifi_scene_sync(&s_ui.wifi_scene, wifi_status_for(&projection->network),
+        projection->network.connected_ssid, projection->network.scan_results_count,
+        projection->network.scan_results, projection->network.ip_address,
+        projection->network.gateway, projection->network.state == APP_NETWORK_STATE_SCANNING);
+    if (projection->network.state == APP_NETWORK_STATE_SCAN_COMPLETE &&
+        projection->network.last_result != ESP_OK) {
+        np_set_text(s_ui.wifi_scene.page_label, "Busca falhou · tente novamente");
+    }
+}
+
 static void update_settings(const app_ui_projection_t *projection)
 {
     if (projection == NULL) return;
@@ -1523,6 +1625,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
                s_ui.active_screen == PRODUCT_SCREEN_SYSTEM) {
         update_header(&s_ui.system_scene.header, &projection, true);
         update_system_information(&s_ui.system_scene.system, &projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_WIFI) {
+        update_wifi_scene(&projection);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                s_ui.active_screen == PRODUCT_SCREEN_NOTIFICATIONS) {
@@ -1654,6 +1760,8 @@ static void release_current_scene(void)
     /* All scene destruction runs after the touch callback, on the LVGL
      * owner. Cancel deferred work before freeing its target tree. */
     (void)lv_async_call_cancel(settings_stage_async, NULL);
+    (void)lv_async_call_cancel(wifi_add_open_async, NULL);
+    s_ui.wifi_add_pending = false;
     (void)lv_async_call_cancel(wifi_password_open_async, NULL);
     (void)lv_async_call_cancel(wifi_forget_open_async, NULL);
     (void)lv_async_call_cancel(system_restart_open_async, NULL);
@@ -1668,6 +1776,7 @@ static void release_current_scene(void)
         s_ui.settings_value_bubble_timer = NULL;
     }
     np_keyboard_hide(&s_ui.keyboard);
+    discard_wifi_add();
     discard_wifi_password();
     discard_wifi_confirmation();
     discard_system_confirmation();
@@ -1681,12 +1790,15 @@ static void release_current_scene(void)
     if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
     if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
     if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
+    if (s_ui.wifi_scene.root != NULL) lv_obj_delete(s_ui.wifi_scene.root);
     s_ui.settings = (np_settings_view_t){0};
     s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
     s_ui.display_sound = (np_settings_display_sound_view_t){0};
     s_ui.notifications_scene = (np_settings_notifications_view_t){0};
+    s_ui.wifi_scene = (np_settings_wifi_view_t){0};
+    s_ui.pending_wifi_ssid[0] = '\0';
     s_ui.settings_controls_initialized = false;
     s_ui.settings_notification_callbacks_initialized = false;
     s_ui.settings_timezone_callbacks_initialized = false;
@@ -1764,7 +1876,8 @@ static void scene_navigation_async(void *user_data)
         destination != PRODUCT_SCREEN_PREFERENCES &&
         destination != PRODUCT_SCREEN_DISPLAY_SOUND &&
         destination != PRODUCT_SCREEN_SYSTEM &&
-        destination != PRODUCT_SCREEN_NOTIFICATIONS) return;
+        destination != PRODUCT_SCREEN_NOTIFICATIONS &&
+        destination != PRODUCT_SCREEN_WIFI) return;
 
     release_current_scene();
     np_header_t *header;
@@ -1795,6 +1908,21 @@ static void scene_navigation_async(void *user_data)
         install_settings_control_callbacks();
         lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    } else if (destination == PRODUCT_SCREEN_WIFI) {
+        const uint32_t started = lv_tick_get();
+        s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
+        np_settings_wifi_scene_bind(&s_ui.wifi_scene);
+        header = &s_ui.wifi_scene.header;
+        root = s_ui.wifi_scene.root;
+        s_ui.active_screen = PRODUCT_SCREEN_WIFI;
+        lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
+            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.connect_button, wifi_manage_event_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.forget_button, wifi_forget_event_cb, LV_EVENT_CLICKED, NULL);
+        ESP_LOGI(TAG, "Wi-Fi scene built: %lu objects, %lu ms",
+            (unsigned long)scene_object_count(root), (unsigned long)lv_tick_elaps(started));
     } else if (destination == PRODUCT_SCREEN_NOTIFICATIONS) {
         s_ui.notifications_scene = np_settings_notifications_scene_build(lv_screen_active());
         header = &s_ui.notifications_scene.header;
@@ -1838,7 +1966,8 @@ static void scene_navigation_async(void *user_data)
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
                                     ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
                                     ? PRODUCT_SCREEN_SYSTEM : i == 3U
-                                    ? PRODUCT_SCREEN_NOTIFICATIONS : PRODUCT_SCREEN_SETTINGS));
+                                    ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
+                                    ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_SETTINGS));
         }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
@@ -1856,6 +1985,7 @@ static void scene_navigation_async(void *user_data)
     if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
     if (destination == PRODUCT_SCREEN_SYSTEM) update_system_information(&s_ui.system_scene.system, &projection);
     if (destination == PRODUCT_SCREEN_NOTIFICATIONS) update_notifications_scene(&projection);
+    if (destination == PRODUCT_SCREEN_WIFI) update_wifi_scene(&projection);
     s_ui.rendered_revision = projection.revision;
     np_set_visible(root, true);
     lv_obj_move_foreground(root);

@@ -1096,3 +1096,38 @@ touch por texto "OK". Firmware e temperatura vêm da projeção atual; sem leitu
 a temperatura permanece indisponível. Uptime, IP e RSSI não são inventados.
 Atualizar sistema fica desabilitado e mantém a indicação de manutenção,
 pois não existe fluxo de atualização de produto aprovado nesta tela.
+
+## ADR-044 — Wi-Fi dedicado com pool e credencial privada
+
+**Decisão:** ampliar `np_settings_wifi.c/.h` com uma cena específica, preservando
+o modal legado e o provisionamento inicial/manutenção em `wifi_setup_view`.
+Preferências abre essa cena; Voltar retorna ao hub. A árvore é criada somente
+ao entrar e liberada ao sair, com quatro rows reutilizados e dez páginas no
+limite atual de 40 resultados. Não existe construção eager das futuras telas.
+
+**Motivo e trade-off:** reproduzir os dois painéis do modelo com dados reais,
+sem outro backend. SSID/estado, RSSI da última busca e aberta/protegida usam o
+snapshot existente. IP/gateway vêm do evento DHCP, passam pelo escritor único
+`app_loop` e só aparecem para a rede atual. Não inferir modalidade WPA2/WPA3
+nem validação de internet a partir do flag de IP. Switch Wi-Fi é omitido porque
+não existe contrato liga/desliga. SSID manual usa o contrato de provisioning
+existente, com escolha explícita aberta/WPA2 e diálogo de senha separado.
+
+A textarea de senha é de uma linha, usa o estilo comum e password mode, mas
+retém apenas a máscara por comprimento. O teclado global em modo privado
+entrega teclas ao provisioning através de `product_ui`. Revelação temporária
+continua usando o getter de um único glyph durante o desenho, conforme a
+autorização anterior do produto; nenhum texto secreto é guardado em widget,
+AppState, projection, eventos ou feedback. Ações de olho, Wi-Fi, sinal,
+gateway e botões são glyphs das fontes existentes, ampliadas sem remover
+ícones ou alterar altura/baseline.
+
+Saída cancela aberturas adiadas, limpa a sessão, esconde teclado e apaga o
+target antes de destruir objetos. Fechar o modal legado também cancela seu
+diálogo de senha. A reconciliação de foco pendente do teclado é cancelada ao
+limpar target. Esquecer mantém confirmação e a mailbox do backend; não é
+declaração de remoção durável quando somente o enfileiramento foi aceito.
+
+Nenhuma alteração de WDT, display, schemas offline, criptografia ou retenção
+do vault. Os testes LVGL em host verificam lifecycle/pool/máscara; não fecham
+os gates físicos de rede, reboot, latência, memória ou WDT.

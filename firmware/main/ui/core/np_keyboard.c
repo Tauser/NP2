@@ -276,6 +276,8 @@ void np_keyboard_open(np_keyboard_t *keyboard, np_keyboard_mode_t mode,
 void np_keyboard_clear_target(np_keyboard_t *keyboard)
 {
     if (keyboard == NULL) return;
+    (void)lv_async_call_cancel(keyboard_reconcile_async, keyboard);
+    keyboard->reconcile_pending = false;
     ++keyboard->lifecycle_generation;
     keyboard->target = NULL;
     keyboard->interaction_inside_keyboard = false;

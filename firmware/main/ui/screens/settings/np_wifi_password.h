@@ -23,6 +23,7 @@ typedef struct {
     lv_obj_t *connect;
     np_keyboard_t *keyboard;
     bool secure;
+    bool syncing_mask;
     bool visible;
     np_wifi_password_action_cb_t action;
 } np_wifi_password_t;
