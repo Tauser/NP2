@@ -165,6 +165,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_ROUTER        "\xEE\x8C\xA8"
 #define NP_ICON_SIGNAL        "\xEE\x88\x82"
 #define NP_ICON_DELETE        "\xEE\xA1\xB2"
+#define NP_ICON_GLOBE         "\xEE\xA0\x8B" /* language U+E80B */
+#define NP_ICON_CHECK_CIRCLE  "\xEE\xA1\xAC" /* check_circle U+E86C */
 #else
 #define NP_FONT_HERO     (&lv_font_montserrat_48)
 #define NP_FONT_BRAND    (&lv_font_montserrat_48)
@@ -220,6 +222,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_ROUTER        "W"
 #define NP_ICON_SIGNAL        "W"
 #define NP_ICON_DELETE        "x"
+#define NP_ICON_GLOBE         "O"
+#define NP_ICON_CHECK_CIRCLE  "+"
 #endif
 
 /* ------------------------------------------------------------------ */

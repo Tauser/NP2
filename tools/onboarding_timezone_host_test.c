@@ -77,6 +77,26 @@ int main(void)
     finish_write();
     expect(2, false);
     assert(onboarding_service_request_timezone_update(TIMEZONE_CATALOG_COUNT) == ESP_ERR_INVALID_ARG);
+    /* Simulated process restart: hydrate the existing stored profile. This
+     * verifies the service contract, not physical NVS/power-loss behavior. */
+    s_started = false;
+    s_editing = false;
+    s_timezone_update_pending = false;
+    s_timezone_write_enqueued = false;
+    s_timezone_selected = false;
+    s_status = (onboarding_service_status_t){0};
+    assert(onboarding_service_start() == ESP_OK);
+    expect(2, false);
+    /* Simulated process restart: hydrate the existing stored profile. This
+     * verifies the service contract, not physical NVS/power-loss behavior. */
+    s_started = false;
+    s_editing = false;
+    s_timezone_update_pending = false;
+    s_timezone_write_enqueued = false;
+    s_timezone_selected = false;
+    s_status = (onboarding_service_status_t){0};
+    assert(onboarding_service_start() == ESP_OK);
+    expect(2, false);
     puts("Onboarding timezone regression: PASS");
     return 0;
 }

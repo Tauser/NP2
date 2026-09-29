@@ -1,4 +1,6 @@
-/* Persistent virtual keyboard shared by Product UI scenes. */
+/* Persistent virtual keyboard shared by Product UI scenes. All operations
+ * run on the LVGL owner. Keep this struct at a stable address after binding;
+ * hide/clear/destroy cancel pending focus reconciliation before teardown. */
 #pragma once
 
 #include <stdbool.h>

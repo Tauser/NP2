@@ -40,6 +40,7 @@ typedef struct {
         PRODUCT_SCREEN_SYSTEM,
         PRODUCT_SCREEN_NOTIFICATIONS,
         PRODUCT_SCREEN_WIFI,
+        PRODUCT_SCREEN_TIMEZONE,
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
@@ -52,6 +53,8 @@ typedef struct {
     np_settings_system_view_t system_scene;
     np_settings_notifications_view_t notifications_scene;
     np_settings_wifi_view_t wifi_scene;
+    np_settings_timezone_view_t timezone_scene;
+    uint32_t timezone_scene_object_count;
     np_feedback_t feedback;
     np_keyboard_t keyboard;
     np_wifi_password_t wifi_password;
@@ -1484,6 +1487,15 @@ static void update_notifications_scene(const app_ui_projection_t *projection)
         : "Salvamento automático ao alterar");
 }
 
+static void update_timezone_scene(const app_ui_projection_t *projection)
+{
+    update_header(&s_ui.timezone_scene.header, projection, true);
+    np_settings_timezone_scene_sync(&s_ui.timezone_scene,
+        projection->onboarding.timezone_index,
+        projection->onboarding.timezone_persistence_pending,
+        projection->onboarding.last_result, projection->time_trusted);
+}
+
 static void update_wifi_scene(const app_ui_projection_t *projection)
 {
     update_header(&s_ui.wifi_scene.header, projection, true);
@@ -1625,6 +1637,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
                s_ui.active_screen == PRODUCT_SCREEN_SYSTEM) {
         update_header(&s_ui.system_scene.header, &projection, true);
         update_system_information(&s_ui.system_scene.system, &projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_TIMEZONE) {
+        update_timezone_scene(&projection);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                s_ui.active_screen == PRODUCT_SCREEN_WIFI) {
@@ -1784,6 +1800,10 @@ static void release_current_scene(void)
      * confirmation survives hiding this scene; its header drawer is reset. */
     np_set_visible(s_ui.system_scene.header.drawer_scrim, false);
     np_set_visible(s_ui.system_scene.root, false);
+    np_set_visible(s_ui.timezone_scene.header.drawer_scrim, false);
+    np_set_visible(s_ui.timezone_scene.root, false);
+    if (s_ui.timezone_scene.timezone.search != NULL)
+        lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
     if (s_ui.settings.root != NULL) lv_obj_delete(s_ui.settings.root);
     if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
@@ -1877,7 +1897,8 @@ static void scene_navigation_async(void *user_data)
         destination != PRODUCT_SCREEN_DISPLAY_SOUND &&
         destination != PRODUCT_SCREEN_SYSTEM &&
         destination != PRODUCT_SCREEN_NOTIFICATIONS &&
-        destination != PRODUCT_SCREEN_WIFI) return;
+        destination != PRODUCT_SCREEN_WIFI &&
+        destination != PRODUCT_SCREEN_TIMEZONE) return;
 
     release_current_scene();
     np_header_t *header;
@@ -1908,6 +1929,26 @@ static void scene_navigation_async(void *user_data)
         install_settings_control_callbacks();
         lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    } else if (destination == PRODUCT_SCREEN_TIMEZONE) {
+        install_header_callbacks = s_ui.timezone_scene.root == NULL;
+        const uint32_t started = lv_tick_get();
+        np_settings_timezone_scene_create(&s_ui.timezone_scene, lv_screen_active(),
+            &s_ui.keyboard, timezone_select_cb, NULL);
+        header = &s_ui.timezone_scene.header;
+        root = s_ui.timezone_scene.root;
+        s_ui.active_screen = PRODUCT_SCREEN_TIMEZONE;
+        app_ui_projection_t current = {0};
+        app_state_get_ui_projection(&current);
+        np_settings_timezone_scene_enter(&s_ui.timezone_scene, current.onboarding.timezone_index);
+        if (install_header_callbacks) {
+            lv_obj_add_event_cb(s_ui.timezone_scene.back_button, scene_navigation_event_cb,
+                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            s_ui.timezone_scene_object_count = scene_object_count(root);
+            ESP_LOGI(TAG, "Timezone scene built: %lu objects, %lu ms",
+                (unsigned long)s_ui.timezone_scene_object_count, (unsigned long)lv_tick_elaps(started));
+        } else if (scene_object_count(root) != s_ui.timezone_scene_object_count) {
+            ESP_LOGW(TAG, "Timezone scene object count changed");
+        }
     } else if (destination == PRODUCT_SCREEN_WIFI) {
         const uint32_t started = lv_tick_get();
         s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
@@ -1967,7 +2008,7 @@ static void scene_navigation_async(void *user_data)
                                     ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
                                     ? PRODUCT_SCREEN_SYSTEM : i == 3U
                                     ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
-                                    ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_SETTINGS));
+                                    ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
         }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
@@ -1986,6 +2027,7 @@ static void scene_navigation_async(void *user_data)
     if (destination == PRODUCT_SCREEN_SYSTEM) update_system_information(&s_ui.system_scene.system, &projection);
     if (destination == PRODUCT_SCREEN_NOTIFICATIONS) update_notifications_scene(&projection);
     if (destination == PRODUCT_SCREEN_WIFI) update_wifi_scene(&projection);
+    if (destination == PRODUCT_SCREEN_TIMEZONE) update_timezone_scene(&projection);
     s_ui.rendered_revision = projection.revision;
     np_set_visible(root, true);
     lv_obj_move_foreground(root);

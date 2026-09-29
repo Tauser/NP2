@@ -1131,3 +1131,30 @@ declaração de remoção durável quando somente o enfileiramento foi aceito.
 Nenhuma alteração de WDT, display, schemas offline, criptografia ou retenção
 do vault. Os testes LVGL em host verificam lifecycle/pool/máscara; não fecham
 os gates físicos de rede, reboot, latência, memória ou WDT.
+
+## ADR-045 — Fuso virtualizado e teclado global com foco reconciliado
+
+**Decisão:** reutilizar o módulo de Fuso existente numa cena dedicada lazy,
+com seis posições visíveis e sete rows fixas. A cena permanece em cache após
+a primeira entrada; não recriar árvore nem duplicar callbacks. Seleção é um
+rascunho até Aplicar. `product_ui` continua a ponte para onboarding_service,
+app_loop, time_service e FlashCoordinator; a UI não persiste nem muda TZ.
+Modal legado continua compilando e usando o mesmo catálogo.
+
+**Motivo e trade-off:** a busca anterior fazia consultas quadráticas ao CSV.
+Um índice imutável em flash mantém a ordem dos 462 índices já gravados e
+torna a busca linear. Filtro e textos das sete rows usam buffers limitados;
+labels estáticas não realocam texto no scroll/busca. Metadados públicos de
+país entram somente como dados estáticos de apresentação, sem novo backend.
+Offset exibido é explicitamente padrão, sem inventar DST atual.
+
+Teclado LVGL oficial permanece único em product_ui_state_t, 1024 px no
+rodapé, com targets registrados num pool. DEFOCUSED agenda reconciliação
+async: procurar outro campo visível com foco, retarget ou esconder. Interação
+do teclado preserva a sessão. Clear/hide/destroy cancelam async antes do
+teardown; DELETE libera bindings e destroy remove callbacks de campos vivos.
+
+O cache limita custo de reentrada, mas mantém a árvore e buffers de Fuso em
+memória junto do cache de Sistema. Não modifica WDT, pipeline de display,
+persistência, schema offline ou contratos de credenciais. Build e testes
+LVGL host não substituem aceite físico de foco, reboot, memória e WDT.
