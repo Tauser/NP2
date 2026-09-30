@@ -106,3 +106,11 @@ Na captura, Home apareceu aos 20,677 s e Perfil → Preferências concluiu
 `REQUEST`, `LEAVE`, `CLEAN_WAIT_NEXT_PASS`, `BUILD` e `ENTER` com gerações
 distintas, sem WDT. O usuário confirmou visualmente que a piscada desapareceu.
 Isto valida o ajuste observado, mas não substitui o ensaio prolongado do piloto.
+
+A mesma piscada foi relatada em Perfil → Home. O commit `97c64f2` manteve
+Perfil visível até `ENTER` também nesse destino. Build e `app-flash` na COM8
+passaram com hash de flash verificado. A imagem P4 tem 2.850.544 bytes e
+SHA-256 `3161c091c027c14e3a87ab0fc61359e25aa28f32fe3603c3b9871a42e3f258af`.
+Na captura curta, houve 16 eventos `ENTER` e nenhum WDT; o usuário confirmou
+visualmente que a piscada em Perfil → Home desapareceu. O ensaio de 100 ciclos
+permanece pendente.
