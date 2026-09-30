@@ -19,8 +19,9 @@
 #define WEATHER_ASSET_TASK_PRIORITY 2U
 #define WEATHER_ASSET_WORKER_PERIOD_MS 100U
 #define WEATHER_SD_SETTLE_MS 750U
-#define WEATHER_SD_RETRY_DELAY_MS 1000U
-#define WEATHER_SD_MOUNT_ATTEMPTS 3U
+#define WEATHER_SD_RETRY_DELAY_MS 1200U
+#define WEATHER_SD_POWER_OFF_MS 200U
+#define WEATHER_SD_MOUNT_ATTEMPTS 4U
 #define WEATHER_ASSET_SLOT_COUNT 2U
 #define WEATHER_ASSET_PATH_MAX 96U
 #define WEATHER_ICON_DIRECTORY "/np2/weather/icons"
@@ -53,13 +54,24 @@ static bool s_last_attempt_day;
 static weather_condition_t s_last_attempt_condition;
 static sd_pwr_ctrl_handle_t s_sd_power;
 
+static void release_weather_sd_power(void)
+{
+    if (s_sd_power == NULL) return;
+    const esp_err_t result = sd_pwr_ctrl_del_on_chip_ldo(s_sd_power);
+    if (result == ESP_OK) {
+        s_sd_power = NULL;
+    } else {
+        ESP_LOGW(TAG, "microSD power-controller release failed: %s",
+                 esp_err_to_name(result));
+    }
+}
+
 static esp_err_t mount_weather_sd(void)
 {
     if (bsp_sdcard != NULL) return ESP_OK;
 
-    /* Match the Waveshare BSP slot and FAT policy. Keep one LDO handle across
-     * retries: bsp_sdcard_mount() creates a new one on every call, including
-     * failed calls, and cannot safely be retried without leaking channel 4. */
+    /* Match the Waveshare BSP slot and FAT policy. Own channel 4 explicitly:
+     * bsp_sdcard_mount() leaks a new LDO handle on each failed attempt. */
     if (s_sd_power == NULL) {
         const sd_pwr_ctrl_ldo_config_t ldo = {.ldo_chan_id = 4};
         const esp_err_t power_result = sd_pwr_ctrl_new_on_chip_ldo(&ldo, &s_sd_power);
@@ -209,8 +221,9 @@ static esp_err_t load_requested_icon(bool is_day, weather_condition_t condition,
 static void weather_asset_task(void *arg)
 {
     (void)arg;
-    /* Card power can lag behind the P4 on a warm reset. Delay and retry only
-     * transient init failures in this worker; LVGL and app_loop never wait. */
+    /* Card power can lag behind the P4 on a warm reset. An OCR timeout can
+     * leave the card powered but unresponsive, so cycle its dedicated LDO
+     * between bounded retries. LVGL and app_loop never wait for this worker. */
     vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_SETTLE_MS));
     esp_err_t result = ESP_ERR_INVALID_STATE;
     for (uint8_t attempt = 0U; attempt < WEATHER_SD_MOUNT_ATTEMPTS; ++attempt) {
@@ -220,16 +233,13 @@ static void weather_asset_task(void *arg)
             attempt + 1U == WEATHER_SD_MOUNT_ATTEMPTS) break;
         ESP_LOGW(TAG, "microSD init attempt %u failed: %s; retrying",
                  (unsigned int)(attempt + 1U), esp_err_to_name(result));
+        release_weather_sd_power();
+        if (s_sd_power != NULL) break; /* Never reacquire an occupied channel. */
+        vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_POWER_OFF_MS));
         vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_RETRY_DELAY_MS));
     }
     const bool mounted = result == ESP_OK;
-    if (!mounted && s_sd_power != NULL) {
-        const esp_err_t release = sd_pwr_ctrl_del_on_chip_ldo(s_sd_power);
-        if (release != ESP_OK)
-            ESP_LOGW(TAG, "microSD power-controller release failed: %s",
-                     esp_err_to_name(release));
-        else s_sd_power = NULL;
-    }
+    if (!mounted) release_weather_sd_power();
     taskENTER_CRITICAL(&s_lock);
     s_status.ready = true;
     s_status.mounted = mounted;
