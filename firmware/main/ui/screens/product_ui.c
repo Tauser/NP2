@@ -1635,12 +1635,12 @@ static void release_current_scene(void)
     discard_wifi_password();
     discard_wifi_confirmation();
     discard_system_confirmation();
-    /* One bounded lazy cache: System is reused across entries. No deferred
-     * confirmation survives hiding this scene; its header drawer is reset. */
+    /* System and Timezone used to remain as hidden roots. Hardware testing
+     * showed accumulated LVGL allocation pressure after visiting every page,
+     * so retain only the active scene. Destruction and the next construction
+     * are already separated by the navigation timer phases below. */
     np_set_visible(s_ui.system_scene.header.drawer_scrim, false);
-    np_set_visible(s_ui.system_scene.root, false);
     np_set_visible(s_ui.timezone_scene.header.drawer_scrim, false);
-    np_set_visible(s_ui.timezone_scene.root, false);
     if (s_ui.timezone_scene.timezone.search != NULL)
         lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
     if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
@@ -1649,12 +1649,18 @@ static void release_current_scene(void)
     if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
     if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
     if (s_ui.wifi_scene.root != NULL) lv_obj_delete(s_ui.wifi_scene.root);
+    if (s_ui.system_scene.root != NULL) lv_obj_delete(s_ui.system_scene.root);
+    if (s_ui.timezone_scene.root != NULL) lv_obj_delete(s_ui.timezone_scene.root);
     s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
     s_ui.display_sound = (np_settings_display_sound_view_t){0};
     s_ui.notifications_scene = (np_settings_notifications_view_t){0};
     s_ui.wifi_scene = (np_settings_wifi_view_t){0};
+    s_ui.system_scene = (np_settings_system_view_t){0};
+    s_ui.timezone_scene = (np_settings_timezone_view_t){0};
+    s_ui.system_scene_object_count = 0U;
+    s_ui.timezone_scene_object_count = 0U;
     s_ui.pending_wifi_ssid[0] = '\0';
     s_ui.display_sound_callbacks_initialized = false;
     s_ui.notification_callbacks_initialized = false;
