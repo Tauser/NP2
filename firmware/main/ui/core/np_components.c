@@ -769,7 +769,7 @@ void np_tile_set_on(np_tile_t *tile, bool on, const char *state_text)
     np_set_text_color(tile->state, on ? np_c_accent() : np_c_text_3());
 }
 
-#define NP_SPARK_GRADIENT_STRENGTH_PERCENT 42U
+#define NP_SPARK_GRADIENT_STRENGTH_PERCENT 26U
 /* Mantem toda a linha na faixa superior do chart. O restante da altura fica
  * reservado para o preco/variacao, enquanto o degradê continua descendo ate
  * a divisoria inferior do card. */
