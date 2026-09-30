@@ -1,10 +1,5 @@
 #include "np_settings_notifications.h"
 
-#define SETTINGS_NOTIFICATIONS_MODAL_X 172
-#define SETTINGS_NOTIFICATIONS_MODAL_Y 84
-#define SETTINGS_NOTIFICATIONS_MODAL_W 680
-#define SETTINGS_NOTIFICATIONS_MODAL_H 432
-
 static lv_obj_t *notification_switch(lv_obj_t *parent, int32_t x, int32_t y)
 {
     lv_obj_t *const sw = lv_switch_create(parent);
@@ -35,13 +30,6 @@ static lv_obj_t *notification_item(lv_obj_t *parent, int32_t y,
     return row;
 }
 
-static void row_event_cb(lv_event_t *event)
-{
-    if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
-        np_settings_notifications_show(lv_event_get_user_data(event));
-    }
-}
-
 static void set_switch(lv_obj_t *sw, bool enabled)
 {
     if (sw == NULL) return;
@@ -65,43 +53,6 @@ static void notification_controls(np_settings_notifications_t *notifications,
         NP_ICON_WARNING, np_c_warning(),
         "Alertas do sistema", "Rede, armazenamento e atualizacoes", width);
     notifications->system_switch = notification_switch(system, width - 80, 20);
-}
-
-void np_settings_notifications_create(np_settings_notifications_t *notifications,
-                                      lv_obj_t *parent)
-{
-    if (notifications == NULL || parent == NULL) return;
-    *notifications = (np_settings_notifications_t){0};
-    np_modal_create(&notifications->modal, parent,
-                    SETTINGS_NOTIFICATIONS_MODAL_X, SETTINGS_NOTIFICATIONS_MODAL_Y,
-                    SETTINGS_NOTIFICATIONS_MODAL_W, SETTINGS_NOTIFICATIONS_MODAL_H,
-                    NP_ICON_NOTIFICATIONS, np_c_accent(),
-                    "Notificacoes", "Alertas e som do painel");
-    lv_obj_t *const content = notifications->modal.content;
-    if (content == NULL) return;
-
-    notification_controls(notifications, content, SETTINGS_NOTIFICATIONS_MODAL_W - 48, 19, 76);
-    np_label(content, "Teste no volume atual", NP_FONT_SM, np_c_text_3(),
-             24, 273, 280, LV_TEXT_ALIGN_LEFT);
-    notifications->test_button = np_button(content, 442, 261, 214, 52,
-                                            "Testar som", true);
-}
-
-void np_settings_notifications_show(np_settings_notifications_t *notifications)
-{
-    if (notifications != NULL) np_modal_show(&notifications->modal);
-}
-
-void np_settings_notifications_hide(np_settings_notifications_t *notifications)
-{
-    if (notifications != NULL) np_modal_hide(&notifications->modal);
-}
-
-void np_settings_notifications_bind_row(np_settings_notifications_t *notifications,
-                                        lv_obj_t *row)
-{
-    if (notifications == NULL || row == NULL) return;
-    lv_obj_add_event_cb(row, row_event_cb, LV_EVENT_CLICKED, notifications);
 }
 
 void np_settings_notifications_sync(np_settings_notifications_t *notifications,

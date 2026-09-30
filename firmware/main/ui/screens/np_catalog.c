@@ -19,7 +19,6 @@ static const np_screen_entry_t s_catalog[] = {
     { "alarms",        "Alarmes",        "Lista", np_alarms_create },
     { "notifications", "Notificacoes",   "Lista", np_notifications_create },
     { "devices",       "Casa",           "Grade", np_devices_create },
-    { "settings",      "Configuracoes",  "Grade", np_settings_create },
     { "sheets",        "Painel lateral", "Fluxo", np_sheets_create },
 };
 

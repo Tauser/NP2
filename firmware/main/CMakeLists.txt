@@ -18,7 +18,7 @@ idf_component_register(
          "ui/assets/np_weather_background_assets.c" "ui/assets/np_btc_tilted_icon.c"
          "ui/screens/np_boot.c" "ui/screens/np_home.c"
          "ui/screens/np_profile.c" "ui/screens/np_preferences.c"
-         "ui/screens/np_settings.c" "ui/screens/settings/np_settings_display_sound.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
+         "ui/screens/settings/np_settings_display_sound.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
          "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          ${NP2_FONT_SRCS}
     INCLUDE_DIRS "." "ui/core" "ui/screens"

@@ -8,11 +8,6 @@
 #define NP_SCREENS_H
 
 #include "np_components.h"
-#include "settings/np_settings_system.h"
-#include "settings/np_settings_notifications.h"
-#include "settings/np_settings_timezone.h"
-#include "settings/np_settings_wifi.h"
-#include "settings/np_settings_display_sound.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,33 +55,8 @@ typedef struct {
     np_market_strip_t ibov;
 } np_home_view_t;
 
-typedef struct {
-    lv_obj_t *root;
-    np_header_t header;
-    lv_obj_t *home_button;
-    lv_obj_t *left_card;
-    lv_obj_t *middle_card;
-    lv_obj_t *right_card;
-    np_display_sound_controls_t controls;
-    lv_obj_t *wifi_row;
-    lv_obj_t *wifi_value;
-    lv_obj_t *notifications_row;
-    lv_obj_t *notifications_value;
-    lv_obj_t *timezone_row;
-    lv_obj_t *timezone_value;
-    lv_obj_t *system_row;
-    np_settings_system_t system;
-    np_settings_notifications_t notifications;
-    np_settings_timezone_t timezone;
-    np_settings_wifi_t wifi;
-} np_settings_view_t;
-
 np_boot_view_t np_boot_build(lv_obj_t *parent);
 np_home_view_t np_home_build(lv_obj_t *parent);
-np_settings_view_t np_settings_begin(lv_obj_t *parent);
-bool np_settings_build_next_card(np_settings_view_t *view);
-np_settings_view_t np_settings_build(lv_obj_t *parent);
-void np_settings_reset_stages(np_settings_view_t *view);
 
 void np_home_set_weather_icon_source(np_home_view_t *view, const void *source);
 void np_home_set_btc_spark(np_home_view_t *view, const int32_t *samples,
@@ -105,7 +75,6 @@ lv_obj_t *np_agenda_create(lv_obj_t *parent);
 lv_obj_t *np_alarms_create(lv_obj_t *parent);
 lv_obj_t *np_notifications_create(lv_obj_t *parent);
 lv_obj_t *np_devices_create(lv_obj_t *parent);
-lv_obj_t *np_settings_create(lv_obj_t *parent);
 lv_obj_t *np_sheets_create(lv_obj_t *parent);
 
 typedef struct {
