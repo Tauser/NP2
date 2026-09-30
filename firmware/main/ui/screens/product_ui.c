@@ -1684,13 +1684,13 @@ static void refresh_timer_cb(lv_timer_t *timer)
         update_header(s_ui.active_screen == PRODUCT_SCREEN_PROFILE
                           ? &s_ui.profile.header : &s_ui.preferences.header,
                       &projection, true);
-        s_ui.rendered_revision = projection.revision;
-    }
         if (s_ui.active_screen == PRODUCT_SCREEN_PROFILE)
             np_profile_sync(&s_ui.profile, projection.user_profile.configured,
                 &projection.user_profile.profile,
                 projection.user_profile.persistence_pending,
                 projection.user_profile.last_result);
+        s_ui.rendered_revision = projection.revision;
+    }
 
     const uint32_t elapsed = lv_tick_elaps(s_ui.started_at_tick);
 
@@ -1814,11 +1814,11 @@ static void release_current_scene(void)
     (void)lv_async_call_cancel(wifi_password_open_async, NULL);
     (void)lv_async_call_cancel(wifi_forget_open_async, NULL);
     (void)lv_async_call_cancel(system_restart_open_async, NULL);
-    s_ui.wifi_password_pending = false;
-    s_ui.wifi_confirmation_pending = false;
     (void)lv_async_call_cancel(profile_editor_open_async, (void *)1);
     (void)lv_async_call_cancel(profile_editor_open_async, (void *)2);
     s_ui.profile_editor_pending = false;
+    s_ui.wifi_password_pending = false;
+    s_ui.wifi_confirmation_pending = false;
     if (s_ui.settings_stage_timer != NULL) {
         lv_timer_delete(s_ui.settings_stage_timer);
         s_ui.settings_stage_timer = NULL;
@@ -1894,8 +1894,6 @@ static void settings_home_event_cb(lv_event_t *event)
 
 static void profile_identity_event_cb(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-{
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.profile_editor_pending) return;
     s_ui.profile_editor_pending = true;
     const bool focus_name = lv_event_get_target(event) != s_ui.profile.avatar_row;
@@ -1924,6 +1922,8 @@ static void profile_cancel_event_cb(lv_event_t *event)
 }
 
 static void profile_save_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     user_profile_t profile = {0};
     if (!np_profile_editor_value(&s_ui.profile, &profile)) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
@@ -1995,13 +1995,13 @@ static void scene_navigation_async(void *user_data)
                             LV_EVENT_CLICKED, NULL);
         lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
                             LV_EVENT_CLICKED, NULL);
-        s_ui.active_screen = PRODUCT_SCREEN_PROFILE;
-    } else if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) {
         app_ui_projection_t current = {0};
         app_state_get_ui_projection(&current);
         np_profile_sync(&s_ui.profile, current.user_profile.configured,
             &current.user_profile.profile, current.user_profile.persistence_pending,
             current.user_profile.last_result);
+        s_ui.active_screen = PRODUCT_SCREEN_PROFILE;
+    } else if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) {
         s_ui.display_sound = np_settings_display_sound_build(lv_screen_active());
         s_ui.active_screen = PRODUCT_SCREEN_DISPLAY_SOUND;
         header = &s_ui.display_sound.header;
