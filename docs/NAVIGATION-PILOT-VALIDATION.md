@@ -45,3 +45,15 @@ não integra esta evidência.
 
 O flash é manual pelo responsável, conforme instrução desta tarefa. Nenhuma
 gravação na placa foi feita neste worktree.
+
+## Captura serial de 2026-09-30
+
+Após o relato de flash manual, a COM8 mostrou Home aos 20,769 s e WDT da task
+`lvgl` a partir de 33,509 s, repetido a cada cinco segundos, com CPU 0 ocupado.
+O endereço `0x48046f4e` simboliza `lv_style_get_prop_inlined`. O boot informou
+prefixo SHA-256 do ELF `df4413a0`, igual ao descritor da imagem em
+`D:\Projetos\NP2\firmware\build\np2_p4.bin`; a imagem deste piloto no
+worktree tem prefixo `7267581a`. Portanto, esta captura é da build do checkout
+principal e não valida o Navigation Manager. Os logs brutos permaneceram apenas
+em `firmware/build/navigation-com8.log`, diretório ignorado pelo Git. Placa/BOM,
+hash da imagem C6 e teste físico da imagem piloto continuam pendentes.
