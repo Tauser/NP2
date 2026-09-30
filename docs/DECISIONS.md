@@ -1187,3 +1187,9 @@ FlashCoordinator serializa um registro pequeno de NVS em dois slots com CRC,
 sem alterar o schema offline nem iniciar escrita no callback LVGL. Uma falha
 de gravação fica visível no Perfil; build e teste host não comprovam retenção
 após reboot ou comportamento de WDT na placa, que exigem flash manual.
+
+## ADR-047 — Piloto de navegação por passagens LVGL
+
+**Decisão:** Home e Preferências usam um shell permanente com header, drawer e `content_host`. O Navigation Manager executa `LEAVE` no início de uma passagem do worker LVGL, `CLEAN` após `lv_timer_handler`, espera a passagem seguinte e então executa `BUILD` e `ENTER`. `handler_generation` conta passagens do worker; `page_generation` conta entradas concluídas em páginas. O adapter 0.6.4 recebe somente hooks genéricos `ui_cycle_begin`/`ui_cycle_end` por override local versionado. Somente a task LVGL chama o gerenciador e modifica objetos. O fluxo lazy de cache das outras telas continua disponível e não é removido neste piloto.
+
+**Motivo e trade-off:** o timer de 32 ms não prova que a limpeza e a construção ocorreram em passagens distintas do handler, e o cache de todas as roots retém heap. O limite por geração elimina essa ambiguidade para as duas páginas piloto e permite medir heap interno, maior bloco, heap LVGL, objetos, timers e tempo de cada fase. O shell compartilhado evita recriar header e drawer entre Home e Preferências; páginas legadas ainda usam seus próprios headers até migração posterior. A instrumentação e a cópia local do adapter aumentam código versionado e exigem revisão ao atualizar a versão. Build não substitui navegação repetida, memória e WDT em placa; o responsável faz flash manual.

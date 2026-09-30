@@ -85,6 +85,8 @@ esp_err_t board_bringup_start(void)
         .task_stack_size = NP2_LVGL_TASK_STACK_BYTES,
         .task_priority = NP2_LVGL_TASK_PRIORITY,
         .task_core_id = -1,
+        .ui_cycle_begin = product_ui_cycle_begin,
+        .ui_cycle_end = product_ui_cycle_end,
         .tick_period_ms = 1,
         .task_min_delay_ms = 1,
         .task_max_delay_ms = 15,

@@ -57,6 +57,7 @@ typedef struct {
 
 np_boot_view_t np_boot_build(lv_obj_t *parent);
 np_home_view_t np_home_build(lv_obj_t *parent);
+np_home_view_t np_home_build_with_header(lv_obj_t *parent, const np_header_t *header);
 
 void np_home_set_weather_icon_source(np_home_view_t *view, const void *source);
 void np_home_set_btc_spark(np_home_view_t *view, const int32_t *samples,

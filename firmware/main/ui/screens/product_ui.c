@@ -14,6 +14,7 @@
 #include "np_screens.h"
 #include "np_profile.h"
 #include "np_preferences.h"
+#include "np_navigation_manager.h"
 #include "np_feedback.h"
 #include "np_confirm.h"
 #include "np_keyboard.h"
@@ -48,6 +49,10 @@ typedef struct {
     } active_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
+    lv_obj_t *shell;
+    lv_obj_t *content_host;
+    np_header_t shell_header;
+    np_navigation_manager_t navigation;
     np_boot_view_t boot;
     np_home_view_t home;
     np_profile_view_t profile;
@@ -131,6 +136,11 @@ static void profile_save_event_cb(lv_event_t *event);
 static void profile_cancel_event_cb(lv_event_t *event);
 static void home_build_timer_cb(lv_timer_t *timer);
 static void home_dispose_boot_timer_cb(lv_timer_t *timer);
+static void navigation_shell_create(void);
+static void navigation_leave(void *context, uintptr_t page);
+static void navigation_clean(void *context, uintptr_t page);
+static bool navigation_build(void *context, uintptr_t page);
+static void navigation_enter(void *context, uintptr_t page);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -1448,6 +1458,24 @@ static void night_switch_event_cb(lv_event_t *event)
 
 static void install_home_navigation_callbacks(void);
 
+static void navigation_shell_create(void)
+{
+    if (s_ui.shell != NULL) return;
+    s_ui.shell = np_scene(lv_screen_active());
+    s_ui.content_host = np_scene(s_ui.shell);
+    s_ui.shell_header = np_header(s_ui.shell);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_home_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_settings_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    lv_obj_add_event_cb(s_ui.shell_header.settings_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+    np_set_visible(s_ui.shell, false);
+}
+
 static void home_dispose_boot_timer_cb(lv_timer_t *timer)
 {
     if (s_ui.boot.root != NULL) lv_obj_delete(s_ui.boot.root);
@@ -1469,13 +1497,19 @@ static void home_build_timer_cb(lv_timer_t *timer)
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
-    s_ui.home = np_home_build(lv_screen_active());
+    navigation_shell_create();
+    s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
     s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
-    install_home_navigation_callbacks();
     update_home(&projection);
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
+    s_ui.navigation.current_page = PRODUCT_SCREEN_HOME;
+    s_ui.navigation.destination = PRODUCT_SCREEN_HOME;
+    ++s_ui.navigation.page_generation;
     s_ui.rendered_revision = projection.revision;
+    np_set_visible(s_ui.shell, true);
+    lv_obj_move_foreground(s_ui.shell);
+    np_feedback_bring_to_front(&s_ui.feedback);
 
     /* Deleting the old tree is intentionally deferred to a later LVGL pass.
      * Building Home and freeing the boot scene together can starve IDLE0. */
@@ -1652,6 +1686,96 @@ static void release_current_scene(void)
     if (s_ui.timezone_scene.timezone.search != NULL)
         lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
     s_ui.pending_wifi_ssid[0] = '\0';
+}
+
+static void navigation_leave(void *context, uintptr_t page)
+{
+    (void)context;
+    release_current_scene();
+    if (page == PRODUCT_SCREEN_PREFERENCES && s_ui.preferences.profile_button != NULL &&
+        lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
+        np_set_visible(s_ui.preferences.profile_button, false);
+    }
+}
+
+static void navigation_clean(void *context, uintptr_t page)
+{
+    (void)context;
+    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+        /* Only pilot page objects belong to content_host. The shell, feedback,
+         * keyboard and legacy lazy caches live outside it. */
+        if (page == PRODUCT_SCREEN_PREFERENCES &&
+            s_ui.preferences.profile_button != NULL &&
+            lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
+            lv_obj_delete(s_ui.preferences.profile_button);
+        }
+        lv_obj_clean(s_ui.content_host);
+        if (page == PRODUCT_SCREEN_HOME) {
+            s_ui.home = (np_home_view_t){0};
+            s_ui.home_data_rendered = false;
+            s_ui.rendered_weather_icon_source = NULL;
+        } else {
+            s_ui.preferences = (np_preferences_view_t){0};
+        }
+    }
+    if (s_ui.navigation.destination != PRODUCT_SCREEN_HOME &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
+        np_set_visible(s_ui.shell, false);
+    }
+}
+
+static bool navigation_build(void *context, uintptr_t page)
+{
+    (void)context;
+    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+        navigation_shell_create();
+        app_ui_projection_t projection = {0};
+        app_state_get_ui_projection(&projection);
+        if (page == PRODUCT_SCREEN_HOME) {
+            s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
+            if (s_ui.home.root == NULL) return false;
+            s_ui.home_data_rendered = false;
+            update_home(&projection);
+            s_ui.active_screen = PRODUCT_SCREEN_HOME;
+        } else {
+            s_ui.preferences = np_preferences_build_with_header(s_ui.content_host,
+                                                                  &s_ui.shell_header,
+                                                                  s_ui.shell);
+            if (s_ui.preferences.root == NULL) return false;
+            lv_obj_add_event_cb(s_ui.preferences.profile_button,
+                                scene_navigation_event_cb, LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+            for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
+                lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
+                                    LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
+                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
+                                        ? PRODUCT_SCREEN_SYSTEM : i == 3U
+                                        ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
+                                        ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
+            }
+            update_header(&s_ui.shell_header, &projection, true);
+            s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
+        }
+        s_ui.rendered_revision = projection.revision;
+        np_set_visible(page == PRODUCT_SCREEN_HOME ? s_ui.home.root : s_ui.preferences.root,
+                       true);
+        return true;
+    }
+    /* The non-pilot screens retain the previous lazy cache implementation. */
+    s_ui.navigation_scene_released = true;
+    scene_navigation_async((void *)page);
+    return (uintptr_t)s_ui.active_screen == page;
+}
+
+static void navigation_enter(void *context, uintptr_t page)
+{
+    (void)context;
+    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+        np_set_visible(s_ui.shell, true);
+        lv_obj_move_foreground(s_ui.shell);
+    }
+    np_feedback_bring_to_front(&s_ui.feedback);
+    s_ui.navigation_pending = false;
 }
 
 static void settings_home_async(void *user_data)
@@ -1970,11 +2094,10 @@ static void scene_navigation_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
         s_ui.navigation_pending || s_ui.active_screen == PRODUCT_SCREEN_BOOT) return;
-    s_ui.navigation_pending = true;
-    if (lv_async_call(scene_navigation_async, lv_event_get_user_data(event)) != LV_RESULT_OK) {
-        s_ui.navigation_pending = false;
-        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
-                               "Navegação indisponível", NULL, 2200U);
+    const uintptr_t destination = (uintptr_t)lv_event_get_user_data(event);
+    if (destination == (uintptr_t)s_ui.active_screen) return;
+    if (np_navigation_request(&s_ui.navigation, destination)) {
+        s_ui.navigation_pending = true;
     }
 }
 
@@ -2006,6 +2129,15 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     lv_obj_clean(screen);
     lv_obj_remove_style_all(screen);
 
+    const np_navigation_ops_t navigation_ops = {
+        .leave = navigation_leave,
+        .clean = navigation_clean,
+        .build = navigation_build,
+        .enter = navigation_enter,
+    };
+    np_navigation_init(&s_ui.navigation, screen, PRODUCT_SCREEN_BOOT,
+                       &navigation_ops, NULL);
+
     s_ui.boot = np_boot_build(screen);
     s_ui.feedback = np_feedback_create(screen);
     s_ui.keyboard = np_keyboard_create(screen);
@@ -2020,4 +2152,16 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     refresh_timer_cb(s_ui.refresh_timer);
     return ESP_OK;
+}
+
+void product_ui_cycle_begin(void *context)
+{
+    (void)context;
+    np_navigation_cycle_begin(&s_ui.navigation);
+}
+
+void product_ui_cycle_end(void *context)
+{
+    (void)context;
+    np_navigation_cycle_end(&s_ui.navigation);
 }

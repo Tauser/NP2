@@ -9,6 +9,8 @@ extern "C" {
 #endif
 
 esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev);
+void product_ui_cycle_begin(void *context);
+void product_ui_cycle_end(void *context);
 
 #ifdef __cplusplus
 }

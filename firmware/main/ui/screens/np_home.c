@@ -87,12 +87,12 @@ void np_home_set_btc_spark(np_home_view_t *view, const int32_t *samples,
 /* Build                                                               */
 /* ------------------------------------------------------------------ */
 
-np_home_view_t np_home_build(lv_obj_t *parent)
+np_home_view_t np_home_build_with_header(lv_obj_t *parent, const np_header_t *header)
 {
     np_home_view_t view = {0};
 
     view.root = np_scene(parent);
-    view.header = np_header(view.root);
+    view.header = header != NULL ? *header : np_header(view.root);
 
     /* ---------------- Clima ---------------- */
 
@@ -287,6 +287,11 @@ np_home_view_t np_home_build(lv_obj_t *parent)
                                 "IBOV");
 
     return view;
+}
+
+np_home_view_t np_home_build(lv_obj_t *parent)
+{
+    return np_home_build_with_header(parent, NULL);
 }
 
 lv_obj_t *np_home_create(lv_obj_t *parent)

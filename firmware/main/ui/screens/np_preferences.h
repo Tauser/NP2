@@ -13,3 +13,6 @@ typedef struct {
 } np_preferences_view_t;
 
 np_preferences_view_t np_preferences_build(lv_obj_t *parent);
+np_preferences_view_t np_preferences_build_with_header(lv_obj_t *parent,
+                                                       const np_header_t *header,
+                                                       lv_obj_t *navigation_parent);

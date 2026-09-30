@@ -1,6 +1,8 @@
 #include "np_preferences.h"
 
-np_preferences_view_t np_preferences_build(lv_obj_t *parent)
+np_preferences_view_t np_preferences_build_with_header(lv_obj_t *parent,
+                                                       const np_header_t *header,
+                                                       lv_obj_t *navigation_parent)
 {
     static const char *const titles[NP_PREFERENCES_ITEM_COUNT] = {
         "Tela e som", "Wi-Fi", "Fuso horário", "Notificações", "Sistema",
@@ -17,8 +19,9 @@ np_preferences_view_t np_preferences_build(lv_obj_t *parent)
     np_preferences_view_t view = {0};
     view.root = np_scene(parent);
     np_set_visible(view.root, false);
-    view.header = np_header(view.root);
-    view.profile_button = np_button(view.root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET,
+    view.header = header != NULL ? *header : np_header(view.root);
+    view.profile_button = np_button(navigation_parent != NULL ? navigation_parent : view.root,
+                                     NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET,
                                      "Perfil", false);
     lv_obj_t *panel = np_panel(view.root, NP_SP_24, 80,
                                 NP_SCREEN_W - 2 * NP_SP_24, 496);
@@ -63,4 +66,9 @@ np_preferences_view_t np_preferences_build(lv_obj_t *parent)
                   32, LV_TEXT_ALIGN_CENTER);
     }
     return view;
+}
+
+np_preferences_view_t np_preferences_build(lv_obj_t *parent)
+{
+    return np_preferences_build_with_header(parent, NULL, NULL);
 }
