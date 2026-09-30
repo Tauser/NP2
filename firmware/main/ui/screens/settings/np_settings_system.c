@@ -80,7 +80,7 @@ void np_settings_system_scene_create(np_settings_system_view_t *view, lv_obj_t *
     view->root = np_scene(parent);
     np_set_visible(view->root, false);
     view->header = np_header(view->root);
-    view->back_button = np_button(view->root, 250, 12, 160, NP_TOUCH_TARGET,
+    view->back_button = np_button(view->root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET,
                                    "Voltar", false);
 
     lv_obj_t *info = np_panel(view->root, 24, 80, 552, 496);

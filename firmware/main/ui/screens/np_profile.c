@@ -72,7 +72,7 @@ np_profile_view_t np_profile_build(lv_obj_t *parent)
     view.root = np_scene(parent);
     np_set_visible(view.root, false);
     view.header = np_header(view.root);
-    view.home_button = np_button(view.root, 250, 12, 160, NP_TOUCH_TARGET,
+    view.home_button = np_button(view.root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET,
                                   "Início", false);
 
     lv_obj_t *hero = np_panel(view.root, 24, 80, 976, 188);

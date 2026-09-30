@@ -369,7 +369,7 @@ void np_settings_timezone_scene_create(np_settings_timezone_view_t *view,
     view->root = np_scene(parent);
     np_set_visible(view->root, false);
     view->header = np_header(view->root);
-    view->back_button = np_button(view->root, 250, 12, 160, NP_TOUCH_TARGET, "Voltar", false);
+    view->back_button = np_button(view->root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET, "Voltar", false);
     lv_obj_t *left = np_panel(view->root, 24, 80, 600, 496);
     lv_obj_t *right = np_panel(view->root, 640, 80, 360, 496);
     scene_badge(left, NP_ICON_CLOCK);

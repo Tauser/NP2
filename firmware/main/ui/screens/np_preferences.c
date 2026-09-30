@@ -18,7 +18,7 @@ np_preferences_view_t np_preferences_build(lv_obj_t *parent)
     view.root = np_scene(parent);
     np_set_visible(view.root, false);
     view.header = np_header(view.root);
-    view.profile_button = np_button(view.root, 250, 12, 160, NP_TOUCH_TARGET,
+    view.profile_button = np_button(view.root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET,
                                      "Perfil", false);
     lv_obj_t *panel = np_panel(view.root, NP_SP_24, 80,
                                 NP_SCREEN_W - 2 * NP_SP_24, 496);

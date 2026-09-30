@@ -54,6 +54,8 @@ extern "C" {
 #define NP_HEADER_H       64
 #define NP_DRAWER_W       84
 #define NP_TOUCH_TARGET   48
+#define NP_HEADER_NAV_X   480
+#define NP_HEADER_NAV_W   160
 #define NP_STATUS_DOT_SIZE 9
 
 #define NP_SP_4  4

@@ -1841,7 +1841,7 @@ static void open_settings_async(void *user_data)
     lv_obj_add_event_cb(s_ui.settings.header.settings_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
-    lv_obj_t *const back = np_button(s_ui.settings.root, 250, 12, 180,
+    lv_obj_t *const back = np_button(s_ui.settings.root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W,
                                       NP_TOUCH_TARGET, "Preferências", false);
     lv_obj_add_event_cb(back, scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
@@ -1954,14 +1954,15 @@ static void release_current_scene(void)
     if (s_ui.timezone_scene.timezone.search != NULL)
         lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
     if (s_ui.settings.root != NULL) lv_obj_delete(s_ui.settings.root);
-    if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
+    /* Home is the return surface. Keep its bounded tree and chart alive so
+     * navigation does not repeatedly allocate, draw and free it in one pass. */
+    np_set_visible(s_ui.home.root, false);
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
     if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
     if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
     if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
     if (s_ui.wifi_scene.root != NULL) lv_obj_delete(s_ui.wifi_scene.root);
     s_ui.settings = (np_settings_view_t){0};
-    s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
     s_ui.display_sound = (np_settings_display_sound_view_t){0};
@@ -1983,10 +1984,14 @@ static void settings_home_async(void *user_data)
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
         s_ui.active_screen == PRODUCT_SCREEN_HOME) return;
     release_current_scene();
-    s_ui.home = np_home_build(lv_screen_active());
-    s_ui.home_data_rendered = false;
+    if (s_ui.home.root == NULL) {
+        s_ui.home = np_home_build(lv_screen_active());
+        s_ui.home_data_rendered = false;
+        install_home_navigation_callbacks();
+    }
+    np_set_visible(s_ui.home.root, true);
+    lv_obj_move_foreground(s_ui.home.root);
     np_feedback_bring_to_front(&s_ui.feedback);
-    install_home_navigation_callbacks();
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);

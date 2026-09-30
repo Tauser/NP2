@@ -354,7 +354,7 @@ np_settings_wifi_view_t np_settings_wifi_scene_build(lv_obj_t *parent)
     np_settings_wifi_view_t view = {0};
     view.root = np_scene(parent);
     view.header = np_header(view.root);
-    view.back_button = np_button(view.root, 250, 12, 160, NP_TOUCH_TARGET, "Voltar", false);
+    view.back_button = np_button(view.root, NP_HEADER_NAV_X, 12, NP_HEADER_NAV_W, NP_TOUCH_TARGET, "Voltar", false);
     view.wifi.selected_index = NP_SETTINGS_WIFI_VISIBLE_RESULTS;
     lv_obj_t *main = np_panel(view.root, 24, 80, 600, 496);
     np_label(main, NP_ICON_WIFI, NP_FONT_ICON_BADGE, np_c_accent(), 24, 26, 56, LV_TEXT_ALIGN_CENTER);

@@ -10,7 +10,9 @@
  * apenas para acessar a layer do draw task. Em builds onde ele não estiver
  * exposto, o chart continua funcional e simplesmente fica sem o fade.
  */
-#if LV_USE_CHART && LV_DRAW_SW_COMPLEX
+#define NP_ENABLE_SPARK_FADE 0
+
+#if NP_ENABLE_SPARK_FADE && LV_USE_CHART && LV_DRAW_SW_COMPLEX
 #  if defined(__has_include)
 #    if __has_include("src/lvgl_private.h")
 #      include "src/lvgl_private.h"
