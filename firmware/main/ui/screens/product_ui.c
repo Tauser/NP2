@@ -72,6 +72,7 @@ typedef struct {
     bool wifi_confirmation_pending;
     lv_timer_t *refresh_timer;
     lv_timer_t *home_transition_timer;
+    lv_timer_t *navigation_build_timer;
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
@@ -99,6 +100,8 @@ typedef struct {
     uint8_t projected_brightness;
     uint8_t projected_volume;
     uint32_t system_scene_object_count;
+    uintptr_t navigation_destination;
+    bool navigation_scene_released;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -131,6 +134,7 @@ static void system_modal_closed(void *user_data);
 static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 static void scene_navigation_event_cb(lv_event_t *event);
 static void scene_navigation_async(void *user_data);
+static void scene_navigation_build_timer_cb(lv_timer_t *timer);
 static void release_current_scene(void);
 static void settings_home_async(void *user_data);
 static void profile_identity_event_cb(lv_event_t *event);
@@ -1822,7 +1826,7 @@ static void open_settings_async(void *user_data)
     s_ui.navigation_pending = false;
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
         s_ui.active_screen == PRODUCT_SCREEN_SETTINGS) return;
-    release_current_scene();
+    if (!s_ui.navigation_scene_released) release_current_scene();
     s_ui.settings = np_settings_begin(lv_screen_active());
     s_ui.settings_controls_initialized = false;
     s_ui.settings_notification_callbacks_initialized = false;
@@ -1954,15 +1958,14 @@ static void release_current_scene(void)
     if (s_ui.timezone_scene.timezone.search != NULL)
         lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
     if (s_ui.settings.root != NULL) lv_obj_delete(s_ui.settings.root);
-    /* Home is the return surface. Keep its bounded tree and chart alive so
-     * navigation does not repeatedly allocate, draw and free it in one pass. */
-    np_set_visible(s_ui.home.root, false);
+    if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
     if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
     if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
     if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
     if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
     if (s_ui.wifi_scene.root != NULL) lv_obj_delete(s_ui.wifi_scene.root);
     s_ui.settings = (np_settings_view_t){0};
+    s_ui.home = (np_home_view_t){0};
     s_ui.profile = (np_profile_view_t){0};
     s_ui.preferences = (np_preferences_view_t){0};
     s_ui.display_sound = (np_settings_display_sound_view_t){0};
@@ -1983,15 +1986,11 @@ static void settings_home_async(void *user_data)
     s_ui.navigation_pending = false;
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
         s_ui.active_screen == PRODUCT_SCREEN_HOME) return;
-    release_current_scene();
-    if (s_ui.home.root == NULL) {
-        s_ui.home = np_home_build(lv_screen_active());
-        s_ui.home_data_rendered = false;
-        install_home_navigation_callbacks();
-    }
-    np_set_visible(s_ui.home.root, true);
-    lv_obj_move_foreground(s_ui.home.root);
+    if (!s_ui.navigation_scene_released) release_current_scene();
+    s_ui.home = np_home_build(lv_screen_active());
+    s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
+    install_home_navigation_callbacks();
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
@@ -2071,11 +2070,37 @@ static uint32_t scene_object_count(lv_obj_t *root)
 static void scene_navigation_async(void *user_data)
 {
     const uintptr_t destination = (uintptr_t)user_data;
-    s_ui.navigation_pending = false;
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
         destination == (uintptr_t)s_ui.active_screen) return;
+
+    if (!s_ui.navigation_scene_released) {
+        if (destination != PRODUCT_SCREEN_HOME && destination != PRODUCT_SCREEN_SETTINGS &&
+            destination != PRODUCT_SCREEN_PROFILE &&
+            destination != PRODUCT_SCREEN_PREFERENCES &&
+            destination != PRODUCT_SCREEN_DISPLAY_SOUND &&
+            destination != PRODUCT_SCREEN_SYSTEM &&
+            destination != PRODUCT_SCREEN_NOTIFICATIONS &&
+            destination != PRODUCT_SCREEN_WIFI &&
+            destination != PRODUCT_SCREEN_TIMEZONE) {
+            s_ui.navigation_pending = false;
+            return;
+        }
+        s_ui.navigation_destination = destination;
+        release_current_scene();
+        s_ui.navigation_scene_released = true;
+        s_ui.navigation_build_timer =
+            lv_timer_create(scene_navigation_build_timer_cb, 32U, NULL);
+        if (s_ui.navigation_build_timer == NULL) {
+            /* Allocation failure must not strand the panel without a scene. */
+            scene_navigation_async((void *)destination);
+        }
+        return;
+    }
+
+    s_ui.navigation_pending = false;
     if (destination == PRODUCT_SCREEN_HOME) {
         settings_home_async(NULL);
+        s_ui.navigation_scene_released = false;
         return;
     }
     if (destination == PRODUCT_SCREEN_SETTINGS) {
@@ -2083,6 +2108,7 @@ static void scene_navigation_async(void *user_data)
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
                                "Configurações atuais",
                                "Tela anterior disponível durante a migração", 2200U);
+        s_ui.navigation_scene_released = false;
         return;
     }
     if (destination != PRODUCT_SCREEN_PROFILE &&
@@ -2093,7 +2119,6 @@ static void scene_navigation_async(void *user_data)
         destination != PRODUCT_SCREEN_WIFI &&
         destination != PRODUCT_SCREEN_TIMEZONE) return;
 
-    release_current_scene();
     np_header_t *header;
     lv_obj_t *root;
     bool install_header_callbacks = true;
@@ -2230,6 +2255,20 @@ static void scene_navigation_async(void *user_data)
     np_set_visible(root, true);
     lv_obj_move_foreground(root);
     np_feedback_bring_to_front(&s_ui.feedback);
+    s_ui.navigation_scene_released = false;
+}
+
+static void scene_navigation_build_timer_cb(lv_timer_t *timer)
+{
+    const uintptr_t destination = s_ui.navigation_destination;
+    s_ui.navigation_build_timer = NULL;
+    lv_timer_delete(timer);
+    if (lv_async_call(scene_navigation_async, (void *)destination) != LV_RESULT_OK) {
+        s_ui.navigation_scene_released = false;
+        s_ui.navigation_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Navegação indisponível", NULL, 2200U);
+    }
 }
 
 static void scene_navigation_event_cb(lv_event_t *event)
