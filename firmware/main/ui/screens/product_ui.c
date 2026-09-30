@@ -1674,7 +1674,7 @@ static void home_build_timer_cb(lv_timer_t *timer)
     install_home_navigation_callbacks();
     update_home(&projection);
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
-    s_ui.rendered_revision = projection->revision;
+    s_ui.rendered_revision = projection.revision;
 
     /* Deleting the old tree is intentionally deferred to a later LVGL pass.
      * Building Home and freeing the boot scene together can starve IDLE0. */
