@@ -57,3 +57,11 @@ worktree tem prefixo `7267581a`. Portanto, esta captura é da build do checkout
 principal e não valida o Navigation Manager. Os logs brutos permaneceram apenas
 em `firmware/build/navigation-com8.log`, diretório ignorado pelo Git. Placa/BOM,
 hash da imagem C6 e teste físico da imagem piloto continuam pendentes.
+
+Na captura seguinte, a COM8 ficou aberta por 120 s e registrou um novo boot
+após o reinício e a reprodução Perfil → Preferências. O boot voltou a informar
+ELF `df4413a0`, Home apareceu aos 20,739 s e o WDT da task `lvgl` começou aos
+39,269 s, repetindo a cada cinco segundos no mesmo `MEPC=0x48046f4e`.
+Não apareceu nenhum evento `np_navigation`. A reprodução confirma a falha da
+imagem do checkout principal, mas ainda não exercita o piloto deste worktree.
+O log bruto atualizado permanece no mesmo arquivo ignorado pelo Git.
