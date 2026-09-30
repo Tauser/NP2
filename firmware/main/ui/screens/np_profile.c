@@ -47,7 +47,7 @@ static void initials_for(const char *name, char out[4])
  * the weather provider's location or manufacture a user from the mockup. */
 static lv_obj_t *profile_row(lv_obj_t *parent, int32_t y,
                               const char *icon, const char *title, const char *detail,
-                              lv_obj_t **out_detail)
+                              lv_obj_t **out_detail, bool actionable)
 {
     lv_obj_t *row = np_fill(parent, NP_SP_24, y, 428, 76,
                              np_c_surface_raised(), LV_OPA_COVER,
@@ -58,9 +58,11 @@ static lv_obj_t *profile_row(lv_obj_t *parent, int32_t y,
     lv_obj_t *value = np_label(row, detail, NP_FONT_SM, np_c_text_2(),
                                60, 42, 300, LV_TEXT_ALIGN_LEFT);
     if (out_detail != NULL) *out_detail = value;
-    np_label(row, NP_ICON_ARROW_RIGHT, NP_FONT_ICON, np_c_text_2(),
-              380, 26, 24, LV_TEXT_ALIGN_CENTER);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    if (actionable) {
+        np_label(row, NP_ICON_ARROW_RIGHT, NP_FONT_ICON, np_c_text_2(),
+                  380, 26, 24, LV_TEXT_ALIGN_CENTER);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    }
     return row;
 }
 
@@ -93,9 +95,9 @@ np_profile_view_t np_profile_build(lv_obj_t *parent)
     np_label(account, "Identidade do usuário", NP_FONT_SM, np_c_text_2(),
               24, 54, 428, LV_TEXT_ALIGN_LEFT);
     view.name_row = profile_row(account, 100, NP_ICON_ACCOUNT,
-                                "Nome", "Não informado", &view.name_value);
+                                "Nome", "Não informado", &view.name_value, true);
     view.avatar_row = profile_row(account, 188, NP_ICON_IMAGE,
-                                  "Avatar", "Iniciais do nome", &view.avatar_value);
+                                  "Avatar", "Iniciais do nome", &view.avatar_value, true);
 
     lv_obj_t *personal = np_panel(view.root, 524, 284, 476, 292);
     np_label(personal, "Preferências pessoais", NP_FONT_LG, np_c_text(),
@@ -103,9 +105,9 @@ np_profile_view_t np_profile_build(lv_obj_t *parent)
     np_label(personal, "Seu painel", NP_FONT_SM, np_c_text_2(),
               24, 54, 428, LV_TEXT_ALIGN_LEFT);
     view.initial_screen_row = profile_row(personal, 100, NP_ICON_HOME,
-                                           "Tela inicial", "Home", NULL);
+                                           "Tela inicial", "Home", NULL, false);
     view.preferences_row = profile_row(personal, 188, NP_ICON_SETTINGS, "Abrir preferências",
-                                       "Configurações do sistema", NULL);
+                                       "Configurações do sistema", NULL, true);
     return view;
 }
 
