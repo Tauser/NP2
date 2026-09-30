@@ -1,6 +1,6 @@
 # Piloto de navegação Home ↔ Preferências
 
-Estado: build e flash P4 concluídos; ensaio de navegação da última imagem pendente.
+Estado: build, flash P4 e teste curto de navegação concluídos; ensaio de 100 ciclos pendente.
 Este documento não fecha gate de estabilidade gráfica ou WDT.
 
 Build de 2026-09-30: ESP-IDF 5.5.4, `IDF_TARGET=esp32p4`,
@@ -97,5 +97,12 @@ durante a janela; as transições corrigidas ainda precisam ser repetidas.
 Após o usuário confirmar que a navegação passou, restou uma piscada ao tocar
 Preferências a partir de Perfil. A tela Perfil era ocultada no `LEAVE`, antes
 do `BUILD` de Preferências na passagem seguinte. O ajuste mantém Perfil visível
-até `ENTER` e prioriza a remoção de outros caches se faltar memória. Exige
-nova gravação e observação visual da transição.
+até `ENTER` e prioriza a remoção de outros caches se faltar memória.
+
+O build/flash de `52e56e3` na COM8 passou com hash de flash verificado. A imagem
+P4 tem 2.850.544 bytes e SHA-256
+`d966d0cdda5a6f8c3370eca75543591a72dcff7e232a7a8d09d714bb48466de9`.
+Na captura, Home apareceu aos 20,677 s e Perfil → Preferências concluiu
+`REQUEST`, `LEAVE`, `CLEAN_WAIT_NEXT_PASS`, `BUILD` e `ENTER` com gerações
+distintas, sem WDT. O usuário confirmou visualmente que a piscada desapareceu.
+Isto valida o ajuste observado, mas não substitui o ensaio prolongado do piloto.
