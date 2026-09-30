@@ -1,6 +1,6 @@
 # Piloto de navegação Home ↔ Preferências
 
-Estado: build P4 validado em software; flash e ensaio de bancada pendentes.
+Estado: build e flash P4 concluídos; ensaio de navegação da última imagem pendente.
 Este documento não fecha gate de estabilidade gráfica ou WDT.
 
 Build de 2026-09-30: ESP-IDF 5.5.4, `IDF_TARGET=esp32p4`,
@@ -43,8 +43,8 @@ não integra esta evidência.
    WDT, reset, falha de touch ou crescimento persistente, preservar o log e
    voltar ao commit anterior antes de ampliar o piloto.
 
-O flash é manual pelo responsável, conforme instrução desta tarefa. Nenhuma
-gravação na placa foi feita neste worktree.
+O responsável autorizou o agente a gravar o P4 na COM8 nesta tarefa. O C6 não
+foi gravado.
 
 ## Captura serial de 2026-09-30
 
@@ -87,3 +87,9 @@ Wi-Fi ainda esgotou o pool: Wi-Fi foi construído com 1688 bytes livres e o
 WDT apareceu aos 59,885 s. A política foi ampliada para liberar caches
 legados ocultos antes da construção de qualquer página, com reserva maior
 para Wi-Fi e Fuso. Esse ajuste ainda requer build, flash e novo ensaio.
+
+O build e `app-flash` de `7535cf4` na COM8 passaram, com hash de flash
+verificado. A imagem P4 tem 2.850.512 bytes e SHA-256
+`103c3f206d3e4f6192e93ea69bf02801eb9bcbdc5f6880f289aa2b4c6d514792`.
+A captura posterior mostrou Home aos 20,706 s, sem WDT, mas não houve toques
+durante a janela; as transições corrigidas ainda precisam ser repetidas.
