@@ -93,3 +93,9 @@ verificado. A imagem P4 tem 2.850.512 bytes e SHA-256
 `103c3f206d3e4f6192e93ea69bf02801eb9bcbdc5f6880f289aa2b4c6d514792`.
 A captura posterior mostrou Home aos 20,706 s, sem WDT, mas não houve toques
 durante a janela; as transições corrigidas ainda precisam ser repetidas.
+
+Após o usuário confirmar que a navegação passou, restou uma piscada ao tocar
+Preferências a partir de Perfil. A tela Perfil era ocultada no `LEAVE`, antes
+do `BUILD` de Preferências na passagem seguinte. O ajuste mantém Perfil visível
+até `ENTER` e prioriza a remoção de outros caches se faltar memória. Exige
+nova gravação e observação visual da transição.

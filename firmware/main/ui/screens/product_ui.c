@@ -1692,6 +1692,13 @@ static void navigation_leave(void *context, uintptr_t page)
 {
     (void)context;
     release_current_scene();
+    if (page == PRODUCT_SCREEN_PROFILE &&
+        s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES &&
+        s_ui.profile.root != NULL) {
+        /* Keep the outgoing scene painted until Preferences is ready. The
+         * legacy Profile tree remains cached through the separated pass. */
+        np_set_visible(s_ui.profile.root, true);
+    }
     if (page == PRODUCT_SCREEN_PREFERENCES && s_ui.preferences.profile_button != NULL &&
         lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
         np_set_visible(s_ui.preferences.profile_button, false);
@@ -1743,7 +1750,7 @@ static bool navigation_legacy_cached(uintptr_t page)
     }
 }
 
-static void navigation_reclaim_for_build(uintptr_t from, uintptr_t destination)
+static void navigation_reclaim_for_build(uintptr_t destination)
 {
     /* The 64 KiB LVGL pool cannot retain every legacy scene. Free hidden
      * caches after LEAVE and before BUILD, keeping the destination cache. */
@@ -1753,7 +1760,7 @@ static void navigation_reclaim_for_build(uintptr_t from, uintptr_t destination)
         : (destination == PRODUCT_SCREEN_HOME || destination == PRODUCT_SCREEN_PREFERENCES)
             ? 24U * 1024U : 30U * 1024U;
     const uintptr_t candidates[] = {
-        from, PRODUCT_SCREEN_SYSTEM, PRODUCT_SCREEN_WIFI, PRODUCT_SCREEN_TIMEZONE,
+        PRODUCT_SCREEN_SYSTEM, PRODUCT_SCREEN_WIFI, PRODUCT_SCREEN_TIMEZONE,
         PRODUCT_SCREEN_DISPLAY_SOUND, PRODUCT_SCREEN_NOTIFICATIONS,
         PRODUCT_SCREEN_PROFILE,
     };
@@ -1796,7 +1803,7 @@ static void navigation_clean(void *context, uintptr_t page)
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
     }
-    navigation_reclaim_for_build(page, s_ui.navigation.destination);
+    navigation_reclaim_for_build(s_ui.navigation.destination);
 }
 
 static bool navigation_build(void *context, uintptr_t page)
@@ -1846,6 +1853,7 @@ static void navigation_enter(void *context, uintptr_t page)
 {
     (void)context;
     if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+        if (s_ui.profile.root != NULL) np_set_visible(s_ui.profile.root, false);
         np_set_visible(s_ui.shell, true);
         lv_obj_move_foreground(s_ui.shell);
     }
