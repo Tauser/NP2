@@ -1631,39 +1631,27 @@ static void release_current_scene(void)
         s_ui.settings_value_bubble_timer = NULL;
     }
     np_keyboard_hide(&s_ui.keyboard);
+    np_profile_close_editor(&s_ui.profile);
     discard_wifi_add();
     discard_wifi_password();
     discard_wifi_confirmation();
     discard_system_confirmation();
-    /* System and Timezone used to remain as hidden roots. Hardware testing
-     * showed accumulated LVGL allocation pressure after visiting every page,
-     * so retain only the active scene. Destruction and the next construction
-     * are already separated by the navigation timer phases below. */
+    /* All product scenes are lazy caches. Rebuilding them on each visit
+     * fragments the LVGL heap under repeated navigation. Hidden roots do not
+     * draw; only their small, fixed object trees remain allocated. */
+    np_set_visible(s_ui.home.root, false);
+    np_set_visible(s_ui.profile.root, false);
+    np_set_visible(s_ui.preferences.root, false);
+    np_set_visible(s_ui.display_sound.root, false);
+    np_set_visible(s_ui.notifications_scene.root, false);
+    np_set_visible(s_ui.wifi_scene.root, false);
     np_set_visible(s_ui.system_scene.header.drawer_scrim, false);
+    np_set_visible(s_ui.system_scene.root, false);
     np_set_visible(s_ui.timezone_scene.header.drawer_scrim, false);
+    np_set_visible(s_ui.timezone_scene.root, false);
     if (s_ui.timezone_scene.timezone.search != NULL)
         lv_obj_remove_state(s_ui.timezone_scene.timezone.search, LV_STATE_FOCUSED);
-    if (s_ui.home.root != NULL) lv_obj_delete(s_ui.home.root);
-    if (s_ui.profile.root != NULL) lv_obj_delete(s_ui.profile.root);
-    if (s_ui.preferences.root != NULL) lv_obj_delete(s_ui.preferences.root);
-    if (s_ui.display_sound.root != NULL) lv_obj_delete(s_ui.display_sound.root);
-    if (s_ui.notifications_scene.root != NULL) lv_obj_delete(s_ui.notifications_scene.root);
-    if (s_ui.wifi_scene.root != NULL) lv_obj_delete(s_ui.wifi_scene.root);
-    if (s_ui.system_scene.root != NULL) lv_obj_delete(s_ui.system_scene.root);
-    if (s_ui.timezone_scene.root != NULL) lv_obj_delete(s_ui.timezone_scene.root);
-    s_ui.home = (np_home_view_t){0};
-    s_ui.profile = (np_profile_view_t){0};
-    s_ui.preferences = (np_preferences_view_t){0};
-    s_ui.display_sound = (np_settings_display_sound_view_t){0};
-    s_ui.notifications_scene = (np_settings_notifications_view_t){0};
-    s_ui.wifi_scene = (np_settings_wifi_view_t){0};
-    s_ui.system_scene = (np_settings_system_view_t){0};
-    s_ui.timezone_scene = (np_settings_timezone_view_t){0};
-    s_ui.system_scene_object_count = 0U;
-    s_ui.timezone_scene_object_count = 0U;
     s_ui.pending_wifi_ssid[0] = '\0';
-    s_ui.display_sound_callbacks_initialized = false;
-    s_ui.notification_callbacks_initialized = false;
 }
 
 static void settings_home_async(void *user_data)
@@ -1673,16 +1661,21 @@ static void settings_home_async(void *user_data)
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
         s_ui.active_screen == PRODUCT_SCREEN_HOME) return;
     if (!s_ui.navigation_scene_released) release_current_scene();
-    s_ui.home = np_home_build(lv_screen_active());
-    s_ui.home_data_rendered = false;
+    if (s_ui.home.root == NULL) {
+        s_ui.home = np_home_build(lv_screen_active());
+        s_ui.home_data_rendered = false;
+        install_home_navigation_callbacks();
+    }
     np_feedback_bring_to_front(&s_ui.feedback);
-    install_home_navigation_callbacks();
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
     update_home(&projection);
     s_ui.rendered_revision = projection.revision;
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
+    np_set_visible(s_ui.home.root, true);
+    lv_obj_move_foreground(s_ui.home.root);
+    np_feedback_bring_to_front(&s_ui.feedback);
 }
 
 static void profile_identity_event_cb(lv_event_t *event)
@@ -1793,21 +1786,24 @@ static void scene_navigation_async(void *user_data)
     lv_obj_t *root;
     bool install_header_callbacks = true;
     if (destination == PRODUCT_SCREEN_PROFILE) {
-        s_ui.profile = np_profile_build(lv_screen_active());
+        install_header_callbacks = s_ui.profile.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.profile = np_profile_build(lv_screen_active());
+            lv_obj_add_event_cb(s_ui.profile.home_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+            lv_obj_add_event_cb(s_ui.profile.initial_screen_row, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+            lv_obj_add_event_cb(s_ui.profile.preferences_row, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.profile.edit_button, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.profile.name_row, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+        }
         header = &s_ui.profile.header;
         root = s_ui.profile.root;
-        lv_obj_add_event_cb(s_ui.profile.home_button, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
-        lv_obj_add_event_cb(s_ui.profile.initial_screen_row, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
-        lv_obj_add_event_cb(s_ui.profile.preferences_row, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
-        lv_obj_add_event_cb(s_ui.profile.edit_button, profile_identity_event_cb,
-                            LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(s_ui.profile.name_row, profile_identity_event_cb,
-                            LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
-                            LV_EVENT_CLICKED, NULL);
         app_ui_projection_t current = {0};
         app_state_get_ui_projection(&current);
         np_profile_sync(&s_ui.profile, current.user_profile.configured,
@@ -1815,13 +1811,16 @@ static void scene_navigation_async(void *user_data)
             current.user_profile.last_result);
         s_ui.active_screen = PRODUCT_SCREEN_PROFILE;
     } else if (destination == PRODUCT_SCREEN_DISPLAY_SOUND) {
-        s_ui.display_sound = np_settings_display_sound_build(lv_screen_active());
+        install_header_callbacks = s_ui.display_sound.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.display_sound = np_settings_display_sound_build(lv_screen_active());
+            install_display_sound_callbacks();
+            lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        }
         s_ui.active_screen = PRODUCT_SCREEN_DISPLAY_SOUND;
         header = &s_ui.display_sound.header;
         root = s_ui.display_sound.root;
-        install_display_sound_callbacks();
-        lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
     } else if (destination == PRODUCT_SCREEN_TIMEZONE) {
         install_header_callbacks = s_ui.timezone_scene.root == NULL;
         const uint32_t started = lv_tick_get();
@@ -1843,28 +1842,34 @@ static void scene_navigation_async(void *user_data)
             ESP_LOGW(TAG, "Timezone scene object count changed");
         }
     } else if (destination == PRODUCT_SCREEN_WIFI) {
+        install_header_callbacks = s_ui.wifi_scene.root == NULL;
         const uint32_t started = lv_tick_get();
-        s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
-        np_settings_wifi_scene_bind(&s_ui.wifi_scene);
+        if (install_header_callbacks) {
+            s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
+            np_settings_wifi_scene_bind(&s_ui.wifi_scene);
+            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
+                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.connect_button, wifi_manage_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.forget_button, wifi_forget_event_cb, LV_EVENT_CLICKED, NULL);
+            ESP_LOGI(TAG, "Wi-Fi scene built: %lu objects, %lu ms",
+                (unsigned long)scene_object_count(s_ui.wifi_scene.root), (unsigned long)lv_tick_elaps(started));
+        }
         header = &s_ui.wifi_scene.header;
         root = s_ui.wifi_scene.root;
         s_ui.active_screen = PRODUCT_SCREEN_WIFI;
-        lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
-            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
-        lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.connect_button, wifi_manage_event_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_event_cb(s_ui.wifi_scene.wifi.forget_button, wifi_forget_event_cb, LV_EVENT_CLICKED, NULL);
-        ESP_LOGI(TAG, "Wi-Fi scene built: %lu objects, %lu ms",
-            (unsigned long)scene_object_count(root), (unsigned long)lv_tick_elaps(started));
     } else if (destination == PRODUCT_SCREEN_NOTIFICATIONS) {
-        s_ui.notifications_scene = np_settings_notifications_scene_build(lv_screen_active());
+        install_header_callbacks = s_ui.notifications_scene.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.notifications_scene = np_settings_notifications_scene_build(lv_screen_active());
+            install_notification_callbacks(&s_ui.notifications_scene.notifications);
+            lv_obj_add_event_cb(s_ui.notifications_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        }
         header = &s_ui.notifications_scene.header;
         root = s_ui.notifications_scene.root;
         s_ui.active_screen = PRODUCT_SCREEN_NOTIFICATIONS;
-        install_notification_callbacks(&s_ui.notifications_scene.notifications);
-        lv_obj_add_event_cb(s_ui.notifications_scene.back_button, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
     } else if (destination == PRODUCT_SCREEN_SYSTEM) {
         install_header_callbacks = s_ui.system_scene.root == NULL;
         const uint32_t started = lv_tick_get();
@@ -1890,19 +1895,22 @@ static void scene_navigation_async(void *user_data)
             }
         }
     } else {
-        s_ui.preferences = np_preferences_build(lv_screen_active());
+        install_header_callbacks = s_ui.preferences.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.preferences = np_preferences_build(lv_screen_active());
+            lv_obj_add_event_cb(s_ui.preferences.profile_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+            for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
+                lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
+                                    LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
+                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
+                                        ? PRODUCT_SCREEN_SYSTEM : i == 3U
+                                        ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
+                                        ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
+            }
+        }
         header = &s_ui.preferences.header;
         root = s_ui.preferences.root;
-        lv_obj_add_event_cb(s_ui.preferences.profile_button, scene_navigation_event_cb,
-                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
-        for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
-            lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
-                                LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
-                                    ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
-                                    ? PRODUCT_SCREEN_SYSTEM : i == 3U
-                                    ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
-                                    ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
-        }
         s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
     }
     if (install_header_callbacks) {
