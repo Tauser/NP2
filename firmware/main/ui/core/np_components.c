@@ -11,7 +11,7 @@
  * apenas para acessar a layer do draw task. Em builds onde ele não estiver
  * exposto, o chart continua funcional e simplesmente fica sem o fade.
  */
-#define NP_ENABLE_SPARK_FADE 0
+#define NP_ENABLE_SPARK_FADE 1
 
 #if NP_ENABLE_SPARK_FADE && LV_USE_CHART && LV_DRAW_SW_COMPLEX
 #  if defined(__has_include)
@@ -888,22 +888,6 @@ np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h
 {
     np_spark_t spark = {0};
 
-    /* This native single-object gradient replaces the old per-segment draw
-     * callback. It remains behind the line and labels and has no transform or
-     * auxiliary draw tasks. */
-    spark.fade = lv_obj_create(parent);
-    lv_obj_remove_style_all(spark.fade);
-    lv_obj_set_pos(spark.fade, x, y);
-    lv_obj_set_size(spark.fade, w, h);
-    lv_obj_set_style_bg_color(spark.fade, np_c_positive(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(spark.fade, LV_OPA_30, LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(spark.fade, np_c_positive(), LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_opa(spark.fade, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_dir(spark.fade, LV_GRAD_DIR_VER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(spark.fade, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(spark.fade, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(spark.fade, LV_OBJ_FLAG_HIDDEN);
-
     spark.chart = lv_chart_create(parent);
     lv_obj_remove_style_all(spark.chart);
     lv_obj_set_pos(spark.chart, x, y);
@@ -943,7 +927,6 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     if (spark == NULL || spark->chart == NULL || spark->series == NULL) return;
 
     if (samples == NULL || count < 2U || w < 48 || h < 80) {
-        np_set_visible(spark->fade, false);
         np_set_visible(spark->chart, false);
         return;
     }
@@ -1005,9 +988,6 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     if (range_max <= range_min) range_max = range_min + 1LL;
 
     lv_obj_set_size(spark->chart, w, h);
-    lv_obj_set_size(spark->fade, w, h);
-    lv_obj_set_style_bg_color(spark->fade, color, LV_PART_MAIN);
-    lv_obj_set_style_bg_grad_color(spark->fade, color, LV_PART_MAIN);
     lv_chart_set_point_count(spark->chart, count);
     lv_chart_set_axis_range(spark->chart, LV_CHART_AXIS_PRIMARY_Y,
                             (int32_t)range_min, (int32_t)range_max);
@@ -1020,7 +1000,6 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     }
 
     lv_chart_refresh(spark->chart);
-    np_set_visible(spark->fade, true);
     np_set_visible(spark->chart, true);
 }
 
