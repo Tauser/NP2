@@ -55,6 +55,9 @@
 #define NP2_UPDATE_OPERATION_TIMEOUT_MS 15000U
 #define NP2_UPDATE_JOURNAL_TIMEOUT_MS 20000U
 #define NP2_VALID_EPOCH_SECONDS 1735689600LL /* 2025-01-01 UTC */
+/* The Home sparkline is a short-term trend. A gap larger than this resets the
+ * local series so disconnected periods are never joined by a misleading line. */
+#define NP2_MARKET_HISTORY_MAX_GAP_S UINT32_C(300)
 
 static const char *const TAG = "np2_netcheck";
 static const char *const NP2_HTTPS_URL = "https://example.com/";
@@ -109,6 +112,14 @@ typedef struct {
 } dns_resolver_context_t;
 
 static dns_resolver_context_t s_dns_resolver;
+
+static void secure_zero(void *buffer, size_t length)
+{
+    volatile uint8_t *bytes = buffer;
+    while (length-- > 0U) {
+        *bytes++ = 0U;
+    }
+}
 
 static uint32_t elapsed_ms_since(int64_t start_us)
 {
@@ -238,15 +249,16 @@ static esp_err_t set_client_budget(esp_http_client_handle_t client, int64_t star
     return esp_http_client_set_timeout_ms(client, (int)remaining_ms);
 }
 
-static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
-                                       esp_http_client_method_t method, size_t maximum_body_bytes,
-                                       uint8_t *out_body, size_t out_body_size,
-                                       size_t *out_body_length)
+static esp_err_t perform_https_request_with_header(
+    const char *url, uint32_t timeout_ms, esp_http_client_method_t method,
+    const char *header_name, const char *header_value, size_t maximum_body_bytes,
+    uint8_t *out_body, size_t out_body_size, size_t *out_body_length)
 {
     if (out_body_length != NULL) {
         *out_body_length = 0U;
     }
     if (url == NULL || timeout_ms == 0U ||
+        ((header_name == NULL) != (header_value == NULL)) ||
         ((out_body == NULL) != (out_body_length == NULL)) ||
         (out_body != NULL && out_body_size < maximum_body_bytes)) {
         return timeout_ms == 0U ? ESP_ERR_TIMEOUT : ESP_ERR_INVALID_ARG;
@@ -254,9 +266,7 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
     if (maximum_body_bytes > NP2_PROVIDER_MAX_BODY_BYTES) {
         return ESP_ERR_INVALID_SIZE;
     }
-    if (timeout_ms == 0U) {
-        return ESP_ERR_TIMEOUT;
-    }
+
     const int64_t start_us = esp_timer_get_time();
     const esp_http_client_config_t config = {
         .url = url,
@@ -277,11 +287,18 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
     if (client == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    esp_err_t result =
-        set_client_budget(client, start_us, timeout_ms, NP2_HTTPS_TIMEOUT_MS);
+
+    esp_err_t result = ESP_OK;
+    if (header_name != NULL) {
+        result = esp_http_client_set_header(client, header_name, header_value);
+    }
+    if (result == ESP_OK) {
+        result = set_client_budget(client, start_us, timeout_ms, NP2_HTTPS_TIMEOUT_MS);
+    }
     if (result == ESP_OK) {
         result = esp_http_client_open(client, 0);
     }
+
     int64_t content_length = -1;
     if (result == ESP_OK) {
         result = set_client_budget(client, start_us, timeout_ms, NP2_HTTPS_TIMEOUT_MS);
@@ -293,7 +310,12 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
                                                             : ESP_ERR_HTTP_FETCH_HEADER;
         }
     }
+
     const int status_code = result == ESP_OK ? esp_http_client_get_status_code(client) : 0;
+    if (result == ESP_OK && (status_code < 200 || status_code >= 300)) {
+        ESP_LOGW(TAG, "HTTPS rejected status=%d content_length=%lld",
+                 status_code, (long long)content_length);
+    }
     if (result == ESP_OK && maximum_body_bytes > 0U && content_length > 0 &&
         (uint64_t)content_length > maximum_body_bytes) {
         result = ESP_ERR_INVALID_SIZE;
@@ -317,7 +339,8 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
             read_size = remaining_body_bytes < sizeof(read_buffer) ? remaining_body_bytes + 1U
                                                                     : sizeof(read_buffer);
         }
-        const int read_result = esp_http_client_read(client, (char *)read_buffer, (int)read_size);
+        const int read_result =
+            esp_http_client_read(client, (char *)read_buffer, (int)read_size);
         if (read_result == -ESP_ERR_HTTP_EAGAIN) {
             result = ESP_ERR_TIMEOUT;
         } else if (read_result < 0) {
@@ -341,8 +364,10 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
         received_bytes < (uint64_t)content_length) {
         result = ESP_ERR_HTTP_INCOMPLETE_DATA;
     }
+
     (void)esp_http_client_close(client);
     esp_http_client_cleanup(client);
+
     if (result != ESP_OK) {
         return result;
     }
@@ -353,6 +378,38 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
         *out_body_length = received_bytes;
     }
     return ESP_OK;
+}
+
+static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
+                                       esp_http_client_method_t method, size_t maximum_body_bytes,
+                                       uint8_t *out_body, size_t out_body_size,
+                                       size_t *out_body_length)
+{
+    return perform_https_request_with_header(
+        url, timeout_ms, method, NULL, NULL, maximum_body_bytes,
+        out_body, out_body_size, out_body_length);
+}
+
+static esp_err_t perform_coingecko_request(const char *url, uint32_t timeout_ms,
+                                           size_t maximum_body_bytes,
+                                           uint8_t *out_body, size_t out_body_size,
+                                           size_t *out_body_length)
+{
+    char api_key[FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES] = {0};
+    esp_err_t result =
+        flash_coordinator_copy_coingecko_api_key(api_key, sizeof(api_key));
+    if (result != ESP_OK) {
+        secure_zero(api_key, sizeof(api_key));
+        ESP_LOGE(TAG, "CoinGecko API key unavailable: %s", esp_err_to_name(result));
+        return result;
+    }
+
+    result = perform_https_request_with_header(
+        url, timeout_ms, HTTP_METHOD_GET, "x-cg-demo-api-key", api_key,
+        maximum_body_bytes, out_body, out_body_size, out_body_length);
+
+    secure_zero(api_key, sizeof(api_key));
+    return result;
 }
 
 static esp_err_t validate_https(const char *url, uint32_t timeout_ms,
@@ -507,6 +564,47 @@ static void retain_market_as_stale(offline_data_snapshot_t *snapshot)
     }
 }
 
+static void append_market_history(offline_market_data_t *fresh,
+                                  const offline_market_data_t *previous)
+{
+    if (fresh == NULL || !fresh->available || fresh->bitcoin_usd_cents == 0U) {
+        return;
+    }
+
+    uint8_t count = 0U;
+    bool continuation = false;
+    if (previous != NULL && previous->available && previous->observed_at_unix_s != 0U &&
+        fresh->observed_at_unix_s > previous->observed_at_unix_s) {
+        const uint32_t gap_s = fresh->observed_at_unix_s - previous->observed_at_unix_s;
+        continuation = gap_s <= NP2_MARKET_HISTORY_MAX_GAP_S;
+    }
+
+    if (continuation) {
+        count = previous->history_count;
+        if (count > OFFLINE_MARKET_HISTORY_MAX) {
+            count = OFFLINE_MARKET_HISTORY_MAX;
+        }
+        if (count > 0U) {
+            memcpy(fresh->history_usd_cents, previous->history_usd_cents,
+                   (size_t)count * sizeof(fresh->history_usd_cents[0]));
+        } else if (previous->bitcoin_usd_cents != 0U) {
+            fresh->history_usd_cents[0] = previous->bitcoin_usd_cents;
+            count = 1U;
+        }
+    }
+
+    if (count < OFFLINE_MARKET_HISTORY_MAX) {
+        fresh->history_usd_cents[count++] = fresh->bitcoin_usd_cents;
+    } else {
+        memmove(&fresh->history_usd_cents[0], &fresh->history_usd_cents[1],
+                (OFFLINE_MARKET_HISTORY_MAX - 1U) *
+                    sizeof(fresh->history_usd_cents[0]));
+        fresh->history_usd_cents[OFFLINE_MARKET_HISTORY_MAX - 1U] =
+            fresh->bitcoin_usd_cents;
+    }
+    fresh->history_count = count;
+}
+
 static void retain_exchange_as_stale(offline_data_snapshot_t *snapshot)
 {
     if (snapshot != NULL && snapshot->exchange.available) {
@@ -596,19 +694,29 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
         }
         else retain_weather_as_stale(&s_product_snapshot);
         break;
-    case DATA_REFRESH_DOMAIN_BITCOIN:
-        result = perform_https_request(NP2_COINGECKO_BITCOIN_URL,
-                                       remaining_request_budget_ms(request_start_us),
-                                       HTTP_METHOD_GET, OFFLINE_MARKET_MAX_BODY_BYTES, body,
-                                       NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+    case DATA_REFRESH_DOMAIN_BITCOIN: {
+        const offline_market_data_t previous_market = s_product_snapshot.market;
+        offline_market_data_t fresh_market = {0};
+
+        result = perform_coingecko_request(
+            NP2_COINGECKO_BITCOIN_URL,
+            remaining_request_budget_ms(request_start_us),
+            OFFLINE_MARKET_MAX_BODY_BYTES, body,
+            NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
         if (result == ESP_OK) {
             result = provider_result_to_esp_err(
                 offline_coingecko_parse_bitcoin_market(
-                    body, body_size, (uint32_t)now, &s_product_snapshot.market));
+                    body, body_size, (uint32_t)now, &fresh_market));
         }
-        if (result == ESP_OK) s_product_snapshot.market.stale = false;
-        else retain_market_as_stale(&s_product_snapshot);
+        if (result == ESP_OK) {
+            append_market_history(&fresh_market, &previous_market);
+            fresh_market.stale = false;
+            s_product_snapshot.market = fresh_market;
+        } else {
+            retain_market_as_stale(&s_product_snapshot);
+        }
         break;
+    }
     case DATA_REFRESH_DOMAIN_USD_BRL:
         result = perform_https_request(NP2_BCB_USD_BRL_URL,
                                        remaining_request_budget_ms(request_start_us),

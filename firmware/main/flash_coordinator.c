@@ -7,6 +7,7 @@
  * filesystem GC, staging and maintenance mode are separate future requests.
  */
 #include "flash_coordinator.h"
+#include "credentials/np2_provider_secrets.h"
 #include "timezone_catalog.h"
 #include "device_control_service.h"
 #include "notification_service.h"
@@ -63,6 +64,25 @@ _Static_assert(sizeof(onboarding_profile_t) == 4U,
 #define FLASH_COORDINATOR_WIFI_SSID_BYTES 33U
 #define FLASH_COORDINATOR_WIFI_PASSWORD_BYTES 64U
 
+/*
+ * Development-only CoinGecko Demo credential.
+ *
+ * This intentionally lives behind the flash/secret ownership boundary instead
+ * of the network service. It is still embedded in the firmware image and must
+ * be migrated to the encrypted provider-secret vault before production.
+ *
+ * Never log this value.
+ */
+#ifndef NP2_DEVELOPMENT_COINGECKO_API_KEY
+#define NP2_DEVELOPMENT_COINGECKO_API_KEY ""
+#endif
+
+static const char NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE[] =
+    NP2_DEVELOPMENT_COINGECKO_API_KEY;
+_Static_assert(sizeof(NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE) <=
+                   FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES,
+               "CoinGecko API key buffer is too small");
+
 static const char *const TAG = "flash_coord";
 static const char *const NVS_PARTITION = "nvs";
 static const char *const NVS_NAMESPACE = "np2_diag";
@@ -81,6 +101,9 @@ static const char *const NOTIFICATION_SLOT_ONE_KEY = "ntf1";
 static const char *const DEVICE_CONTROL_NAMESPACE = "np2_controls";
 static const char *const DEVICE_CONTROL_SLOT_ZERO_KEY = "ctl0";
 static const char *const DEVICE_CONTROL_SLOT_ONE_KEY = "ctl1";
+static const char *const USER_PROFILE_NAMESPACE = "np2_profile";
+static const char *const USER_PROFILE_SLOT_ZERO_KEY = "usr0";
+static const char *const USER_PROFILE_SLOT_ONE_KEY = "usr1";
 static const char *const CREDENTIAL_VAULT_NAMESPACE = "np2_credentials";
 static const char *const CREDENTIAL_VAULT_SLOT_ZERO_KEY = "cred0";
 static const char *const CREDENTIAL_VAULT_SLOT_ONE_KEY = "cred1";
@@ -96,9 +119,6 @@ static const char *const LITTLEFS_FULL_PROBE_TAIL_PATH = "/lfsdiag/full-probe.ta
 
 typedef struct {
     cache_record_header_t header;
-static const char *const USER_PROFILE_NAMESPACE = "np2_profile";
-static const char *const USER_PROFILE_SLOT_ZERO_KEY = "usr0";
-static const char *const USER_PROFILE_SLOT_ONE_KEY = "usr1";
     uint32_t value;
 } config_record_t;
 
@@ -111,6 +131,7 @@ typedef enum {
     FLASH_REQUEST_ONBOARDING_PROFILE_WRITE,
     FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE,
     FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE,
+    FLASH_REQUEST_USER_PROFILE_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR,
     FLASH_REQUEST_NVS_PROBE,
@@ -126,7 +147,6 @@ typedef enum {
     FLASH_REQUEST_CONFIG_CORRUPT_NEWEST,
     FLASH_REQUEST_UPDATE_JOURNAL_WRITE,
     FLASH_REQUEST_P4_OTA_BEGIN,
-    FLASH_REQUEST_USER_PROFILE_WRITE,
     FLASH_REQUEST_P4_OTA_APPEND,
     FLASH_REQUEST_P4_OTA_FINISH,
     FLASH_REQUEST_P4_OTA_ABORT,
@@ -143,6 +163,7 @@ typedef struct {
     onboarding_profile_t onboarding_profile;
     notification_profile_t notification_profile;
     device_control_profile_t device_control_profile;
+    user_profile_t user_profile;
     credential_vault_t credential_vault;
     update_journal_record_t update_journal;
     const esp_partition_t *ota_partition;
@@ -158,7 +179,6 @@ typedef struct {
     uint32_t written_bytes;
     bool active;
     bool finished;
-    user_profile_t user_profile;
 } p4_ota_session_t;
 
 static QueueHandle_t s_request_queue;
@@ -176,6 +196,7 @@ static void refresh_config_status(void);
 static void refresh_update_journal_status(void);
 static void refresh_onboarding_profile_status(void);
 static void refresh_notification_profile_status(void);
+static void refresh_user_profile_status(void);
 static void refresh_credential_vault_status(void);
 
 static void secure_zero(void *buffer, size_t length)
@@ -191,7 +212,6 @@ static size_t bounded_length(const char *value, size_t limit)
     size_t length = 0U;
     while (length < limit && value[length] != '\0') {
         ++length;
-static void refresh_user_profile_status(void);
     }
     return length;
 }
@@ -1235,21 +1255,6 @@ static esp_err_t write_notification_profile(const notification_profile_t *profil
 
 typedef struct {
     cache_record_header_t header;
-    device_control_profile_t profile;
-} device_control_profile_record_t;
-
-_Static_assert(sizeof(device_control_profile_record_t) == sizeof(cache_record_header_t) + 4U,
-               "Keep legacy controls record alignment");
-
-static esp_err_t read_device_control_profile_slot(
-    const char *key, device_control_profile_record_t *out_record)
-{
-    nvs_handle_t handle;
-    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, DEVICE_CONTROL_NAMESPACE,
-                                               NVS_READONLY, &handle);
-    if (result != ESP_OK) return result;
-typedef struct {
-    cache_record_header_t header;
     user_profile_t profile;
 } user_profile_record_t;
 
@@ -1338,6 +1343,21 @@ static esp_err_t write_user_profile(const user_profile_t *profile)
     return result;
 }
 
+typedef struct {
+    cache_record_header_t header;
+    device_control_profile_t profile;
+} device_control_profile_record_t;
+
+_Static_assert(sizeof(device_control_profile_record_t) == sizeof(cache_record_header_t) + 4U,
+               "Keep legacy controls record alignment");
+
+static esp_err_t read_device_control_profile_slot(
+    const char *key, device_control_profile_record_t *out_record)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, DEVICE_CONTROL_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
 
     device_control_profile_record_t record = {0};
     size_t record_size = sizeof(record);
@@ -1984,6 +2004,7 @@ static void flash_worker_task(void *arg)
     refresh_onboarding_profile_status();
     refresh_notification_profile_status();
     refresh_device_control_profile_status();
+    refresh_user_profile_status();
     refresh_credential_vault_status();
     refresh_update_journal_status();
     if (littlefs_init_result != ESP_OK) {
@@ -1999,7 +2020,6 @@ static void flash_worker_task(void *arg)
         if (request.kind == FLASH_REQUEST_RESTART) {
             /* Restart is serialized after earlier writes, with a final check
              * for changes accepted after the UI's confirmation snapshot. */
-    refresh_user_profile_status();
             if (restart_requests_safe(true)) esp_restart();
             portENTER_CRITICAL(&s_status_lock);
             s_status.restart_pending = false;
@@ -2027,6 +2047,9 @@ static void flash_worker_task(void *arg)
         case FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE:
             result = write_device_control_profile(&request.device_control_profile);
             break;
+        case FLASH_REQUEST_USER_PROFILE_WRITE:
+            result = write_user_profile(&request.user_profile);
+            break;
         case FLASH_REQUEST_CREDENTIAL_VAULT_WRITE:
             result = write_credential_vault(&request.credential_vault);
             break;
@@ -2042,9 +2065,6 @@ static void flash_worker_task(void *arg)
                                            &littlefs_verified_bytes);
             break;
         case FLASH_REQUEST_LITTLEFS_FORMAT:
-        case FLASH_REQUEST_USER_PROFILE_WRITE:
-            result = write_user_profile(&request.user_profile);
-            break;
             littlefs_format = true;
             result = format_and_mount_littlefs();
             break;
@@ -2120,6 +2140,8 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE) {
                 ESP_LOGI(TAG, "display and volume preferences saved in %lums",
                          (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
+                ESP_LOGI(TAG, "local profile saved in %lums", (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_WRITE) {
                 ESP_LOGI(TAG, "credential vault credentials saved in %lums",
                          (unsigned long)duration_ms);
@@ -2135,8 +2157,6 @@ static void flash_worker_task(void *arg)
             } else if (request.kind == FLASH_REQUEST_LITTLEFS_FORMAT) {
                 ESP_LOGI(TAG, "LittleFS explicit format %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
-            } else if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
-                ESP_LOGI(TAG, "local profile saved in %lums", (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CACHE_CORRUPT_NEWEST) {
                 ESP_LOGW(TAG, "cache newest-generation corruption %lu completed in %lums",
                          (unsigned long)request.sequence, (unsigned long)duration_ms);
@@ -2164,6 +2184,7 @@ static void flash_worker_task(void *arg)
             } else if (request.kind != FLASH_REQUEST_ONBOARDING_PROFILE_WRITE &&
                        request.kind != FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE &&
                        request.kind != FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE &&
+                       request.kind != FLASH_REQUEST_USER_PROFILE_WRITE &&
                        request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_WRITE &&
                        request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR) {
                 ESP_LOGI(TAG,
@@ -2179,7 +2200,6 @@ static void flash_worker_task(void *arg)
                      esp_err_to_name(result));
         }
         if (request.kind == FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE) {
-                       request.kind != FLASH_REQUEST_USER_PROFILE_WRITE &&
             portENTER_CRITICAL(&s_status_lock);
             s_status.notification_profile_completed_sequence = request.sequence;
             s_status.notification_profile_last_write_result = result;
@@ -2189,6 +2209,12 @@ static void flash_worker_task(void *arg)
             portENTER_CRITICAL(&s_status_lock);
             s_status.device_control_profile_completed_sequence = request.sequence;
             s_status.device_control_profile_last_write_result = result;
+            portEXIT_CRITICAL(&s_status_lock);
+        }
+        if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.user_profile_completed_sequence = request.sequence;
+            s_status.user_profile_last_write_result = result;
             portEXIT_CRITICAL(&s_status_lock);
         }
         complete_request(request.sequence, result, duration_ms, batch_writes,
@@ -2206,16 +2232,11 @@ esp_err_t flash_coordinator_start(void)
 
     s_request_queue = xQueueCreate(FLASH_COORDINATOR_QUEUE_LENGTH, sizeof(flash_request_t));
     ESP_RETURN_ON_FALSE(s_request_queue != NULL, ESP_ERR_NO_MEM, TAG, "Flash queue allocation failed");
-        if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
-            portENTER_CRITICAL(&s_status_lock);
-            s_status.user_profile_completed_sequence = request.sequence;
-            s_status.user_profile_last_write_result = result;
-            portEXIT_CRITICAL(&s_status_lock);
-        }
 
     portENTER_CRITICAL(&s_status_lock);
     s_status.init_result = ESP_ERR_INVALID_STATE;
     s_status.last_result = ESP_ERR_INVALID_STATE;
+    s_status.user_profile_result = ESP_ERR_INVALID_STATE;
     portEXIT_CRITICAL(&s_status_lock);
 
     s_p4_ota_submission_lock = xSemaphoreCreateMutex();
@@ -2231,7 +2252,6 @@ esp_err_t flash_coordinator_start(void)
         vQueueDelete(s_request_queue);
         s_request_queue = NULL;
         return ESP_ERR_NO_MEM;
-    s_status.user_profile_result = ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
 }
@@ -2484,21 +2504,6 @@ esp_err_t flash_coordinator_request_device_control_profile_write(
     return ESP_OK;
 }
 
-bool flash_coordinator_credential_vault_ready(void)
-{
-#if defined(CONFIG_NVS_ENCRYPTION)
-    return esp_flash_encryption_enabled();
-#elif defined(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION)
-    /* Development-only opt-in. Production builds never define this path. */
-    return true;
-#else
-    return false;
-#endif
-}
-
-esp_err_t flash_coordinator_request_credential_vault_write(const char *ssid,
-                                                                        const char *password)
-{
 esp_err_t flash_coordinator_request_user_profile_write(
     const user_profile_t *profile, uint32_t *out_sequence)
 {
@@ -2528,6 +2533,21 @@ esp_err_t flash_coordinator_request_user_profile_write(
     return ESP_OK;
 }
 
+bool flash_coordinator_credential_vault_ready(void)
+{
+#if defined(CONFIG_NVS_ENCRYPTION)
+    return esp_flash_encryption_enabled();
+#elif defined(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION)
+    /* Development-only opt-in. Production builds never define this path. */
+    return true;
+#else
+    return false;
+#endif
+}
+
+esp_err_t flash_coordinator_request_credential_vault_write(const char *ssid,
+                                                                        const char *password)
+{
     if (!flash_coordinator_credential_vault_ready() || ssid == NULL ||
         password == NULL || s_request_queue == NULL) {
         return ESP_ERR_NOT_SUPPORTED;
@@ -2593,6 +2613,24 @@ esp_err_t flash_coordinator_copy_credential_vault(char *out_ssid, size_t ssid_si
     }
     portEXIT_CRITICAL(&s_status_lock);
     return result;
+}
+
+esp_err_t flash_coordinator_copy_coingecko_api_key(char *out_key, size_t out_size)
+{
+    if (out_key == NULL) return ESP_ERR_INVALID_ARG;
+
+    const size_t key_length =
+        bounded_length(NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE,
+                       sizeof(NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE));
+    if (key_length == 0U ||
+        key_length >= sizeof(NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE) ||
+        out_size <= key_length) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    memset(out_key, 0, out_size);
+    memcpy(out_key, NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE, key_length);
+    return ESP_OK;
 }
 
 esp_err_t flash_coordinator_request_config_journal_write(void)

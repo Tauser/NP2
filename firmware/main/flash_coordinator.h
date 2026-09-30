@@ -11,6 +11,8 @@
 #include "device_control_profile.h"
 #include "user_profile.h"
 
+#define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES 64U
+
 /*
  * The coordinator is the sole owner of normal flash writes. Callers only
  * enqueue an intent; they never call NVS or filesystem APIs from UI callbacks.
@@ -80,14 +82,14 @@ typedef struct {
     esp_err_t device_control_profile_result;
     uint32_t device_control_profile_completed_sequence;
     esp_err_t device_control_profile_last_write_result;
-    /* Credential-vault presence only. Credential data is never exposed here. */
-    bool credential_vault_valid;
     bool user_profile_valid;
     uint32_t user_profile_generation;
     user_profile_t user_profile;
     esp_err_t user_profile_result;
     uint32_t user_profile_completed_sequence;
     esp_err_t user_profile_last_write_result;
+    /* Credential-vault presence only. Credential data is never exposed here. */
+    bool credential_vault_valid;
     uint32_t credential_vault_generation;
     esp_err_t credential_vault_result;
     bool update_journal_valid;
@@ -167,10 +169,10 @@ esp_err_t flash_coordinator_request_notification_profile_write(
 
 esp_err_t flash_coordinator_request_device_control_profile_write(
     const device_control_profile_t *profile, uint32_t *out_sequence);
-
-/*
 esp_err_t flash_coordinator_request_user_profile_write(
     const user_profile_t *profile, uint32_t *out_sequence);
+
+/*
  * Credential-vault storage. Production requires NVS Encryption and active
  * Flash Encryption. An explicitly compiled development profile may retain
  * credentials in local NVS on an unlocked P4. The driver keeps
@@ -184,6 +186,17 @@ esp_err_t flash_coordinator_request_credential_vault_clear(void);
 /* Private handoff for the connectivity worker; no UI/status getter exists. */
 esp_err_t flash_coordinator_copy_credential_vault(char *out_ssid, size_t ssid_size,
                                                    char *out_password, size_t password_size);
+
+/*
+ * Temporary development-only provider secret handoff.
+ * The CoinGecko Demo key is currently hardcoded inside flash_coordinator.c so
+ * network code never owns or logs the source secret. Callers must scrub their
+ * temporary copy after the HTTPS request completes.
+ *
+ * TODO: replace the hardcoded source with an encrypted provider-secret vault
+ * before production without changing this consumer-facing API.
+ */
+esp_err_t flash_coordinator_copy_coingecko_api_key(char *out_key, size_t out_size);
 
 /* Persists one sealed OTA journal transition through the sole flash owner. */
 esp_err_t flash_coordinator_request_update_journal(const update_journal_record_t *record);

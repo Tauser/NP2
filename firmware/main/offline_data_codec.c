@@ -136,6 +136,13 @@ bool offline_data_snapshot_is_valid(const offline_data_snapshot_t *snapshot)
     if ((!snapshot->market.high_24h_available && snapshot->market.high_24h_usd_cents != 0U) ||
         (!snapshot->market.low_24h_available && snapshot->market.low_24h_usd_cents != 0U) ||
         (!snapshot->market.volume_24h_available && snapshot->market.volume_24h_usd_cents != 0U)) return false;
+    for (size_t index = 0U; index < OFFLINE_MARKET_HISTORY_MAX; ++index) {
+        const bool used = index < snapshot->market.history_count;
+        if ((used && snapshot->market.history_usd_cents[index] == 0U) ||
+            (!used && snapshot->market.history_usd_cents[index] != 0U)) {
+            return false;
+        }
+    }
     if (snapshot->exchange.available) {
         if (snapshot->exchange.usd_brl_ten_thousandths == 0U ||
             snapshot->exchange.usd_brl_ten_thousandths > UINT32_C(1000000) ||
