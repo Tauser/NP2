@@ -18,10 +18,11 @@
 #define WEATHER_ASSET_TASK_STACK_BYTES (5U * 1024U)
 #define WEATHER_ASSET_TASK_PRIORITY 2U
 #define WEATHER_ASSET_WORKER_PERIOD_MS 100U
-#define WEATHER_SD_SETTLE_MS 750U
+#define WEATHER_SD_SETTLE_MS 1000U
 #define WEATHER_SD_RETRY_DELAY_MS 1200U
-#define WEATHER_SD_POWER_OFF_MS 200U
-#define WEATHER_SD_MOUNT_ATTEMPTS 4U
+#define WEATHER_SD_POWER_OFF_MS 500U
+#define WEATHER_SD_BOOT_WINDOW_MS 3500U
+#define WEATHER_SD_MOUNT_ATTEMPTS 2U
 #define WEATHER_ASSET_SLOT_COUNT 2U
 #define WEATHER_ASSET_PATH_MAX 96U
 #define WEATHER_ICON_DIRECTORY "/np2/weather/icons"
@@ -53,6 +54,7 @@ static bool s_last_attempt_valid;
 static bool s_last_attempt_day;
 static weather_condition_t s_last_attempt_condition;
 static sd_pwr_ctrl_handle_t s_sd_power;
+static TaskHandle_t s_boot_waiter;
 
 static void release_weather_sd_power(void)
 {
@@ -64,6 +66,17 @@ static void release_weather_sd_power(void)
         ESP_LOGW(TAG, "microSD power-controller release failed: %s",
                  esp_err_to_name(result));
     }
+}
+
+static esp_err_t power_cycle_weather_sd(void)
+{
+    if (s_sd_power == NULL) {
+        const sd_pwr_ctrl_ldo_config_t ldo = {.ldo_chan_id = 4};
+        const esp_err_t result = sd_pwr_ctrl_new_on_chip_ldo(&ldo, &s_sd_power);
+        if (result != ESP_OK) return result;
+    }
+    release_weather_sd_power();
+    return s_sd_power == NULL ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t mount_weather_sd(void)
@@ -221,9 +234,15 @@ static esp_err_t load_requested_icon(bool is_day, weather_condition_t condition,
 static void weather_asset_task(void *arg)
 {
     (void)arg;
-    /* Card power can lag behind the P4 on a warm reset. An OCR timeout can
-     * leave the card powered but unresponsive, so cycle its dedicated LDO
-     * between bounded retries. LVGL and app_loop never wait for this worker. */
+    /* A warm reset can leave the card powered in an indeterminate state.
+     * Cycle its dedicated LDO before the first mount; app_main starts this
+     * service before ESP-Hosted, so the C6 is never disturbed. */
+    const esp_err_t power_cycle_result = power_cycle_weather_sd();
+    if (power_cycle_result != ESP_OK) {
+        ESP_LOGW(TAG, "microSD power reset unavailable: %s",
+                 esp_err_to_name(power_cycle_result));
+    }
+    vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_POWER_OFF_MS));
     vTaskDelay(pdMS_TO_TICKS(WEATHER_SD_SETTLE_MS));
     esp_err_t result = ESP_ERR_INVALID_STATE;
     for (uint8_t attempt = 0U; attempt < WEATHER_SD_MOUNT_ATTEMPTS; ++attempt) {
@@ -259,6 +278,9 @@ static void weather_asset_task(void *arg)
         ESP_LOGI(TAG, "microSD mounted at %s; animated weather icons %s",
                  BSP_SD_MOUNT_POINT, s_icons_allocated ? "ready" : "unavailable");
     }
+
+    const TaskHandle_t boot_waiter = s_boot_waiter;
+    if (boot_waiter != NULL) xTaskNotifyGive(boot_waiter);
 
     for (;;) {
         bool pending = false;
@@ -317,12 +339,19 @@ esp_err_t weather_asset_service_start(void)
     s_started = true;
     taskEXIT_CRITICAL(&s_lock);
 
+    s_boot_waiter = xTaskGetCurrentTaskHandle();
     if (xTaskCreate(weather_asset_task, "np2_weather_sd", WEATHER_ASSET_TASK_STACK_BYTES, NULL,
                     WEATHER_ASSET_TASK_PRIORITY, NULL) != pdPASS) {
+        s_boot_waiter = NULL;
         taskENTER_CRITICAL(&s_lock);
         s_started = false;
         taskEXIT_CRITICAL(&s_lock);
         return ESP_ERR_NO_MEM;
+    }
+    /* app_main waits only for this bounded pre-Hosted initialization window.
+     * LVGL is already active, so visible UI keeps running normally. */
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WEATHER_SD_BOOT_WINDOW_MS)) == 0U) {
+        ESP_LOGW(TAG, "microSD boot window elapsed; continuing with Hosted startup");
     }
     return ESP_OK;
 }

@@ -50,6 +50,14 @@ void app_main(void)
         return;
     }
 
+    /* The microSD owns slot 0 and needs a clean power window after a warm
+     * reset. Start it before ESP-Hosted claims slot 1 for the C6. */
+    const esp_err_t weather_assets_err = weather_asset_service_start();
+    if (weather_assets_err != ESP_OK) {
+        ESP_LOGE(TAG, "Weather-asset SD service unavailable: %s",
+                 esp_err_to_name(weather_assets_err));
+    }
+
     const esp_err_t device_controls_err = device_control_service_start();
     if (device_controls_err != ESP_OK) {
         ESP_LOGE(TAG, "Device controls unavailable: %s",
@@ -87,12 +95,6 @@ void app_main(void)
     const esp_err_t app_state_err = app_state_start();
     if (app_state_err != ESP_OK) {
         ESP_LOGE(TAG, "Phase 4 app state unavailable: %s", esp_err_to_name(app_state_err));
-    }
-
-    const esp_err_t weather_assets_err = weather_asset_service_start();
-    if (weather_assets_err != ESP_OK) {
-        ESP_LOGE(TAG, "Weather-asset SD service unavailable: %s",
-                 esp_err_to_name(weather_assets_err));
     }
 
     /* Start the EventBus consumer before the producer. Product-data updates

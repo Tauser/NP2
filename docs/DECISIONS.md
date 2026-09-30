@@ -945,15 +945,18 @@ O profile P4 habilita `CONFIG_FATFS_LFN_HEAP=y` com `CONFIG_FATFS_MAX_LFN=64`:
 sem LFN, o FATFS reduz esses nomes a aliases 8.3 e a seleção deixa de encontrar
 o arquivo original.
 
-**Recuperação de boot (2026-09-29):** a inicialização opcional do microSD
-aguarda 750 ms no worker e faz até três tentativas apenas para timeout ou
-resposta inválida, com intervalo de 1 s. A montagem mantém o mesmo slot,
-frequência, LDO e política FAT do BSP, sem formatação. O worker cria o
-controlador da LDO uma única vez para todas as tentativas, pois a função de
-montagem do BSP cria outro controlador a cada chamada, mesmo se a montagem
-falhar. Em falha final, libera a LDO e conserva o ícone estático. Essa
-recuperação não atesta a causa elétrica do timeout nem substitui ensaios de
-reboot frio/quente e SD junto de Wi-Fi na placa.
+**Recuperação de boot (2026-09-30):** após observar que desligar a placa
+recupera um timeout de OCR que sobrevive a um reset quente, a inicialização
+opcional do microSD passou a ocorrer antes de iniciar ESP-Hosted. O worker
+desliga a LDO do cartão por 500 ms, aguarda 1 s de estabilização e tenta
+montar no máximo duas vezes para timeout ou resposta inválida. `app_main`
+espera essa janela limitada de 3,5 s antes de iniciar o C6; a LVGL já está
+ativa nesse ponto. O controlador SDMMC compartilhado não é reinicializado
+globalmente, pois isso poderia interromper a conexão do C6. A montagem mantém
+o mesmo slot, frequência, LDO e política FAT do BSP, sem formatação. Em falha
+final, libera a LDO e conserva o ícone estático. Essa recuperação não atesta
+a causa elétrica do timeout nem substitui ensaios de reboot frio/quente e SD
+junto de Wi-Fi na placa.
 
 **Consequências:** cartão ausente, FAT inválido, arquivo ausente ou tamanho
 divergente preservam o card escuro sem formatar, gravar ou bloquear a Home. Os
