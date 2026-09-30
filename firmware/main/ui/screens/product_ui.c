@@ -2263,12 +2263,10 @@ static void scene_navigation_build_timer_cb(lv_timer_t *timer)
     const uintptr_t destination = s_ui.navigation_destination;
     s_ui.navigation_build_timer = NULL;
     lv_timer_delete(timer);
-    if (lv_async_call(scene_navigation_async, (void *)destination) != LV_RESULT_OK) {
-        s_ui.navigation_scene_released = false;
-        s_ui.navigation_pending = false;
-        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
-                               "Navegação indisponível", NULL, 2200U);
-    }
+    /* This timer already runs on the LVGL owner in a later pass than scene
+     * destruction. Calling the build phase directly avoids a second async
+     * delivery that can leave navigation_pending latched after a touch. */
+    scene_navigation_async((void *)destination);
 }
 
 static void scene_navigation_event_cb(lv_event_t *event)
