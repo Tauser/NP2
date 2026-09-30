@@ -71,6 +71,7 @@ typedef struct {
     bool wifi_password_pending;
     bool wifi_confirmation_pending;
     lv_timer_t *refresh_timer;
+    lv_timer_t *home_transition_timer;
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
@@ -83,6 +84,7 @@ typedef struct {
     uint8_t settings_stage;
     uint8_t boot_rendered_stage;
     bool boot_saved_network_seen;
+    bool home_transition_pending;
     bool navigation_pending;
     bool profile_editor_pending;
     bool notification_feedback_initialized;
@@ -135,6 +137,8 @@ static void profile_identity_event_cb(lv_event_t *event);
 static void profile_editor_open_async(void *user_data);
 static void profile_save_event_cb(lv_event_t *event);
 static void profile_cancel_event_cb(lv_event_t *event);
+static void home_build_timer_cb(lv_timer_t *timer);
+static void home_dispose_boot_timer_cb(lv_timer_t *timer);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -1643,24 +1647,58 @@ static void night_switch_event_cb(lv_event_t *event)
 
 static void install_home_navigation_callbacks(void);
 
-static void show_home(const app_ui_projection_t *projection)
+static void home_dispose_boot_timer_cb(lv_timer_t *timer)
 {
-    if (s_ui.active_screen != PRODUCT_SCREEN_BOOT) return;
+    if (s_ui.boot.root != NULL) lv_obj_delete(s_ui.boot.root);
+    s_ui.boot = (np_boot_view_t){0};
+    s_ui.home_transition_timer = NULL;
+    s_ui.home_transition_pending = false;
+    lv_timer_delete(timer);
+    ESP_LOGI(TAG, "Boot transition complete; Home V2 visible");
+}
 
-    lv_obj_t *const boot_root = s_ui.boot.root;
+static void home_build_timer_cb(lv_timer_t *timer)
+{
+    s_ui.home_transition_timer = NULL;
+    lv_timer_delete(timer);
+    if (s_ui.active_screen != PRODUCT_SCREEN_BOOT || s_ui.boot.root == NULL) {
+        s_ui.home_transition_pending = false;
+        return;
+    }
+
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
     s_ui.home = np_home_build(lv_screen_active());
     s_ui.home_data_rendered = false;
     np_feedback_bring_to_front(&s_ui.feedback);
     install_home_navigation_callbacks();
-    update_home(projection);
+    update_home(&projection);
     s_ui.active_screen = PRODUCT_SCREEN_HOME;
     s_ui.rendered_revision = projection->revision;
 
-    /* Mantemos somente a cena ativa; a tela de boot nao fica alocada. */
-    lv_obj_delete(boot_root);
-    s_ui.boot = (np_boot_view_t){0};
+    /* Deleting the old tree is intentionally deferred to a later LVGL pass.
+     * Building Home and freeing the boot scene together can starve IDLE0. */
+    s_ui.home_transition_timer =
+        lv_timer_create(home_dispose_boot_timer_cb, 32U, NULL);
+    if (s_ui.home_transition_timer == NULL) {
+        if (s_ui.boot.root != NULL) lv_obj_delete(s_ui.boot.root);
+        s_ui.boot = (np_boot_view_t){0};
+        s_ui.home_transition_pending = false;
+        ESP_LOGW(TAG, "Boot scene disposal could not be deferred");
+    }
+}
 
-    ESP_LOGI(TAG, "Boot transition complete; Home V2 visible");
+static void show_home(const app_ui_projection_t *projection)
+{
+    (void)projection;
+    if (s_ui.active_screen != PRODUCT_SCREEN_BOOT || s_ui.home_transition_pending) return;
+
+    s_ui.home_transition_pending = true;
+    s_ui.home_transition_timer = lv_timer_create(home_build_timer_cb, 32U, NULL);
+    if (s_ui.home_transition_timer == NULL) {
+        s_ui.home_transition_pending = false;
+        ESP_LOGE(TAG, "Home transition timer allocation failed");
+    }
 }
 
 static void refresh_timer_cb(lv_timer_t *timer)
