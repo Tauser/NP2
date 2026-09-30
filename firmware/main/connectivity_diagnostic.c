@@ -1169,56 +1169,19 @@ static void connectivity_probe_task(void *arg)
         return;
     }
 
-    const wifi_scan_config_t scan_cfg = {
-        .show_hidden = false,
-        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-    };
-    set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING, ESP_OK);
-    err = esp_wifi_scan_start(&scan_cfg, true);
-    if (err != ESP_OK) {
-        fail_probe("esp_wifi_scan_start", err);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    uint16_t access_points_found = 0;
-    err = esp_wifi_scan_get_ap_num(&access_points_found);
-    if (err != ESP_OK) {
-        fail_probe("esp_wifi_scan_get_ap_num", err);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    static wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
-    memset(records, 0, sizeof(records));
-    uint16_t records_count = access_points_found < NP2_WIFI_SCAN_RESULTS_MAX
-                                 ? access_points_found : NP2_WIFI_SCAN_RESULTS_MAX;
-    err = records_count > 0U ? esp_wifi_scan_get_ap_records(&records_count, records) : ESP_OK;
-    if (err != ESP_OK) {
-        fail_probe("esp_wifi_scan_get_ap_records", err);
-        vTaskDelete(NULL);
-        return;
-    }
-    taskENTER_CRITICAL(&s_status_lock);
-    s_status.access_points_found = access_points_found;
-    s_status.scan_results_count = (uint8_t)records_count;
-    memset(s_status.scan_results, 0, sizeof(s_status.scan_results));
-    for (uint16_t index = 0; index < records_count; ++index) {
-        memcpy(s_status.scan_results[index].ssid, records[index].ssid,
-               sizeof(s_status.scan_results[index].ssid) - 1U);
-        s_status.scan_results[index].rssi = records[index].rssi;
-        s_status.scan_results[index].secure = records[index].authmode != WIFI_AUTH_OPEN;
-    }
-    taskEXIT_CRITICAL(&s_status_lock);
-    set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCAN_COMPLETE, ESP_OK);
-    ESP_LOGI(TAG, "credential-free Wi-Fi scan complete: %u AP(s)",
-             (unsigned int)access_points_found);
-
     const esp_err_t restore_result = restore_credential_vault();
-    if (restore_result != ESP_OK && restore_result != ESP_ERR_NOT_FOUND &&
-        restore_result != ESP_ERR_NOT_SUPPORTED) {
+    if (restore_result == ESP_OK) {
+        ESP_LOGI(TAG, "saved Wi-Fi association requested before initial scan");
+    } else {
+        if (restore_result != ESP_ERR_NOT_FOUND && restore_result != ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGW(TAG, "credential vault credential restore skipped: %s",
                  esp_err_to_name(restore_result));
+        }
+        /* Sem rede persistida, mantenha a descoberta inicial para o fluxo de
+         * configuração. Com credencial salva, o scan só ocorre sob demanda
+         * para não atrasar associação, DHCP e NTP no boot. */
+        connectivity_request_t scan_request = {.type = CONNECTIVITY_REQUEST_SCAN};
+        process_request(&scan_request);
     }
 
     run_station_loop();
