@@ -266,6 +266,7 @@ static void refresh_projection(void)
         .scan_results_count = network.scan_results_count,
         .reconnect_attempts = network.reconnect_attempts,
         .transport_failures = network.transport_failures,
+        .credentials_active = network.station_credentials_in_ram,
         .online = network.online,
         .last_result = network.last_result,
     };

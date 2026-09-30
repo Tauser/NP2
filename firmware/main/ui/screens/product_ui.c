@@ -26,6 +26,8 @@
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
+#define BOOT_SAVED_NETWORK_MAXIMUM_MS 15000U
+#define BOOT_TRANSITION_MS 180U
 #define SETTINGS_STAGE_INTERVAL_MS 80U
 #define SETTINGS_STAGE_COUNT 1U
 
@@ -72,12 +74,15 @@ typedef struct {
     lv_timer_t *settings_stage_timer;
     lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
+    uint32_t saved_network_wait_started_tick;
     uint32_t rendered_revision;
     uint32_t notified_persisted_generation;
     uint32_t control_save_completion_id;
     offline_data_snapshot_t rendered_home_data;
     const void *rendered_weather_icon_source;
     uint8_t settings_stage;
+    uint8_t boot_rendered_stage;
+    bool boot_saved_network_seen;
     bool navigation_pending;
     bool profile_editor_pending;
     bool notification_feedback_initialized;
@@ -1378,12 +1383,32 @@ static uint8_t boot_progress(const app_ui_projection_t *projection)
     if (projection->storage.ready) stage = 2U;
     if (projection->network.state >= APP_NETWORK_STATE_LINK_UP) stage = 3U;
     if (projection->time_trusted) stage = 4U;
-    if (projection->offline_data.weather.available ||
-        projection->offline_data.market.available) {
+    if (projection->time_trusted && (projection->offline_data.weather.available ||
+        projection->offline_data.market.available)) {
         stage = 5U;
     }
 
     return stage;
+}
+
+static void boot_opacity_animation(void *target, int32_t value)
+{
+    lv_obj_set_style_opa((lv_obj_t *)target, (lv_opa_t)value, 0);
+}
+
+static void boot_fade_in(lv_obj_t *object)
+{
+    if (object == NULL) return;
+
+    lv_anim_del(object, boot_opacity_animation);
+    lv_obj_set_style_opa(object, LV_OPA_TRANSP, 0);
+    lv_anim_t animation;
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, object);
+    lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&animation, BOOT_TRANSITION_MS);
+    lv_anim_set_exec_cb(&animation, boot_opacity_animation);
+    lv_anim_start(&animation);
 }
 
 static void update_boot(const app_ui_projection_t *projection)
@@ -1399,18 +1424,41 @@ static void update_boot(const app_ui_projection_t *projection)
         "Tudo pronto",
     };
 
-    np_segbar_set(&s_ui.boot.progress, stage, np_c_accent());
-    np_set_text(s_ui.boot.status, status[stage]);
+    if (stage != s_ui.boot_rendered_stage) {
+        if (stage > s_ui.boot_rendered_stage) {
+            for (uint8_t index = s_ui.boot_rendered_stage;
+                 index < stage && index < s_ui.boot.progress.count; ++index) {
+                np_set_bg_color(s_ui.boot.progress.seg[index], np_c_accent());
+                boot_fade_in(s_ui.boot.progress.seg[index]);
+            }
+        } else {
+            np_segbar_set(&s_ui.boot.progress, stage, np_c_accent());
+        }
+        np_set_text(s_ui.boot.status, status[stage]);
+        boot_fade_in(s_ui.boot.status);
+        s_ui.boot_rendered_stage = stage;
+    }
 
-    if (stage < 3U) {
-        np_set_text(s_ui.boot.detail,
-                    "A inicialização continua mesmo sem internet.");
-    } else if (!projection->network.online) {
-        np_set_text(s_ui.boot.detail,
-                    "O painel abrirá com os últimos dados salvos.");
+    const char *detail = NULL;
+    if (stage < 2U) {
+        detail = "Preparando os serviços do painel.";
+    } else if (stage < 3U && projection->network.credentials_active) {
+        detail = "Conectando à rede Wi-Fi salva.";
+    } else if (stage < 3U) {
+        detail = "Procurando redes Wi-Fi disponíveis.";
+    } else if (stage < 4U && projection->network.online) {
+        detail = "Conexão pronta; sincronizando data e hora.";
+    } else if (stage < 4U) {
+        detail = "A inicialização continua mesmo sem internet.";
+    } else if (stage < 5U) {
+        detail = "Hora atualizada; preparando os dados do painel.";
     } else {
+        detail = "Tudo pronto.";
+    }
+    if (strcmp(lv_label_get_text(s_ui.boot.detail), detail) != 0) {
         np_set_text(s_ui.boot.detail,
-                    "Conexão disponível; concluindo a inicialização.");
+                    detail);
+        boot_fade_in(s_ui.boot.detail);
     }
 }
 
@@ -1708,14 +1756,25 @@ static void refresh_timer_cb(lv_timer_t *timer)
         s_ui.rendered_revision = projection.revision;
     }
 
-    const uint32_t elapsed = lv_tick_elaps(s_ui.started_at_tick);
+    if (s_ui.active_screen == PRODUCT_SCREEN_BOOT) {
+        const uint32_t elapsed = lv_tick_elaps(s_ui.started_at_tick);
+        if (projection.network.credentials_active && !s_ui.boot_saved_network_seen) {
+            s_ui.boot_saved_network_seen = true;
+            s_ui.saved_network_wait_started_tick = lv_tick_get();
+        }
 
-    if (elapsed >= BOOT_MINIMUM_MS &&
-        projection.ready &&
-        (projection.time_trusted || elapsed >= BOOT_MAXIMUM_MS)) {
-        show_home(&projection);
-    } else if (elapsed >= BOOT_MAXIMUM_MS) {
-        show_home(&projection);
+        const bool saved_network_wait_expired = s_ui.boot_saved_network_seen &&
+            lv_tick_elaps(s_ui.saved_network_wait_started_tick) >=
+                BOOT_SAVED_NETWORK_MAXIMUM_MS;
+        const bool saved_network_failed = s_ui.boot_saved_network_seen &&
+            projection.network.state == APP_NETWORK_STATE_FAILED;
+        const bool ready_to_leave = projection.time_trusted ||
+            (!s_ui.boot_saved_network_seen && elapsed >= BOOT_MAXIMUM_MS) ||
+            saved_network_wait_expired || saved_network_failed;
+
+        if (elapsed >= BOOT_MINIMUM_MS && projection.ready && ready_to_leave) {
+            show_home(&projection);
+        }
     }
 }
 

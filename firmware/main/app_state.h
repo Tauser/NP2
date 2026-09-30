@@ -63,6 +63,8 @@ typedef struct {
     connectivity_scan_result_t scan_results[CONNECTIVITY_DIAGNOSTIC_MAX_SCAN_RESULTS];
     uint32_t reconnect_attempts;
     uint32_t transport_failures;
+    /* Presence of an active private station configuration, never credentials. */
+    bool credentials_active;
     bool online;
     char connected_ssid[33];
     char ip_address[16];
