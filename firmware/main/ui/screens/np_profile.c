@@ -182,30 +182,31 @@ void np_profile_open_editor(np_profile_view_t *view, np_keyboard_t *keyboard,
     if (view == NULL || view->root == NULL || keyboard == NULL) return;
     if (view->editor.scrim == NULL) {
         view->keyboard = keyboard;
-        np_modal_create(&view->editor, view->root, 288, 82, 448, 280,
+        np_modal_create(&view->editor, view->root, 252, 16, 520, 348,
                         NULL, np_c_accent(), "Editar perfil", "Nome e avatar local");
         np_modal_set_close_callback(&view->editor, editor_closed, view);
         np_label(view->editor.content, "Nome", NP_FONT_SM, np_c_text_2(),
-                 24, 2, 400, LV_TEXT_ALIGN_LEFT);
-        view->name_input = np_form_text_input(view->editor.content, 24, 24,
-                                              400, 48, "Seu nome", NP_ICON_ACCOUNT);
+                 32, 12, 456, LV_TEXT_ALIGN_LEFT);
+        view->name_input = np_form_text_input(view->editor.content, 32, 37,
+                                              456, 54, "Seu nome", NP_ICON_ACCOUNT);
         lv_textarea_set_max_length(view->name_input, USER_PROFILE_NAME_BYTES - 1U);
         np_keyboard_bind(keyboard, view->name_input, NP_KEYBOARD_MODE_TEXT);
         lv_obj_add_event_cb(view->name_input, editor_input_changed,
                             LV_EVENT_VALUE_CHANGED, view);
         np_label(view->editor.content, "Cor do avatar", NP_FONT_SM, np_c_text_2(),
-                 24, 82, 400, LV_TEXT_ALIGN_LEFT);
-        view->editor_avatar = np_fill(view->editor.content, 24, 110, 44, 44,
+                 32, 110, 456, LV_TEXT_ALIGN_LEFT);
+        view->editor_avatar = np_fill(view->editor.content, 32, 139, 52, 52,
                                       np_c_accent(), LV_OPA_COVER, LV_RADIUS_CIRCLE);
         view->editor_initials = np_label(view->editor_avatar, "--", NP_FONT_SM,
-                                          np_c_text_on_accent(), 0, 11, 44,
+                                          np_c_text_on_accent(), 0, 16, 52,
                                           LV_TEXT_ALIGN_CENTER);
         for (uint8_t i = 0; i < USER_PROFILE_COLOR_COUNT; ++i) {
             view->color_buttons[i] = np_form_icon_button(view->editor.content,
-                108 + i * 72, 110, 44, NP_ICON_CHECK);
+                140 + i * 90, 139, 52, NP_ICON_CHECK);
             lv_obj_set_style_bg_color(view->color_buttons[i], avatar_color(i), 0);
             lv_obj_set_style_bg_opa(view->color_buttons[i], LV_OPA_COVER, 0);
             lv_obj_set_style_border_width(view->color_buttons[i], 3, 0);
+            lv_obj_center(lv_obj_get_child(view->color_buttons[i], 0));
             lv_obj_set_style_text_color(view->color_buttons[i],
                                          np_c_text_on_accent(), 0);
             lv_obj_set_style_text_color(lv_obj_get_child(view->color_buttons[i], 0),
@@ -213,11 +214,11 @@ void np_profile_open_editor(np_profile_view_t *view, np_keyboard_t *keyboard,
             lv_obj_add_event_cb(view->color_buttons[i], editor_color_clicked,
                                 LV_EVENT_CLICKED, view);
         }
-        view->cancel_button = np_form_button(view->editor.content, 24, 158,
-                                              190, 44, "Cancelar",
+        view->cancel_button = np_form_button(view->editor.content, 32, 215,
+                                              218, 48, "Cancelar",
                                               NP_FORM_BUTTON_SECONDARY);
-        view->save_button = np_form_button(view->editor.content, 234, 158,
-                                            190, 44, "Salvar",
+        view->save_button = np_form_button(view->editor.content, 270, 215,
+                                            218, 48, "Salvar",
                                             NP_FORM_BUTTON_PRIMARY);
     }
     view->draft_color = view->current_color;

@@ -3,6 +3,15 @@
 static lv_font_t s_text_with_icons;
 static bool s_text_with_icons_ready;
 
+static int32_t field_vertical_padding(int32_t height)
+{
+    /* Leave two pixels of scroll slack around the 20 px text line even with
+     * the 2 px focused border. Otherwise LVGL scrolls the textarea vertically
+     * to reveal its cursor on each edit. */
+    const int32_t padding = (height - NP_FONT_SM->line_height - 6) / 2;
+    return padding > 0 ? padding : 0;
+}
+
 const lv_font_t *np_form_text_font(void)
 {
     if (!s_text_with_icons_ready) {
@@ -27,10 +36,8 @@ void np_form_apply_field_style(lv_obj_t *field)
     lv_obj_set_style_text_color(field, np_c_text(), LV_PART_MAIN);
     lv_obj_set_style_pad_left(field, NP_SP_16, LV_PART_MAIN);
     lv_obj_set_style_pad_right(field, NP_SP_16, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(field, (NP_INPUT_H - NP_FONT_SM->line_height) / 2,
-                             LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(field, (NP_INPUT_H - NP_FONT_SM->line_height) / 2,
-                                LV_PART_MAIN);
+    lv_obj_set_style_pad_top(field, field_vertical_padding(NP_INPUT_H), LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(field, field_vertical_padding(NP_INPUT_H), LV_PART_MAIN);
     lv_obj_set_style_border_width(field, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
     lv_obj_set_style_border_color(field, np_c_accent(),
                                   LV_PART_MAIN | LV_STATE_FOCUSED);
@@ -55,8 +62,8 @@ lv_obj_t *np_form_text_input(lv_obj_t *parent, int32_t x, int32_t y,
     /* One-line mode resets height to LV_SIZE_CONTENT. Apply the template's
      * dimensions afterwards, with the requested vertical centering. */
     lv_obj_set_size(input, w, h);
-    lv_obj_set_style_pad_top(input, (h - NP_FONT_SM->line_height) / 2, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(input, (h - NP_FONT_SM->line_height) / 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(input, field_vertical_padding(h), LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(input, field_vertical_padding(h), LV_PART_MAIN);
     lv_textarea_set_placeholder_text(input, placeholder != NULL ? placeholder : "");
     if (leading_icon != NULL && leading_icon[0] != '\0') {
         lv_obj_set_style_pad_left(input, NP_SP_48, LV_PART_MAIN);
