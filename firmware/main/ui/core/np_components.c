@@ -358,9 +358,13 @@ lv_obj_t *np_bitcoin_badge(lv_obj_t *parent, int32_t x, int32_t y, int32_t size)
 {
     lv_obj_t *badge = np_fill(parent, x, y, size, size,
                               np_c_btc(), LV_OPA_COVER, LV_RADIUS_CIRCLE);
-    np_label(badge, NP_ICON_BITCOIN, NP_FONT_ICON_BADGE, np_c_text(),
-             0, (size - NP_FONT_ICON_BADGE->line_height) / 2, size,
-             LV_TEXT_ALIGN_CENTER);
+    lv_obj_t *icon = np_label(badge, NP_ICON_BITCOIN, NP_FONT_ICON_BADGE, np_c_text(),
+                              0, (size - NP_FONT_ICON_BADGE->line_height) / 2, size,
+                              LV_TEXT_ALIGN_CENTER);
+    /* LVGL usa décimos de grau. O pivot preserva o glyph centralizado no badge. */
+    lv_obj_set_style_transform_pivot_x(icon, size / 2, 0);
+    lv_obj_set_style_transform_pivot_y(icon, NP_FONT_ICON_BADGE->line_height / 2, 0);
+    lv_obj_set_style_transform_rotation(icon, 200, 0);
     return badge;
 }
 
