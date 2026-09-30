@@ -37,8 +37,9 @@
 #define NP_HOME_WEATHER_VALUE_X 200
 #define NP_HOME_WEATHER_TEXT_W (NP_HOME_LEFT_W - NP_HOME_WEATHER_VALUE_X - 24)
 
-#define NP_HOME_BTC_SPARK_W  352
-#define NP_HOME_BTC_SPARK_H  58
+#define NP_HOME_BTC_SPARK_W  390
+#define NP_HOME_BTC_SPARK_H  202
+#define NP_HOME_WEATHER_FRAME_MS 250U
 
 /* ------------------------------------------------------------------ */
 /* Clima                                                               */
@@ -62,8 +63,11 @@ void np_home_set_weather_icon_source(np_home_view_t *view, const void *source)
     }
     (void)lv_animimg_delete(view->weather_icon);
     lv_animimg_set_src(view->weather_icon, asset->frames, asset->frame_count);
+    /* Os assets continuam declarando 125 ms por frame, mas a Home limita
+     * a animação a 4 FPS para reduzir carga do renderer SW e evitar starvation
+     * da IDLE0/watchdog. */
     lv_animimg_set_duration(view->weather_icon,
-                            (uint32_t)asset->frame_count * asset->frame_ms);
+                            (uint32_t)asset->frame_count * NP_HOME_WEATHER_FRAME_MS);
     lv_animimg_set_repeat_count(view->weather_icon, LV_ANIM_REPEAT_INFINITE);
     lv_image_set_src(view->weather_icon, asset->frames[0]);
     np_set_visible(view->weather_icon_fallback, false);
@@ -103,9 +107,9 @@ np_home_view_t np_home_build(lv_obj_t *parent)
     lv_obj_set_pos(view.weather_icon, 24, 62);
     lv_obj_set_size(view.weather_icon, NP_HOME_WEATHER_ICON_DISPLAY_SIZE,
                     NP_HOME_WEATHER_ICON_DISPLAY_SIZE);
-    /* Native 160px packs render at 1:1. Legacy 96px packs remain readable
-     * during the SD migration and are enlarged in the same display area. */
-    lv_image_set_inner_align(view.weather_icon, LV_IMAGE_ALIGN_STRETCH);
+    /* Assets nativos já chegam no tamanho de exibição. Evite STRETCH: ele
+     * força transform/recolor por software a cada frame no ESP32-P4. */
+    lv_image_set_inner_align(view.weather_icon, LV_IMAGE_ALIGN_CENTER);
     lv_obj_clear_flag(view.weather_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(view.weather_icon, LV_OBJ_FLAG_HIDDEN);
 
@@ -203,40 +207,49 @@ np_home_view_t np_home_build(lv_obj_t *parent)
                                     28,
                                     NP_DATA_UNAVAILABLE);
 
+    /*
+     * O chart é criado antes das labels de preço/variação. Assim o gráfico e
+     * o fade formam o fundo do card e as informações permanecem sempre por
+     * cima. A linha usa pontos discretos e o fade linear segue a técnica do
+     * exemplo oficial do LVGL até a divisória.
+     */
+    view.btc_spark = np_spark(view.btc_card,
+                              5, 80,
+                              NP_HOME_BTC_SPARK_W,
+                              NP_HOME_BTC_SPARK_H);
+
     view.btc_price_prefix = np_label(view.btc_card,
                                      "US$",
                                      NP_FONT_SM,
                                      np_c_text_2(),
-                                     24, 119, 46,
+                                     24, 184, 46,
                                      LV_TEXT_ALIGN_LEFT);
 
     view.btc_price = np_label(view.btc_card,
                               "--",
                               NP_FONT_BRAND,
                               np_c_text(),
-                              74, 91, 302,
+                              74, 154, 302,
                               LV_TEXT_ALIGN_LEFT);
 
+    /* Variação volta a funcionar como informação semântica principal:
+     * verde na alta, vermelho na queda. Mantemos NP_FONT_ICON porque esse é
+     * o subset que contém os glyphs reais de subida/queda nesta build. */
     view.btc_change_icon = np_label(view.btc_card,
                                     NP_ICON_RISE,
                                     NP_FONT_ICON,
                                     np_c_text_3(),
-                                    24, 174, 24,
-                                    LV_TEXT_ALIGN_LEFT);
+                                    24, 238, 30,
+                                    LV_TEXT_ALIGN_CENTER);
 
     view.btc_change = np_label(view.btc_card,
                                "--",
                                NP_FONT_LG,
                                np_c_text_3(),
-                               54, 169, 160,
+                               58, 232, 170,
                                LV_TEXT_ALIGN_LEFT);
 
-    view.btc_spark = np_spark(view.btc_card,
-                              24, 207,
-                              NP_HOME_BTC_SPARK_W,
-                              NP_HOME_BTC_SPARK_H);
-
-    np_hline(view.btc_card, 24, 282, NP_HOME_BTC_SPARK_W);
+    np_hline(view.btc_card, 24, 282, NP_HOME_RIGHT_W - 48);
 
     np_metric_t high = np_metric(view.btc_card,
                                  24, 298, 104,

@@ -1136,7 +1136,7 @@ static void clear_btc_details(void)
     np_set_text(s_ui.home.btc_high_24h, "--");
     np_set_text(s_ui.home.btc_low_24h, "--");
     np_set_text(s_ui.home.btc_volume_24h, "--");
-    np_home_set_btc_spark(&s_ui.home, NULL, 0U, np_c_text_3());
+    np_home_set_btc_spark(&s_ui.home, NULL, 0U, np_c_btc());
 }
 
 static void update_market(const app_ui_projection_t *projection)
@@ -1217,6 +1217,8 @@ static void update_market(const app_ui_projection_t *projection)
             samples[i] = (int32_t)(market->history_usd_cents[i] / 100U);
         }
 
+        /* O gráfico inteiro acompanha a direção de 24 h: verde na alta e
+         * vermelho na queda. Linha e degradê recebem exatamente a mesma cor. */
         np_home_set_btc_spark(&s_ui.home,
                               samples,
                               count,

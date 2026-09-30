@@ -1,7 +1,33 @@
 #include "np_components.h"
 #include "np_styles.h"
 
+#include <limits.h>
 #include <string.h>
+
+/*
+ * O preenchimento do sparkline usa o mesmo mecanismo do exemplo oficial
+ * "Faded area under line chart" do LVGL 9. O header privado é necessário
+ * apenas para acessar a layer do draw task. Em builds onde ele não estiver
+ * exposto, o chart continua funcional e simplesmente fica sem o fade.
+ */
+#if LV_USE_CHART && LV_DRAW_SW_COMPLEX
+#  if defined(__has_include)
+#    if __has_include("src/lvgl_private.h")
+#      include "src/lvgl_private.h"
+#      define NP_HAVE_LVGL_PRIVATE_DRAW 1
+#    elif __has_include("lvgl_private.h")
+#      include "lvgl_private.h"
+#      define NP_HAVE_LVGL_PRIVATE_DRAW 1
+#    elif __has_include("lvgl/src/lvgl_private.h")
+#      include "lvgl/src/lvgl_private.h"
+#      define NP_HAVE_LVGL_PRIVATE_DRAW 1
+#    endif
+#  endif
+#endif
+
+#ifndef NP_HAVE_LVGL_PRIVATE_DRAW
+#define NP_HAVE_LVGL_PRIVATE_DRAW 0
+#endif
 
 /* ---------------- escrita guardada ---------------- */
 
@@ -730,49 +756,238 @@ void np_tile_set_on(np_tile_t *tile, bool on, const char *state_text)
     np_set_text_color(tile->state, on ? np_c_accent() : np_c_text_3());
 }
 
+#define NP_SPARK_GRADIENT_STRENGTH_PERCENT 35U
+/* Mantem toda a linha na faixa superior do chart. O restante da altura fica
+ * reservado para o preco/variacao, enquanto o degradê continua descendo ate
+ * a divisoria inferior do card. */
+#define NP_SPARK_LINE_ZONE_PERCENT         30U
+
+#if LV_USE_CHART && LV_DRAW_SW_COMPLEX && NP_HAVE_LVGL_PRIVATE_DRAW
+static lv_opa_t spark_gradient_opa_for_y(int32_t y, const lv_area_t *coords)
+{
+    const int32_t full_h = coords->y2 - coords->y1 + 1;
+    if (full_h <= 1) return 0U;
+
+    int32_t fract = (y - coords->y1) * 255 / full_h;
+    if (fract < 0) fract = 0;
+    if (fract > 255) fract = 255;
+
+    /* Mesma geometria linear do exemplo oficial do LVGL. A única diferença
+     * é um multiplicador global para o fundo ficar mais discreto no card
+     * Dark Graphite sem mudar a forma do fade. */
+    const uint32_t official_opa = (uint32_t)(255 - fract);
+    return (lv_opa_t)((official_opa * NP_SPARK_GRADIENT_STRENGTH_PERCENT) / 100U);
+}
+
+static void spark_add_faded_area(lv_event_t *event)
+{
+    lv_obj_t *const chart = lv_event_get_target_obj(event);
+    if (chart == NULL) return;
+
+    lv_draw_task_t *const draw_task = lv_event_get_draw_task(event);
+    if (draw_task == NULL || lv_draw_task_get_type(draw_task) != LV_DRAW_TASK_TYPE_LINE) {
+        return;
+    }
+
+    lv_draw_dsc_base_t *const base_dsc =
+        (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(draw_task);
+    lv_draw_line_dsc_t *const line_dsc = lv_draw_task_get_line_dsc(draw_task);
+    if (base_dsc == NULL || base_dsc->layer == NULL || line_dsc == NULL ||
+        line_dsc->points == NULL || line_dsc->point_cnt < 2) {
+        return;
+    }
+
+    lv_chart_series_t *const series = lv_chart_get_series_next(chart, NULL);
+    if (series == NULL) return;
+
+    const lv_color_t color = lv_chart_get_series_color(chart, series);
+
+    lv_area_t coords;
+    lv_obj_get_coords(chart, &coords);
+
+    for (int32_t i = 0; i < line_dsc->point_cnt - 1; ++i) {
+        const lv_point_precise_t p1 = line_dsc->points[i];
+        const lv_point_precise_t p2 = line_dsc->points[i + 1];
+
+        if (p1.x == LV_DRAW_LINE_POINT_NONE || p1.y == LV_DRAW_LINE_POINT_NONE ||
+            p2.x == LV_DRAW_LINE_POINT_NONE || p2.y == LV_DRAW_LINE_POINT_NONE) {
+            continue;
+        }
+
+        /* Fecha geometricamente o espaço imediatamente abaixo do segmento. */
+        lv_draw_triangle_dsc_t tri_dsc;
+        lv_draw_triangle_dsc_init(&tri_dsc);
+        tri_dsc.p[0] = p1;
+        tri_dsc.p[1] = p2;
+        tri_dsc.p[2].x = p1.y < p2.y ? p1.x : p2.x;
+        tri_dsc.p[2].y = LV_MAX(p1.y, p2.y);
+        tri_dsc.grad.dir = LV_GRAD_DIR_VER;
+        tri_dsc.grad.stops[0].color = color;
+        tri_dsc.grad.stops[0].opa =
+            spark_gradient_opa_for_y(LV_MIN(p1.y, p2.y), &coords);
+        tri_dsc.grad.stops[0].frac = 0U;
+        tri_dsc.grad.stops[1].color = color;
+        tri_dsc.grad.stops[1].opa =
+            spark_gradient_opa_for_y(LV_MAX(p1.y, p2.y), &coords);
+        tri_dsc.grad.stops[1].frac = 255U;
+        lv_draw_triangle(base_dsc->layer, &tri_dsc);
+
+        /* O retângulo completa o fade até o fundo do chart/divisória. */
+        lv_draw_rect_dsc_t rect_dsc;
+        lv_draw_rect_dsc_init(&rect_dsc);
+        rect_dsc.bg_grad.dir = LV_GRAD_DIR_VER;
+        rect_dsc.bg_grad.stops[0].color = color;
+        rect_dsc.bg_grad.stops[0].frac = 0U;
+        rect_dsc.bg_grad.stops[0].opa =
+            spark_gradient_opa_for_y(LV_MAX(p1.y, p2.y), &coords);
+        rect_dsc.bg_grad.stops[1].color = color;
+        rect_dsc.bg_grad.stops[1].frac = 255U;
+        rect_dsc.bg_grad.stops[1].opa = 0U;
+
+        lv_area_t rect_area = {
+            .x1 = (int32_t)p1.x,
+            .x2 = (int32_t)p2.x - 1,
+            .y1 = (int32_t)LV_MAX(p1.y, p2.y),
+            .y2 = coords.y2,
+        };
+        if (rect_area.x2 >= rect_area.x1 && rect_area.y2 >= rect_area.y1) {
+            lv_draw_rect(base_dsc->layer, &rect_dsc, &rect_area);
+        }
+    }
+}
+
+static void spark_draw_event_cb(lv_event_t *event)
+{
+    lv_draw_task_t *const draw_task = lv_event_get_draw_task(event);
+    if (draw_task == NULL || lv_draw_task_get_type(draw_task) != LV_DRAW_TASK_TYPE_LINE) {
+        return;
+    }
+
+    lv_draw_dsc_base_t *const base_dsc =
+        (lv_draw_dsc_base_t *)lv_draw_task_get_draw_dsc(draw_task);
+    if (base_dsc != NULL && base_dsc->part == LV_PART_ITEMS) {
+        spark_add_faded_area(event);
+    }
+}
+#endif
+
 np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
-    np_spark_t spark;
-    memset(&spark, 0, sizeof(spark));
-    spark.line = lv_line_create(parent);
-    lv_obj_set_pos(spark.line, x, y);
-    lv_obj_set_size(spark.line, w, h);
-    lv_obj_set_style_line_width(spark.line, 2, 0);
-    lv_obj_set_style_line_rounded(spark.line, true, 0);
-    lv_obj_set_style_line_color(spark.line, np_c_text_3(), 0);
-    lv_obj_add_flag(spark.line, LV_OBJ_FLAG_HIDDEN);
+    np_spark_t spark = {0};
+
+    spark.chart = lv_chart_create(parent);
+    lv_obj_remove_style_all(spark.chart);
+    lv_obj_set_pos(spark.chart, x, y);
+    lv_obj_set_size(spark.chart, w, h);
+    lv_obj_set_style_pad_all(spark.chart, 0, 0);
+    lv_obj_set_style_bg_opa(spark.chart, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(spark.chart, 0, LV_PART_MAIN);
+    lv_obj_set_style_line_width(spark.chart, 3, LV_PART_ITEMS);
+    lv_obj_set_style_line_rounded(spark.chart, true, LV_PART_ITEMS);
+
+    /* Sem marcadores nos pontos: somente a linha e o degradê ficam visíveis. */
+    lv_obj_set_style_size(spark.chart, 0, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(spark.chart, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_clear_flag(spark.chart, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(spark.chart, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_chart_set_type(spark.chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_div_line_count(spark.chart, 0, 0);
+    lv_chart_set_point_count(spark.chart, 2U);
+    spark.series = lv_chart_add_series(spark.chart, np_c_positive(),
+                                       LV_CHART_AXIS_PRIMARY_Y);
+
+#if LV_USE_CHART && LV_DRAW_SW_COMPLEX && NP_HAVE_LVGL_PRIVATE_DRAW
+    /* O gradiente é inserido diretamente no draw task da linha do chart. */
+    lv_obj_add_event_cb(spark.chart, spark_draw_event_cb,
+                        LV_EVENT_DRAW_TASK_ADDED, NULL);
+    lv_obj_add_flag(spark.chart, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
+#endif
+
+    lv_obj_add_flag(spark.chart, LV_OBJ_FLAG_HIDDEN);
     return spark;
 }
 
 void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
                   int32_t w, int32_t h, lv_color_t color)
 {
-    if (spark == NULL || spark->line == NULL) return;
+    if (spark == NULL || spark->chart == NULL || spark->series == NULL) return;
 
-    if (samples == NULL || count < 2) {
-        np_set_visible(spark->line, false);
+    if (samples == NULL || count < 2U || w < 48 || h < 80) {
+        np_set_visible(spark->chart, false);
         return;
     }
 
-    if (count > 24) count = 24;
+    if (count > NP_SPARK_MAX_POINTS) count = NP_SPARK_MAX_POINTS;
 
     int32_t lo = samples[0];
     int32_t hi = samples[0];
-    for (uint8_t i = 1; i < count; ++i) {
+    for (uint8_t i = 1U; i < count; ++i) {
         if (samples[i] < lo) lo = samples[i];
         if (samples[i] > hi) hi = samples[i];
     }
 
-    const int32_t span = (hi - lo) > 0 ? (hi - lo) : 1;
-    for (uint8_t i = 0; i < count; ++i) {
-        spark->pts[i].x = (int32_t)i * (w - 1) / (count - 1);
-        spark->pts[i].y =
-            (h - 1) - ((samples[i] - lo) * (h - 1) / span);
+    /*
+     * Reserva explicitamente a parte inferior do chart para as labels do BTC.
+     * Em vez de apenas adicionar um padding arbitrario abaixo da serie,
+     * calculamos o range Y para que ate o MENOR valor permaneça dentro dos
+     * primeiros NP_SPARK_LINE_ZONE_PERCENT da altura. Assim a linha não chega
+     * por trás do preço, mas o degradê ainda pode ocupar toda a
+     * altura ate a divisoria.
+     */
+    const int64_t raw_span = (int64_t)hi - (int64_t)lo;
+    int64_t upper_pad;
+    if (raw_span > 0) {
+        upper_pad = raw_span / 8LL + 1LL; /* pequeno respiro acima do pico */
+    } else {
+        const int64_t magnitude =
+            samples[0] >= 0 ? (int64_t)samples[0] : -(int64_t)samples[0];
+        upper_pad = magnitude / 1000LL + 1LL;
     }
 
-    lv_line_set_points(spark->line, spark->pts, count);
-    lv_obj_set_style_line_color(spark->line, color, 0);
-    np_set_visible(spark->line, true);
+    int64_t range_max = (int64_t)hi + upper_pad;
+    if (range_max > INT32_MAX) range_max = INT32_MAX;
+
+    const int64_t plot_h = (int64_t)h - 1LL;
+    int64_t line_bottom_y =
+        (plot_h * (int64_t)NP_SPARK_LINE_ZONE_PERCENT) / 100LL;
+    if (line_bottom_y < 1LL) line_bottom_y = 1LL;
+    if (line_bottom_y > plot_h) line_bottom_y = plot_h;
+
+    const int64_t distance_to_low = range_max - (int64_t)lo;
+    int64_t required_range;
+    if (raw_span > 0) {
+        /* ceil(distance_to_low * plot_h / line_bottom_y) */
+        required_range =
+            (distance_to_low * plot_h + line_bottom_y - 1LL) / line_bottom_y;
+    } else {
+        /* Serie plana: posiciona a linha aproximadamente no meio da faixa
+         * segura, evitando que fique colada no limite inferior dela. */
+        int64_t flat_y = line_bottom_y / 2LL;
+        if (flat_y < 1LL) flat_y = 1LL;
+        required_range =
+            (distance_to_low * plot_h + flat_y - 1LL) / flat_y;
+    }
+    if (required_range < 1LL) required_range = 1LL;
+
+    int64_t range_min = range_max - required_range;
+    if (range_min < INT32_MIN) range_min = INT32_MIN;
+    if (range_max <= range_min) range_max = range_min + 1LL;
+
+    lv_obj_set_size(spark->chart, w, h);
+    lv_chart_set_point_count(spark->chart, count);
+    lv_chart_set_axis_range(spark->chart, LV_CHART_AXIS_PRIMARY_Y,
+                            (int32_t)range_min, (int32_t)range_max);
+    lv_chart_set_series_color(spark->chart, spark->series, color);
+
+    /* Recarrega toda a pequena série (máx. 24 pontos) de forma determinística. */
+    lv_chart_set_all_values(spark->chart, spark->series, LV_CHART_POINT_NONE);
+    for (uint8_t i = 0U; i < count; ++i) {
+        lv_chart_set_next_value(spark->chart, spark->series, samples[i]);
+    }
+
+    lv_chart_refresh(spark->chart);
+    np_set_visible(spark->chart, true);
 }
 
 np_segbar_t np_segbar(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, uint8_t count)

@@ -196,9 +196,17 @@ np_tile_t np_tile(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
                   const char *icon, const char *title, const char *state);
 void np_tile_set_on(np_tile_t *tile, bool on, const char *state_text);
 
+#define NP_SPARK_MAX_POINTS 24U
+
 typedef struct {
-    lv_obj_t *line;
-    lv_point_precise_t pts[24];
+    /*
+     * O spark do BTC usa LV_CHART_TYPE_LINE. O preenchimento degradê é
+     * desenhado no próprio pipeline do LVGL (LV_EVENT_DRAW_TASK_ADDED), sem
+     * colunas/barras auxiliares e sem framebuffer dedicado.
+     */
+    lv_obj_t *chart;
+    lv_chart_series_t *series;
+    lv_obj_t *last_dot;
 } np_spark_t;
 
 np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
