@@ -769,7 +769,7 @@ void np_tile_set_on(np_tile_t *tile, bool on, const char *state_text)
     np_set_text_color(tile->state, on ? np_c_accent() : np_c_text_3());
 }
 
-#define NP_SPARK_GRADIENT_STRENGTH_PERCENT 35U
+#define NP_SPARK_GRADIENT_STRENGTH_PERCENT 42U
 /* Mantem toda a linha na faixa superior do chart. O restante da altura fica
  * reservado para o preco/variacao, enquanto o degradê continua descendo ate
  * a divisoria inferior do card. */
@@ -785,11 +785,13 @@ static lv_opa_t spark_gradient_opa_for_y(int32_t y, const lv_area_t *coords)
     if (fract < 0) fract = 0;
     if (fract > 255) fract = 255;
 
-    /* Mesma geometria linear do exemplo oficial do LVGL. A única diferença
-     * é um multiplicador global para o fundo ficar mais discreto no card
-     * Dark Graphite sem mudar a forma do fade. */
-    const uint32_t official_opa = (uint32_t)(255 - fract);
-    return (lv_opa_t)((official_opa * NP_SPARK_GRADIENT_STRENGTH_PERCENT) / 100U);
+    /* Smoothstep mantém o início e o fim do fade contínuos, evitando uma
+     * queda visual abrupta no RGB565. A geometria ainda nasce da curva real
+     * do chart; apenas a opacidade vertical fica mais gradual. */
+    const uint32_t remaining = (uint32_t)(255 - fract);
+    const uint32_t eased_opa =
+        (remaining * remaining * (765U - 2U * remaining) + 32512U) / 65025U;
+    return (lv_opa_t)((eased_opa * NP_SPARK_GRADIENT_STRENGTH_PERCENT) / 100U);
 }
 
 static void spark_add_faded_area(lv_event_t *event)
