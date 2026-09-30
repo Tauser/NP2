@@ -16,8 +16,8 @@ typedef struct {
     data_refresh_domain_t next_domain;
 } data_refresh_scheduler_t;
 
-/* Product policy: volatile BTC, slowly changing weather, and daily PTAX. */
-#define DATA_REFRESH_BITCOIN_INTERVAL_US (5LL * 60LL * 1000LL * 1000LL)
+/* Product policy: 60 s BTC cadence, slowly changing weather, and daily PTAX. */
+#define DATA_REFRESH_BITCOIN_INTERVAL_US (60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_WEATHER_INTERVAL_US (2LL * 60LL * 60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_USD_BRL_INTERVAL_US (24LL * 60LL * 60LL * 1000LL * 1000LL)
 
