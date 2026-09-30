@@ -1693,9 +1693,10 @@ static void navigation_leave(void *context, uintptr_t page)
     (void)context;
     release_current_scene();
     if (page == PRODUCT_SCREEN_PROFILE &&
-        s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES &&
+        (s_ui.navigation.destination == PRODUCT_SCREEN_HOME ||
+         s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES) &&
         s_ui.profile.root != NULL) {
-        /* Keep the outgoing scene painted until Preferences is ready. The
+        /* Keep the outgoing scene painted until the pilot page is ready. The
          * legacy Profile tree remains cached through the separated pass. */
         np_set_visible(s_ui.profile.root, true);
     }
