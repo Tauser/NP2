@@ -1759,12 +1759,12 @@ static void scene_navigation_async(void *user_data)
         s_ui.navigation_build_timer =
             lv_timer_create(scene_navigation_build_timer_cb, 32U, NULL);
         if (s_ui.navigation_build_timer == NULL) {
-            /* Allocation failure must not strand the panel without a scene.
-             * This path still runs after the touch callback because this
-             * function was entered through lv_async_call. */
-            release_current_scene();
-            s_ui.navigation_scene_released = true;
-            scene_navigation_async((void *)destination);
+            /* Never combine destruction and construction as an allocation
+             * fallback: that can starve IDLE0 while LVGL compacts its heap.
+             * Keeping the current scene is safer than a risky transition. */
+            s_ui.navigation_pending = false;
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Navegação indisponível", NULL, 2200U);
         }
         return;
     }
@@ -1927,11 +1927,28 @@ static void scene_navigation_build_timer_cb(lv_timer_t *timer)
     const uintptr_t destination = s_ui.navigation_destination;
     s_ui.navigation_build_timer = NULL;
     lv_timer_delete(timer);
-    /* Keep the current scene drawn during the debounce interval. Destroy and
-     * rebuild only in this later LVGL pass, so transitions never expose the
-     * empty screen between roots. */
-    release_current_scene();
-    s_ui.navigation_scene_released = true;
+    if (!s_ui.navigation_scene_released) {
+        /* Keep the current scene displayed through the debounce. Free its
+         * object tree in this pass and let LVGL return before the next pass
+         * creates another tree. This avoids allocator/draw pressure from
+         * deleting and building a full scene in one LVGL cycle. */
+        release_current_scene();
+        s_ui.navigation_scene_released = true;
+        s_ui.navigation_build_timer =
+            lv_timer_create(scene_navigation_build_timer_cb, 32U, NULL);
+        if (s_ui.navigation_build_timer != NULL) return;
+
+        /* This is an exceptional memory exhaustion path. A deferred async
+         * still preserves task ordering; it must never recurse here. */
+        if (lv_async_call(scene_navigation_async, (void *)destination) == LV_RESULT_OK)
+            return;
+        s_ui.navigation_scene_released = false;
+        s_ui.navigation_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Navegação indisponível", NULL, 2200U);
+        return;
+    }
+
     scene_navigation_async((void *)destination);
 }
 
