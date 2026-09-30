@@ -1698,6 +1698,28 @@ static void navigation_leave(void *context, uintptr_t page)
     }
 }
 
+static void navigation_reclaim_for_pilot(void)
+{
+    /* Hidden legacy scenes are useful caches, but the 64 KiB LVGL pool cannot
+     * retain several of them and still build Preferences safely. Evict the
+     * simple inactive caches only when the measured reserve is too small. */
+    lv_mem_monitor_t heap = {0};
+    lv_mem_monitor(&heap);
+    if (heap.free_size >= 24U * 1024U) return;
+    if (s_ui.display_sound.root != NULL) {
+        lv_obj_delete(s_ui.display_sound.root);
+        s_ui.display_sound = (np_settings_display_sound_view_t){0};
+        lv_mem_monitor(&heap);
+        ESP_LOGI(TAG, "Evicted Display/Sound cache; LVGL free=%u", (unsigned)heap.free_size);
+    }
+    if (heap.free_size < 24U * 1024U && s_ui.profile.root != NULL) {
+        lv_obj_delete(s_ui.profile.root);
+        s_ui.profile = (np_profile_view_t){0};
+        lv_mem_monitor(&heap);
+        ESP_LOGI(TAG, "Evicted Profile cache; LVGL free=%u", (unsigned)heap.free_size);
+    }
+}
+
 static void navigation_clean(void *context, uintptr_t page)
 {
     (void)context;
@@ -1722,6 +1744,8 @@ static void navigation_clean(void *context, uintptr_t page)
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
     }
+    if (s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES)
+        navigation_reclaim_for_pilot();
 }
 
 static bool navigation_build(void *context, uintptr_t page)

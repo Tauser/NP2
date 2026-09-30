@@ -65,3 +65,17 @@ ELF `df4413a0`, Home apareceu aos 20,739 s e o WDT da task `lvgl` começou aos
 Não apareceu nenhum evento `np_navigation`. A reprodução confirma a falha da
 imagem do checkout principal, mas ainda não exercita o piloto deste worktree.
 O log bruto atualizado permanece no mesmo arquivo ignorado pelo Git.
+
+## Captura do piloto em 2026-09-30
+
+O `app-flash` na COM8 foi concluído com verificação de hash. A captura seguinte
+mostrou eventos `np_navigation` durante Home → Perfil → Preferências → Tela e som
+→ Perfil → Preferências. Na segunda entrada em Preferências, o heap LVGL caiu
+para 316 bytes e o WDT acusou a task `lvgl` a partir de 71,435 s. A pilha parou
+em `lv_draw_add_task`. O ciclo `CLEAN_WAIT_NEXT_PASS`/`BUILD` usou gerações
+distintas; o problema observado é pressão do pool LVGL de 64 KiB com caches
+legados ocultos. O log bruto está em `firmware/build/navigation-com8.log`.
+
+Foi adicionada uma evacuação condicional dos caches simples Perfil e Tela e som
+antes de construir Preferências quando o heap livre está abaixo de 24 KiB.
+Essa correção requer novo build, flash e repetição do percurso na placa.
