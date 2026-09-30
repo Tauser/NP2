@@ -201,10 +201,11 @@ void np_tile_set_on(np_tile_t *tile, bool on, const char *state_text);
 
 typedef struct {
     /*
-     * O spark do BTC usa LV_CHART_TYPE_LINE. O preenchimento degradê é
-     * desenhado no próprio pipeline do LVGL (LV_EVENT_DRAW_TASK_ADDED), sem
-     * colunas/barras auxiliares e sem framebuffer dedicado.
+     * O spark do BTC usa LV_CHART_TYPE_LINE. Um único plano de fundo com
+     * gradiente dá profundidade ao card sem inserir tarefas de desenho para
+     * cada segmento da linha.
      */
+    lv_obj_t *fade;
     lv_obj_t *chart;
     lv_chart_series_t *series;
     lv_obj_t *last_dot;

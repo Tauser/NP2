@@ -1,5 +1,6 @@
 #include "np_components.h"
 #include "np_styles.h"
+#include "../assets/np_btc_tilted_icon.h"
 
 #include <limits.h>
 #include <string.h>
@@ -360,12 +361,15 @@ lv_obj_t *np_bitcoin_badge(lv_obj_t *parent, int32_t x, int32_t y, int32_t size)
 {
     lv_obj_t *badge = np_fill(parent, x, y, size, size,
                               np_c_btc(), LV_OPA_COVER, LV_RADIUS_CIRCLE);
-    lv_obj_t *icon = np_label(badge, NP_ICON_BITCOIN, NP_FONT_ICON_BADGE, np_c_text(),
-                              0, (size - NP_FONT_ICON_BADGE->line_height) / 2, size,
-                              LV_TEXT_ALIGN_CENTER);
-    /* Keep the glyph direct-rendered. A runtime transform creates an
-     * intermediate LVGL draw buffer and has starved IDLE0 on the P4. */
-    (void)icon;
+    /* A bitmap cache generated from the Material Bitcoin glyph at 20 degrees
+     * avoids LVGL's per-frame transform layer and its temporary draw buffer. */
+    lv_obj_t *icon = lv_image_create(badge);
+    lv_image_set_src(icon, &np_btc_tilted_icon);
+    lv_obj_set_size(icon, NP_BTC_TILTED_ICON_SIZE, NP_BTC_TILTED_ICON_SIZE);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_image_recolor(icon, np_c_text(), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
     return badge;
 }
 
@@ -884,6 +888,22 @@ np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h
 {
     np_spark_t spark = {0};
 
+    /* This native single-object gradient replaces the old per-segment draw
+     * callback. It remains behind the line and labels and has no transform or
+     * auxiliary draw tasks. */
+    spark.fade = lv_obj_create(parent);
+    lv_obj_remove_style_all(spark.fade);
+    lv_obj_set_pos(spark.fade, x, y);
+    lv_obj_set_size(spark.fade, w, h);
+    lv_obj_set_style_bg_color(spark.fade, np_c_positive(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(spark.fade, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_color(spark.fade, np_c_positive(), LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_opa(spark.fade, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_dir(spark.fade, LV_GRAD_DIR_VER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(spark.fade, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(spark.fade, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(spark.fade, LV_OBJ_FLAG_HIDDEN);
+
     spark.chart = lv_chart_create(parent);
     lv_obj_remove_style_all(spark.chart);
     lv_obj_set_pos(spark.chart, x, y);
@@ -923,6 +943,7 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     if (spark == NULL || spark->chart == NULL || spark->series == NULL) return;
 
     if (samples == NULL || count < 2U || w < 48 || h < 80) {
+        np_set_visible(spark->fade, false);
         np_set_visible(spark->chart, false);
         return;
     }
@@ -984,6 +1005,9 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     if (range_max <= range_min) range_max = range_min + 1LL;
 
     lv_obj_set_size(spark->chart, w, h);
+    lv_obj_set_size(spark->fade, w, h);
+    lv_obj_set_style_bg_color(spark->fade, color, LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_color(spark->fade, color, LV_PART_MAIN);
     lv_chart_set_point_count(spark->chart, count);
     lv_chart_set_axis_range(spark->chart, LV_CHART_AXIS_PRIMARY_Y,
                             (int32_t)range_min, (int32_t)range_max);
@@ -996,6 +1020,7 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
     }
 
     lv_chart_refresh(spark->chart);
+    np_set_visible(spark->fade, true);
     np_set_visible(spark->chart, true);
 }
 
