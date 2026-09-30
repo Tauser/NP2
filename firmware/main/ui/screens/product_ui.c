@@ -2086,12 +2086,14 @@ static void scene_navigation_async(void *user_data)
             return;
         }
         s_ui.navigation_destination = destination;
-        release_current_scene();
-        s_ui.navigation_scene_released = true;
         s_ui.navigation_build_timer =
             lv_timer_create(scene_navigation_build_timer_cb, 32U, NULL);
         if (s_ui.navigation_build_timer == NULL) {
-            /* Allocation failure must not strand the panel without a scene. */
+            /* Allocation failure must not strand the panel without a scene.
+             * This path still runs after the touch callback because this
+             * function was entered through lv_async_call. */
+            release_current_scene();
+            s_ui.navigation_scene_released = true;
             scene_navigation_async((void *)destination);
         }
         return;
@@ -2263,9 +2265,11 @@ static void scene_navigation_build_timer_cb(lv_timer_t *timer)
     const uintptr_t destination = s_ui.navigation_destination;
     s_ui.navigation_build_timer = NULL;
     lv_timer_delete(timer);
-    /* This timer already runs on the LVGL owner in a later pass than scene
-     * destruction. Calling the build phase directly avoids a second async
-     * delivery that can leave navigation_pending latched after a touch. */
+    /* Keep the current scene drawn during the debounce interval. Destroy and
+     * rebuild only in this later LVGL pass, so transitions never expose the
+     * empty screen between roots. */
+    release_current_scene();
+    s_ui.navigation_scene_released = true;
     scene_navigation_async((void *)destination);
 }
 
