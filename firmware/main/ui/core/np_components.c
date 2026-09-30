@@ -596,8 +596,8 @@ np_header_t np_header(lv_obj_t *parent)
                                  88, 19, 64, LV_TEXT_ALIGN_LEFT);
     header.brand_panel = np_label(parent, "Panel", NP_FONT_LG, np_c_accent(),
                                   146, 19, 76, LV_TEXT_ALIGN_LEFT);
-    header.user_greeting = np_label(parent, "", NP_FONT_SM, np_c_text_2(),
-                                    238, 24, 392, LV_TEXT_ALIGN_LEFT);
+    header.user_greeting = np_label(parent, "", NP_FONT_MD, np_c_text_2(),
+                                    250, 21, 380, LV_TEXT_ALIGN_LEFT);
     lv_label_set_long_mode(header.user_greeting, LV_LABEL_LONG_DOT);
     lv_obj_add_flag(header.user_greeting, LV_OBJ_FLAG_HIDDEN);
 

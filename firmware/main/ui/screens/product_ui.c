@@ -970,11 +970,21 @@ static void update_header(np_header_t *header,
             salutation = local.tm_hour < 12 ? "Bom dia" :
                          local.tm_hour < 18 ? "Boa tarde" : "Boa noite";
         }
-        char greeting[USER_PROFILE_NAME_BYTES + 16U] = {0};
-        (void)snprintf(greeting, sizeof(greeting), "%s, %s!", salutation, first_name);
-        np_set_text(header->user_greeting, greeting);
+        np_set_text(header->brand_nova, first_name);
+        if (lv_obj_get_width(header->brand_nova) != 150) {
+            lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(header->brand_nova, 150);
+        }
+        np_set_visible(header->brand_panel, false);
+        np_set_text(header->user_greeting, salutation);
         np_set_visible(header->user_greeting, true);
     } else {
+        np_set_text(header->brand_nova, "Nova");
+        if (lv_obj_get_width(header->brand_nova) != 64) {
+            lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(header->brand_nova, 64);
+        }
+        np_set_visible(header->brand_panel, true);
         np_set_text(header->user_greeting, "");
         np_set_visible(header->user_greeting, false);
     }
