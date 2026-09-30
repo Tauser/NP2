@@ -156,6 +156,7 @@ typedef struct {
 
     lv_obj_t *brand_nova;
     lv_obj_t *brand_panel;
+    lv_obj_t *user_greeting;
     lv_obj_t *divider;
     np_clock_t clock;
     lv_obj_t *date;

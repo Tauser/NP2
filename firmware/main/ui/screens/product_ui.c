@@ -964,18 +964,20 @@ static void update_header(np_header_t *header,
             first_name[length] = name[length];
             ++length;
         }
-        np_set_text(header->brand_nova, first_name);
+        const char *salutation = "Olá";
+        struct tm local = {0};
+        if (projection_local_time(projection, &local)) {
+            salutation = local.tm_hour < 12 ? "Bom dia" :
+                         local.tm_hour < 18 ? "Boa tarde" : "Boa noite";
+        }
+        char greeting[USER_PROFILE_NAME_BYTES + 16U] = {0};
+        (void)snprintf(greeting, sizeof(greeting), "%s, %s!", salutation, first_name);
+        np_set_text(header->user_greeting, greeting);
+        np_set_visible(header->user_greeting, true);
     } else {
-        np_set_text(header->brand_nova, "Nova");
+        np_set_text(header->user_greeting, "");
+        np_set_visible(header->user_greeting, false);
     }
-    /* Profile has a Home action at x=250; keep long first names within the
-     * brand area instead of wrapping over that button. */
-    const int32_t brand_width = has_name ? 150 : 64;
-    if (lv_obj_get_width(header->brand_nova) != brand_width) {
-        lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(header->brand_nova, brand_width);
-    }
-    np_set_visible(header->brand_panel, !has_name);
 
     int8_t connected_rssi = 0;
     bool connected_rssi_measured = false;
