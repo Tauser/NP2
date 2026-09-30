@@ -1698,26 +1698,78 @@ static void navigation_leave(void *context, uintptr_t page)
     }
 }
 
-static void navigation_reclaim_for_pilot(void)
+static bool navigation_evict_legacy(uintptr_t page)
 {
-    /* Hidden legacy scenes are useful caches, but the 64 KiB LVGL pool cannot
-     * retain several of them and still build Preferences safely. Evict the
-     * simple inactive caches only when the measured reserve is too small. */
+    lv_obj_t *root = NULL;
+    switch (page) {
+    case PRODUCT_SCREEN_PROFILE: root = s_ui.profile.root; break;
+    case PRODUCT_SCREEN_DISPLAY_SOUND: root = s_ui.display_sound.root; break;
+    case PRODUCT_SCREEN_SYSTEM: root = s_ui.system_scene.root; break;
+    case PRODUCT_SCREEN_NOTIFICATIONS: root = s_ui.notifications_scene.root; break;
+    case PRODUCT_SCREEN_WIFI: root = s_ui.wifi_scene.root; break;
+    case PRODUCT_SCREEN_TIMEZONE: root = s_ui.timezone_scene.root; break;
+    default: return false;
+    }
+    if (root == NULL) return false;
+    lv_obj_delete(root);
+    switch (page) {
+    case PRODUCT_SCREEN_PROFILE: s_ui.profile = (np_profile_view_t){0}; break;
+    case PRODUCT_SCREEN_DISPLAY_SOUND:
+        s_ui.display_sound = (np_settings_display_sound_view_t){0}; break;
+    case PRODUCT_SCREEN_SYSTEM:
+        s_ui.system_scene = (np_settings_system_view_t){0};
+        s_ui.system_scene_object_count = 0; break;
+    case PRODUCT_SCREEN_NOTIFICATIONS:
+        s_ui.notifications_scene = (np_settings_notifications_view_t){0}; break;
+    case PRODUCT_SCREEN_WIFI: s_ui.wifi_scene = (np_settings_wifi_view_t){0}; break;
+    case PRODUCT_SCREEN_TIMEZONE:
+        s_ui.timezone_scene = (np_settings_timezone_view_t){0};
+        s_ui.timezone_scene_object_count = 0; break;
+    default: break;
+    }
+    return true;
+}
+
+static bool navigation_legacy_cached(uintptr_t page)
+{
+    switch (page) {
+    case PRODUCT_SCREEN_PROFILE: return s_ui.profile.root != NULL;
+    case PRODUCT_SCREEN_DISPLAY_SOUND: return s_ui.display_sound.root != NULL;
+    case PRODUCT_SCREEN_SYSTEM: return s_ui.system_scene.root != NULL;
+    case PRODUCT_SCREEN_NOTIFICATIONS: return s_ui.notifications_scene.root != NULL;
+    case PRODUCT_SCREEN_WIFI: return s_ui.wifi_scene.root != NULL;
+    case PRODUCT_SCREEN_TIMEZONE: return s_ui.timezone_scene.root != NULL;
+    default: return false;
+    }
+}
+
+static void navigation_reclaim_for_build(uintptr_t from, uintptr_t destination)
+{
+    /* The 64 KiB LVGL pool cannot retain every legacy scene. Free hidden
+     * caches after LEAVE and before BUILD, keeping the destination cache. */
+    const uint32_t reserve = navigation_legacy_cached(destination) ? 16U * 1024U
+        : (destination == PRODUCT_SCREEN_WIFI || destination == PRODUCT_SCREEN_TIMEZONE)
+            ? 40U * 1024U
+        : (destination == PRODUCT_SCREEN_HOME || destination == PRODUCT_SCREEN_PREFERENCES)
+            ? 24U * 1024U : 30U * 1024U;
+    const uintptr_t candidates[] = {
+        from, PRODUCT_SCREEN_SYSTEM, PRODUCT_SCREEN_WIFI, PRODUCT_SCREEN_TIMEZONE,
+        PRODUCT_SCREEN_DISPLAY_SOUND, PRODUCT_SCREEN_NOTIFICATIONS,
+        PRODUCT_SCREEN_PROFILE,
+    };
     lv_mem_monitor_t heap = {0};
     lv_mem_monitor(&heap);
-    if (heap.free_size >= 24U * 1024U) return;
-    if (s_ui.display_sound.root != NULL) {
-        lv_obj_delete(s_ui.display_sound.root);
-        s_ui.display_sound = (np_settings_display_sound_view_t){0};
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]) &&
+         heap.free_size < reserve; ++i) {
+        if (candidates[i] == destination || !navigation_evict_legacy(candidates[i]))
+            continue;
         lv_mem_monitor(&heap);
-        ESP_LOGI(TAG, "Evicted Display/Sound cache; LVGL free=%u", (unsigned)heap.free_size);
+        ESP_LOGI(TAG, "Evicted cached page=%u; LVGL free=%u reserve=%u",
+                 (unsigned)candidates[i], (unsigned)heap.free_size, (unsigned)reserve);
     }
-    if (heap.free_size < 24U * 1024U && s_ui.profile.root != NULL) {
-        lv_obj_delete(s_ui.profile.root);
-        s_ui.profile = (np_profile_view_t){0};
-        lv_mem_monitor(&heap);
-        ESP_LOGI(TAG, "Evicted Profile cache; LVGL free=%u", (unsigned)heap.free_size);
-    }
+    if (heap.free_size < reserve)
+        ESP_LOGW(TAG, "LVGL reserve low before page=%u: free=%u reserve=%u",
+                 (unsigned)destination, (unsigned)heap.free_size, (unsigned)reserve);
 }
 
 static void navigation_clean(void *context, uintptr_t page)
@@ -1744,8 +1796,7 @@ static void navigation_clean(void *context, uintptr_t page)
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
     }
-    if (s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES)
-        navigation_reclaim_for_pilot();
+    navigation_reclaim_for_build(page, s_ui.navigation.destination);
 }
 
 static bool navigation_build(void *context, uintptr_t page)

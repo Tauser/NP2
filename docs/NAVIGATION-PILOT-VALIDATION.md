@@ -79,3 +79,11 @@ legados ocultos. O log bruto está em `firmware/build/navigation-com8.log`.
 Foi adicionada uma evacuação condicional dos caches simples Perfil e Tela e som
 antes de construir Preferências quando o heap livre está abaixo de 24 KiB.
 Essa correção requer novo build, flash e repetição do percurso na placa.
+
+O build/flash de `da048bf` passou com verificação de hash. O percurso
+Perfil → Preferências → Tela e som → Perfil → Preferências passou sem WDT;
+o cache de Tela e som foi liberado sob pressão. A continuação por Sistema e
+Wi-Fi ainda esgotou o pool: Wi-Fi foi construído com 1688 bytes livres e o
+WDT apareceu aos 59,885 s. A política foi ampliada para liberar caches
+legados ocultos antes da construção de qualquer página, com reserva maior
+para Wi-Fi e Fuso. Esse ajuste ainda requer build, flash e novo ensaio.
