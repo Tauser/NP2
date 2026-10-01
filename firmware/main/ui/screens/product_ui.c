@@ -78,7 +78,6 @@ typedef struct {
     bool wifi_confirmation_pending;
     lv_timer_t *refresh_timer;
     lv_timer_t *home_transition_timer;
-    lv_timer_t *navigation_build_timer;
     lv_timer_t *settings_value_bubble_timer;
     uint32_t started_at_tick;
     uint32_t saved_network_wait_started_tick;
@@ -101,8 +100,6 @@ typedef struct {
     uint8_t projected_brightness;
     uint8_t projected_volume;
     uint32_t system_scene_object_count;
-    uintptr_t navigation_destination;
-    bool navigation_scene_released;
 } product_ui_state_t;
 
 static product_ui_state_t s_ui;
@@ -126,10 +123,7 @@ static void discard_system_confirmation(void);
 static void system_restart_event_cb(lv_event_t *event);
 static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 static void scene_navigation_event_cb(lv_event_t *event);
-static void scene_navigation_async(void *user_data);
-static void scene_navigation_build_timer_cb(lv_timer_t *timer);
 static void release_current_scene(void);
-static void settings_home_async(void *user_data);
 static void profile_identity_event_cb(lv_event_t *event);
 static void profile_editor_open_async(void *user_data);
 static void profile_save_event_cb(lv_event_t *event);
@@ -142,6 +136,7 @@ static void navigation_clean(void *context, uintptr_t page);
 static bool navigation_build(void *context, uintptr_t page);
 static void navigation_enter(void *context, uintptr_t page);
 static void navigation_failed(void *context, uintptr_t page);
+static uint32_t scene_object_count(lv_obj_t *root);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -1457,8 +1452,6 @@ static void night_switch_event_cb(lv_event_t *event)
     (void)app_state_request_refresh();
 }
 
-static void install_home_navigation_callbacks(void);
-
 static void navigation_shell_create(void)
 {
     if (s_ui.shell != NULL) return;
@@ -1776,23 +1769,18 @@ static void navigation_reclaim_for_build(uintptr_t destination)
 static void navigation_clean(void *context, uintptr_t page)
 {
     (void)context;
-    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
-        /* Only pilot page objects belong to content_host. The shell, feedback,
-         * keyboard and legacy lazy caches live outside it. */
-        if (page == PRODUCT_SCREEN_PREFERENCES &&
-            s_ui.preferences.profile_button != NULL &&
-            lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
-            lv_obj_delete(s_ui.preferences.profile_button);
-        }
-        lv_obj_clean(s_ui.content_host);
-        if (page == PRODUCT_SCREEN_HOME) {
-            s_ui.home = (np_home_view_t){0};
-            s_ui.home_data_rendered = false;
-            s_ui.rendered_weather_icon_source = NULL;
-        } else {
-            s_ui.preferences = (np_preferences_view_t){0};
-        }
+    /* The shared shell owns only Home and Preferences content. Clear it on
+     * every navigation so a return from a legacy root cannot retain a hidden
+     * pilot tree or its detached Profile button. */
+    if (s_ui.preferences.profile_button != NULL &&
+        lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
+        lv_obj_delete(s_ui.preferences.profile_button);
     }
+    lv_obj_clean(s_ui.content_host);
+    s_ui.home = (np_home_view_t){0};
+    s_ui.home_data_rendered = false;
+    s_ui.rendered_weather_icon_source = NULL;
+    s_ui.preferences = (np_preferences_view_t){0};
     if (s_ui.navigation.destination != PRODUCT_SCREEN_HOME &&
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
@@ -1803,10 +1791,10 @@ static void navigation_clean(void *context, uintptr_t page)
 static bool navigation_build(void *context, uintptr_t page)
 {
     (void)context;
+    navigation_shell_create();
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
     if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
-        navigation_shell_create();
-        app_ui_projection_t projection = {0};
-        app_state_get_ui_projection(&projection);
         if (page == PRODUCT_SCREEN_HOME) {
             s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
             if (s_ui.home.root == NULL) return false;
@@ -1837,10 +1825,156 @@ static bool navigation_build(void *context, uintptr_t page)
                        true);
         return true;
     }
-    /* The non-pilot screens retain the previous lazy cache implementation. */
-    s_ui.navigation_scene_released = true;
-    scene_navigation_async((void *)page);
-    return (uintptr_t)s_ui.active_screen == page;
+
+    /* The remaining screens keep their lazy roots, but their complete
+     * lifecycle now runs inside this manager BUILD phase. No timer or async
+     * navigation path may create a second scene tree. */
+    lv_obj_t *root = NULL;
+    np_header_t *header = NULL;
+    bool install_header_callbacks = false;
+    if (page == PRODUCT_SCREEN_PROFILE) {
+        install_header_callbacks = s_ui.profile.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.profile = np_profile_build(lv_screen_active());
+            if (s_ui.profile.root == NULL) return false;
+            lv_obj_add_event_cb(s_ui.profile.home_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+            lv_obj_add_event_cb(s_ui.profile.initial_screen_row, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+            lv_obj_add_event_cb(s_ui.profile.preferences_row, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.profile.edit_button, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.profile.name_row, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+        }
+        root = s_ui.profile.root;
+        header = &s_ui.profile.header;
+        np_profile_sync(&s_ui.profile, projection.user_profile.configured,
+            &projection.user_profile.profile, projection.user_profile.persistence_pending,
+            projection.user_profile.last_result);
+    } else if (page == PRODUCT_SCREEN_DISPLAY_SOUND) {
+        install_header_callbacks = s_ui.display_sound.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.display_sound = np_settings_display_sound_build(lv_screen_active());
+            if (s_ui.display_sound.root == NULL) return false;
+            install_display_sound_callbacks();
+            lv_obj_add_event_cb(s_ui.display_sound.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        }
+        root = s_ui.display_sound.root;
+        header = &s_ui.display_sound.header;
+    } else if (page == PRODUCT_SCREEN_TIMEZONE) {
+        install_header_callbacks = s_ui.timezone_scene.root == NULL;
+        const uint32_t started = lv_tick_get();
+        np_settings_timezone_scene_create(&s_ui.timezone_scene, lv_screen_active(),
+                                          &s_ui.keyboard, timezone_select_cb, NULL);
+        root = s_ui.timezone_scene.root;
+        header = &s_ui.timezone_scene.header;
+        if (root == NULL) return false;
+        np_settings_timezone_scene_enter(&s_ui.timezone_scene,
+                                         projection.onboarding.timezone_index);
+        if (install_header_callbacks) {
+            lv_obj_add_event_cb(s_ui.timezone_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            s_ui.timezone_scene_object_count = scene_object_count(root);
+            ESP_LOGI(TAG, "Timezone scene built: %lu objects, %lu ms",
+                     (unsigned long)s_ui.timezone_scene_object_count,
+                     (unsigned long)lv_tick_elaps(started));
+        } else if (scene_object_count(root) != s_ui.timezone_scene_object_count) {
+            ESP_LOGW(TAG, "Timezone scene object count changed");
+        }
+    } else if (page == PRODUCT_SCREEN_WIFI) {
+        install_header_callbacks = s_ui.wifi_scene.root == NULL;
+        const uint32_t started = lv_tick_get();
+        if (install_header_callbacks) {
+            s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
+            if (s_ui.wifi_scene.root == NULL) return false;
+            np_settings_wifi_scene_bind(&s_ui.wifi_scene);
+            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.connect_button, wifi_manage_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.wifi_scene.wifi.forget_button, wifi_forget_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            ESP_LOGI(TAG, "Wi-Fi scene built: %lu objects, %lu ms",
+                     (unsigned long)scene_object_count(s_ui.wifi_scene.root),
+                     (unsigned long)lv_tick_elaps(started));
+        }
+        root = s_ui.wifi_scene.root;
+        header = &s_ui.wifi_scene.header;
+    } else if (page == PRODUCT_SCREEN_NOTIFICATIONS) {
+        install_header_callbacks = s_ui.notifications_scene.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.notifications_scene = np_settings_notifications_scene_build(lv_screen_active());
+            if (s_ui.notifications_scene.root == NULL) return false;
+            install_notification_callbacks(&s_ui.notifications_scene.notifications);
+            lv_obj_add_event_cb(s_ui.notifications_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        }
+        root = s_ui.notifications_scene.root;
+        header = &s_ui.notifications_scene.header;
+    } else if (page == PRODUCT_SCREEN_SYSTEM) {
+        install_header_callbacks = s_ui.system_scene.root == NULL;
+        const uint32_t started = lv_tick_get();
+        np_settings_system_scene_create(&s_ui.system_scene, lv_screen_active());
+        root = s_ui.system_scene.root;
+        header = &s_ui.system_scene.header;
+        if (root == NULL) return false;
+        if (install_header_callbacks) {
+            lv_obj_add_event_cb(s_ui.system_scene.back_button, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED,
+                                (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.system_scene.system.restart_button,
+                                system_restart_event_cb, LV_EVENT_CLICKED, NULL);
+            s_ui.system_scene_object_count = scene_object_count(root);
+            ESP_LOGI(TAG, "System scene built: %lu objects, %lu ms",
+                     (unsigned long)s_ui.system_scene_object_count,
+                     (unsigned long)lv_tick_elaps(started));
+        } else {
+            const uint32_t count = scene_object_count(root);
+            if (count != s_ui.system_scene_object_count) {
+                ESP_LOGW(TAG, "System scene object count changed: %lu -> %lu",
+                         (unsigned long)s_ui.system_scene_object_count,
+                         (unsigned long)count);
+            }
+        }
+    } else {
+        ESP_LOGE(TAG, "Unsupported navigation page=%u", (unsigned)page);
+        return false;
+    }
+
+    if (root == NULL || header == NULL) return false;
+    if (install_header_callbacks) {
+        lv_obj_add_event_cb(header->drawer_home_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+        lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+        lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+    }
+    update_header(header, &projection, true);
+    if (page == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
+    if (page == PRODUCT_SCREEN_SYSTEM)
+        update_system_information(&s_ui.system_scene.system, &projection);
+    if (page == PRODUCT_SCREEN_NOTIFICATIONS) update_notifications_scene(&projection);
+    if (page == PRODUCT_SCREEN_WIFI) update_wifi_scene(&projection);
+    if (page == PRODUCT_SCREEN_TIMEZONE) update_timezone_scene(&projection);
+    s_ui.rendered_revision = projection.revision;
+    s_ui.active_screen = page;
+    np_set_visible(root, true);
+    lv_obj_move_foreground(root);
+    return true;
 }
 
 static void navigation_enter(void *context, uintptr_t page)
@@ -1861,30 +1995,6 @@ static void navigation_failed(void *context, uintptr_t page)
     s_ui.navigation_pending = false;
     np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                            "Navegação indisponível", NULL, 2200U);
-}
-
-static void settings_home_async(void *user_data)
-{
-    (void)user_data;
-    s_ui.navigation_pending = false;
-    if (s_ui.active_screen == PRODUCT_SCREEN_BOOT ||
-        s_ui.active_screen == PRODUCT_SCREEN_HOME) return;
-    if (!s_ui.navigation_scene_released) release_current_scene();
-    if (s_ui.home.root == NULL) {
-        s_ui.home = np_home_build(lv_screen_active());
-        s_ui.home_data_rendered = false;
-        install_home_navigation_callbacks();
-    }
-    np_feedback_bring_to_front(&s_ui.feedback);
-
-    app_ui_projection_t projection = {0};
-    app_state_get_ui_projection(&projection);
-    update_home(&projection);
-    s_ui.rendered_revision = projection.revision;
-    s_ui.active_screen = PRODUCT_SCREEN_HOME;
-    np_set_visible(s_ui.home.root, true);
-    lv_obj_move_foreground(s_ui.home.root);
-    np_feedback_bring_to_front(&s_ui.feedback);
 }
 
 static void profile_identity_event_cb(lv_event_t *event)
@@ -1945,6 +2055,9 @@ static uint32_t scene_object_count(lv_obj_t *root)
     return count;
 }
 
+/* Retained only as migration history until the next source cleanup. The
+ * Navigation Manager is the sole compiled navigation path. */
+#if 0
 static void scene_navigation_async(void *user_data)
 {
     const uintptr_t destination = (uintptr_t)user_data;
@@ -2174,6 +2287,7 @@ static void scene_navigation_build_timer_cb(lv_timer_t *timer)
 
     scene_navigation_async((void *)destination);
 }
+#endif
 
 static void scene_navigation_event_cb(lv_event_t *event)
 {
@@ -2184,16 +2298,6 @@ static void scene_navigation_event_cb(lv_event_t *event)
     if (np_navigation_request(&s_ui.navigation, destination)) {
         s_ui.navigation_pending = true;
     }
-}
-
-static void install_home_navigation_callbacks(void)
-{
-    lv_obj_add_event_cb(s_ui.home.header.drawer_settings_button,
-                        scene_navigation_event_cb, LV_EVENT_CLICKED,
-                        (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
-    lv_obj_add_event_cb(s_ui.home.header.settings_button,
-                        scene_navigation_event_cb, LV_EVENT_CLICKED,
-                        (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
 }
 
 esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)

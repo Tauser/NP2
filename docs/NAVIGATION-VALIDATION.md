@@ -173,3 +173,19 @@ normal. A imagem resultante ocupa `0x2b8010` bytes numa partição de
 `0x800000` bytes, com 66% livres. Esta alteração do lock não mudou o código
 fonte compilado; a gravação relatada pelo usuário permanece a evidência
 visual da correção de navegação.
+
+## Migração completa do ciclo de navegação
+
+A ADR-050 remove a rota compilada de construção assíncrona que ainda atendia
+as telas fora de Home e Preferências. Perfil, Tela e som, Wi-Fi, Fuso,
+Notificações e Sistema agora são construídos diretamente no `BUILD` do
+Navigation Manager. A limpeza do `content_host` ocorre em toda transição,
+evitando reter uma página piloto escondida após entrar em configurações. O
+resultado exige build, flash e validação manual de todas as rotas antes de
+encerrar o gate de navegação.
+
+O build limpo `idf.py -B build/validation-full-navigation build` passou para
+`esp32p4` com ESP-IDF 5.5.4. A imagem usa `0x2b8010` bytes em uma partição de
+`0x800000` bytes, com 66% livres. Ainda falta gravar esta revisão no P4 e
+percorrer visualmente Home, Perfil, Preferências, Tela e som, Wi-Fi, Fuso,
+Notificações e Sistema, incluindo os retornos por drawer e botão Voltar.

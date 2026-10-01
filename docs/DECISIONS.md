@@ -1226,3 +1226,21 @@ por isso a invalidação também fica suspensa, de forma balanceada. A pausa
 dura apenas a transição entre passagens do worker, sem bloquear a task. Esta
 decisão exige verificação visual em placa de todas as rotas e não resolve por
 si só o WDT observado após aproximadamente 19 minutos de navegação.
+
+## ADR-050 — Navigation Manager para todas as telas de produto
+
+**Decisão:** Perfil, Tela e som, Wi-Fi, Fuso horário, Notificações e Sistema
+passam a construir suas raízes lazy diretamente na fase `BUILD` do Navigation
+Manager. A sequência `LEAVE` → `CLEAN` → `WAIT_NEXT_PASS` → `BUILD` → `ENTER`
+é agora a única rota compilada para qualquer transição iniciada por toque. Os
+layouts, callbacks, serviços e caches pequenos existentes são preservados;
+somente a orquestração de ciclo de vida foi centralizada.
+
+**Motivo e trade-off:** o caminho anterior chamava um construtor assíncrono
+legado de dentro de `BUILD`, deixando duas políticas de navegação no mesmo
+produto. Centralizar elimina timers auxiliares e impede que uma árvore seja
+criada fora da passagem medida pelo gerenciador. O `content_host` compartilhado
+é limpo em toda transição para não reter Home ou Preferências ocultas depois
+de uma tela de configurações. As raízes das demais telas permanecem lazy e
+podem ser evacuadas pela política de heap; todas as rotas exigem novo ensaio
+em placa, inclusive a investigação do WDT prolongado.
