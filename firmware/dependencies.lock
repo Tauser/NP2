@@ -168,7 +168,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     dependencies: []
     source:
-      path: C:\Users\Tauser\.codex\worktrees\2b15\NP2\firmware\components\espressif__esp_lvgl_adapter
+      path: D:\Projetos\NP2\firmware\components\espressif__esp_lvgl_adapter
       type: local
     version: 0.6.4
   espressif/esp_mmap_assets:
