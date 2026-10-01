@@ -156,3 +156,20 @@ especial de Perfil → Home/Preferências foi removido. A validação exige buil
 limpo, flash no P4, captura do boot, navegação visual por múltiplas rotas e
 repetição prolongada para observar o WDT; esses resultados ainda serão
 registrados após o teste na placa.
+
+O usuário compilou e gravou pelo VS Code a versão `b69b03f` no projeto normal
+`D:\Projetos\NP2` e relatou navegação por Home, Perfil, Preferências e outras
+telas sem piscada branca, travamento ou reinício. A confirmação visual cobre
+o comportamento observado; não há captura serial nem contagem de 100 ciclos
+desse flash. O WDT após uso prolongado continua em aberto.
+
+Durante a verificação do build, `dependencies.lock` ainda apontava o adaptador
+LVGL para o worktree antigo. O commit `c1b4caf` mudou essa resolução para o
+componente local do projeto normal. Um `idf.py reconfigure` no build padrão
+confirmou o caminho `D:\Projetos\NP2\firmware\components\espressif__esp_lvgl_adapter`.
+O build padrão e o build separado em `build/validation-selfcontained-b69b03f`
+passaram após a correção; o segundo também listou o adaptador no checkout
+normal. A imagem resultante ocupa `0x2b8010` bytes numa partição de
+`0x800000` bytes, com 66% livres. Esta alteração do lock não mudou o código
+fonte compilado; a gravação relatada pelo usuário permanece a evidência
+visual da correção de navegação.
