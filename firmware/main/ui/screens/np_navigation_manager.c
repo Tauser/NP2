@@ -8,6 +8,32 @@
 
 static const char *const TAG = "np_navigation";
 
+static void hold_frame(np_navigation_manager_t *manager)
+{
+    lv_display_t *display = lv_obj_get_display(manager->screen);
+    lv_timer_t *refresh = lv_display_get_refr_timer(display);
+    if (refresh == NULL) return;
+    /* Keep the last physical frame while the outgoing tree is hidden and
+     * cleaned. Invalidation alone can resume the LVGL refresh timer. */
+    lv_display_enable_invalidation(display, false);
+    lv_timer_pause(refresh);
+    manager->frame_held = true;
+}
+
+static void release_frame(np_navigation_manager_t *manager)
+{
+    if (!manager->frame_held) return;
+    lv_display_t *display = lv_obj_get_display(manager->screen);
+    lv_timer_t *refresh = lv_display_get_refr_timer(display);
+    lv_display_enable_invalidation(display, true);
+    lv_obj_invalidate(manager->screen);
+    if (refresh != NULL) {
+        lv_timer_resume(refresh);
+        lv_timer_ready(refresh);
+    }
+    manager->frame_held = false;
+}
+
 static uint32_t object_count(lv_obj_t *root)
 {
     if (root == NULL) return 0;
@@ -77,6 +103,7 @@ void np_navigation_cycle_begin(void *context)
     ++manager->handler_generation;
     if (manager->phase == NP_NAV_LEAVE) {
         const int64_t started = esp_timer_get_time();
+        hold_frame(manager);
         manager->ops.leave(manager->context, manager->current_page);
         manager->phase = NP_NAV_CLEAN;
         trace(manager, "LEAVE", started);
@@ -92,7 +119,12 @@ void np_navigation_cycle_begin(void *context)
             manager->ops.enter(manager->context, manager->destination);
             manager->current_page = manager->destination;
             ++manager->page_generation;
+            release_frame(manager);
             trace(manager, "ENTER", entered);
+        } else {
+            if (manager->ops.failed != NULL)
+                manager->ops.failed(manager->context, manager->destination);
+            release_frame(manager);
         }
         manager->phase = NP_NAV_IDLE;
     }

@@ -146,3 +146,13 @@ por segundo antes do ajuste. Home → Perfil → Preferências concluiu fases em
 ordem, sem WDT na janela de 50 s. O teste de duração superior a 19 minutos e
 o gate de 100 ciclos continuam pendentes; placa/BOM e hash C6 devem ser
 registrados antes de fechar o gate físico.
+
+## Quadro preservado em todas as rotas
+
+A ADR-049 suspende invalidação e refresh no `LEAVE` e só os reativa após
+`ENTER` ou falha de `BUILD`. Assim o painel mantém o último quadro durante
+`CLEAN_WAIT_NEXT_PASS`, independentemente do link escolhido. O tratamento
+especial de Perfil → Home/Preferências foi removido. A validação exige build
+limpo, flash no P4, captura do boot, navegação visual por múltiplas rotas e
+repetição prolongada para observar o WDT; esses resultados ainda serão
+registrados após o teste na placa.

@@ -18,6 +18,7 @@ typedef struct {
     void (*clean)(void *context, uintptr_t page);
     bool (*build)(void *context, uintptr_t page);
     void (*enter)(void *context, uintptr_t page);
+    void (*failed)(void *context, uintptr_t page);
 } np_navigation_ops_t;
 
 typedef struct {
@@ -30,6 +31,7 @@ typedef struct {
     uint32_t page_generation;
     uint32_t cleaned_handler_generation;
     int64_t requested_us;
+    bool frame_held;
     np_nav_phase_t phase;
 } np_navigation_manager_t;
 

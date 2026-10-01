@@ -141,6 +141,7 @@ static void navigation_leave(void *context, uintptr_t page);
 static void navigation_clean(void *context, uintptr_t page);
 static bool navigation_build(void *context, uintptr_t page);
 static void navigation_enter(void *context, uintptr_t page);
+static void navigation_failed(void *context, uintptr_t page);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -1692,14 +1693,6 @@ static void navigation_leave(void *context, uintptr_t page)
 {
     (void)context;
     release_current_scene();
-    if (page == PRODUCT_SCREEN_PROFILE &&
-        (s_ui.navigation.destination == PRODUCT_SCREEN_HOME ||
-         s_ui.navigation.destination == PRODUCT_SCREEN_PREFERENCES) &&
-        s_ui.profile.root != NULL) {
-        /* Keep the outgoing scene painted until the pilot page is ready. The
-         * legacy Profile tree remains cached through the separated pass. */
-        np_set_visible(s_ui.profile.root, true);
-    }
     if (page == PRODUCT_SCREEN_PREFERENCES && s_ui.preferences.profile_button != NULL &&
         lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
         np_set_visible(s_ui.preferences.profile_button, false);
@@ -1854,12 +1847,20 @@ static void navigation_enter(void *context, uintptr_t page)
 {
     (void)context;
     if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
-        if (s_ui.profile.root != NULL) np_set_visible(s_ui.profile.root, false);
         np_set_visible(s_ui.shell, true);
         lv_obj_move_foreground(s_ui.shell);
     }
     np_feedback_bring_to_front(&s_ui.feedback);
     s_ui.navigation_pending = false;
+}
+
+static void navigation_failed(void *context, uintptr_t page)
+{
+    (void)context;
+    ESP_LOGE(TAG, "Failed to build page=%u", (unsigned)page);
+    s_ui.navigation_pending = false;
+    np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                           "Navegação indisponível", NULL, 2200U);
 }
 
 static void settings_home_async(void *user_data)
@@ -2218,6 +2219,7 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
         .clean = navigation_clean,
         .build = navigation_build,
         .enter = navigation_enter,
+        .failed = navigation_failed,
     };
     np_navigation_init(&s_ui.navigation, screen, PRODUCT_SCREEN_BOOT,
                        &navigation_ops, NULL);

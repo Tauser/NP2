@@ -1208,3 +1208,21 @@ cede CPU ao IDLE0 e reduz a taxa máxima de polling. Um WDT observado após
 cerca de 19 minutos ainda exige repetição em placa; o PC isolado do watchdog
 não prova a causa, especialmente quando o monitor usa um ELF diferente do
 binário gravado.
+
+## ADR-049 — Quadro preservado durante transições de navegação
+
+**Decisão:** o Navigation Manager suspende a invalidação e o timer de refresh
+do display antes de `LEAVE`. O último quadro permanece no painel durante
+`CLEAN` e a espera pela passagem seguinte. Depois de `ENTER`, o gerenciador
+reativa a invalidação, invalida a tela inteira e agenda um refresh imediato.
+Em falha de `BUILD`, também reativa o display e sinaliza o erro. A proteção
+vale para todas as rotas que passam pelo gerenciador; foi removida a exceção
+que mantinha Perfil visível apenas para Home e Preferências.
+
+**Motivo e trade-off:** ocultar a árvore antiga antes de a nova página estar
+pronta permite que o LVGL desenhe um quadro branco intermediário. Congelar
+somente o timer não basta, pois uma requisição de refresh pode reativá-lo;
+por isso a invalidação também fica suspensa, de forma balanceada. A pausa
+dura apenas a transição entre passagens do worker, sem bloquear a task. Esta
+decisão exige verificação visual em placa de todas as rotas e não resolve por
+si só o WDT observado após aproximadamente 19 minutos de navegação.
