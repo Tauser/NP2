@@ -138,8 +138,9 @@ O commit `352956f` passou em build limpo P4 com
 foi atualizado e `idf.py -p COM8 app-flash` gravou 2.850.640 bytes com hash
 verificado. SHA-256 da imagem P4:
 `e4973d9d0ed00ab5bcc01de63b6696adea0c7a6c3b19ea09dad74b1f551d77b3`.
-Configuração efetiva: `CONFIG_FREERTOS_HZ=100`, espera do worker LVGL entre
-um e dois ticks (10–20 ms). Em captura curta, `handler_generation` foi 4666
+Configuração efetiva: `CONFIG_FREERTOS_HZ=100`, timeout do worker LVGL entre
+um e dois ticks (10–20 ms), sujeito a despertar antecipado por notificação.
+Em captura curta, `handler_generation` foi 4666
 aos 37,306 s e 5055 aos 40,406 s, cerca de 125 passagens/s, contra milhares
 por segundo antes do ajuste. Home → Perfil → Preferências concluiu fases em
 ordem, sem WDT na janela de 50 s. O teste de duração superior a 19 minutos e

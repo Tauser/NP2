@@ -1197,7 +1197,8 @@ após reboot ou comportamento de WDT na placa, que exigem flash manual.
 
 **Decisão:** configurar a espera mínima do worker LVGL como um tick FreeRTOS e
 a máxima como dois ticks, mantendo o tick LVGL de 1 ms. Com
-`CONFIG_FREERTOS_HZ=100`, o intervalo efetivo fica entre 10 e 20 ms.
+`CONFIG_FREERTOS_HZ=100`, o timeout fica entre 10 e 20 ms; notificações podem
+acordar a task antes desse prazo.
 
 **Motivo e trade-off:** o valor anterior de 1 ms era convertido por
 `pdMS_TO_TICKS(1)` em zero ticks no adapter. Isso permitia ciclos de handler
