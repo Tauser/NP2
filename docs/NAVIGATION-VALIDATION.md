@@ -189,3 +189,11 @@ O build limpo `idf.py -B build/validation-full-navigation build` passou para
 `0x800000` bytes, com 66% livres. Ainda falta gravar esta revisão no P4 e
 percorrer visualmente Home, Perfil, Preferências, Tela e som, Wi-Fi, Fuso,
 Notificações e Sistema, incluindo os retornos por drawer e botão Voltar.
+
+O commit `9cba15a` foi integrado ao checkout normal `D:\Projetos\NP2`,
+compilado e gravado no P4 pela COM8 com `idf.py -p COM8 app-flash`. O esptool
+verificou o hash de gravação. A imagem P4 tem 2.849.856 bytes e SHA-256
+`801b9cec12ccfffbe3348eabcbda5a4f2c0832914bc4d90d2f27104353770e5b`.
+Uma captura de 35 s após o flash registrou `Boot transition complete; Home V2
+visible`, sem WDT, panic ou assert nessa janela. A inspeção manual de todas as
+rotas e o ensaio prolongado continuam pendentes.
