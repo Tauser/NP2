@@ -1193,3 +1193,17 @@ após reboot ou comportamento de WDT na placa, que exigem flash manual.
 **Decisão:** Home e Preferências usam um shell permanente com header, drawer e `content_host`. O Navigation Manager executa `LEAVE` no início de uma passagem do worker LVGL, `CLEAN` após `lv_timer_handler`, espera a passagem seguinte e então executa `BUILD` e `ENTER`. `handler_generation` conta passagens do worker; `page_generation` conta entradas concluídas em páginas. O adapter 0.6.4 recebe somente hooks genéricos `ui_cycle_begin`/`ui_cycle_end` por override local versionado. Somente a task LVGL chama o gerenciador e modifica objetos. O fluxo lazy de cache das outras telas continua disponível e não é removido neste piloto.
 
 **Motivo e trade-off:** o timer de 32 ms não prova que a limpeza e a construção ocorreram em passagens distintas do handler, e o cache de todas as roots retém heap. O limite por geração elimina essa ambiguidade para as duas páginas piloto e permite medir heap interno, maior bloco, heap LVGL, objetos, timers e tempo de cada fase. O shell compartilhado evita recriar header e drawer entre Home e Preferências; páginas legadas ainda usam seus próprios headers até migração posterior. A instrumentação e a cópia local do adapter aumentam código versionado e exigem revisão ao atualizar a versão. Build não substitui navegação repetida, memória e WDT em placa; o responsável faz flash manual.
+## ADR-048 — Espera mínima do worker LVGL em ticks reais
+
+**Decisão:** configurar a espera mínima do worker LVGL como um tick FreeRTOS e
+a máxima como dois ticks, mantendo o tick LVGL de 1 ms. Com
+`CONFIG_FREERTOS_HZ=100`, o intervalo efetivo fica entre 10 e 20 ms.
+
+**Motivo e trade-off:** o valor anterior de 1 ms era convertido por
+`pdMS_TO_TICKS(1)` em zero ticks no adapter. Isso permitia ciclos de handler
+sem bloqueio quando o LVGL retornava prazo curto; as medições do piloto
+mostraram centenas de milhares de passagens em poucos segundos. O novo limite
+cede CPU ao IDLE0 e reduz a taxa máxima de polling. Um WDT observado após
+cerca de 19 minutos ainda exige repetição em placa; o PC isolado do watchdog
+não prova a causa, especialmente quando o monitor usa um ELF diferente do
+binário gravado.

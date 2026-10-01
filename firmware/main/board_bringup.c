@@ -88,8 +88,10 @@ esp_err_t board_bringup_start(void)
         .ui_cycle_begin = product_ui_cycle_begin,
         .ui_cycle_end = product_ui_cycle_end,
         .tick_period_ms = 1,
-        .task_min_delay_ms = 1,
-        .task_max_delay_ms = 15,
+        /* A 100 Hz FreeRTOS tick is 10 ms. A 1 ms wait becomes zero ticks
+         * in the adapter worker and can spin the LVGL task without yielding. */
+        .task_min_delay_ms = portTICK_PERIOD_MS,
+        .task_max_delay_ms = 2 * portTICK_PERIOD_MS,
         .stack_in_psram = false,
         .auto_sleep = {
             .enable = false,

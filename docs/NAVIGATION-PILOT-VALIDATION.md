@@ -114,3 +114,21 @@ SHA-256 `3161c091c027c14e3a87ab0fc61359e25aa28f32fe3603c3b9871a42e3f258af`.
 Na captura curta, houve 16 eventos `ENTER` e nenhum WDT; o usuário confirmou
 visualmente que a piscada em Perfil → Home desapareceu. O ensaio de 100 ciclos
 permanece pendente.
+
+## Integração no projeto normal e WDT prolongado
+
+Em 2026-09-30, o checkout limpo `D:\Projetos\NP2` recebeu por fast-forward os
+commits do piloto. O build nesse diretório passou para `esp32p4`/ESP-IDF 5.5.4;
+o primeiro flash encontrou COM8 ocupada pelo monitor, e a repetição gravou
+2.850.640 bytes com hash verificado. O SHA-256 dessa imagem é
+`3411d2e49953c6bcb35cc689b31f5406475bf9fea2f96a052c6d68d61ed8a31f`.
+O C6 não foi alterado. A captura curta após o flash teve bytes de boot e rede,
+mas perdeu a linha do SHA do ELF; não é ensaio de estabilidade.
+
+O usuário informou WDT de `IDLE0` com task `lvgl` após 1.155,227 s de uso do
+piloto anterior. Ele apenas abriu o monitor do checkout normal, sem novo flash
+antes desse evento; portanto os símbolos impressos pelo monitor usaram o ELF
+errado. O PC isolado não identifica a causa. A configuração efetiva tinha
+`CONFIG_FREERTOS_HZ=100` e `task_min_delay_ms=1`, que convertia a espera mínima
+do worker em zero ticks. A ADR-048 muda o mínimo para um tick e o máximo para
+dois; build, flash e ensaio prolongado dessa alteração ainda são necessários.
