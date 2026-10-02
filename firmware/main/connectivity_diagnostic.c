@@ -20,7 +20,9 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "flash_coordinator.h"
+#include "network_validation_service.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 
 static const char *const TAG = "np2_connect";
@@ -33,6 +35,9 @@ static const char *const TAG = "np2_connect";
 #define NP2_WIFI_PASSWORD_MAX_BYTES 63U
 #define NP2_WIFI_ASSOCIATION_TIMEOUT_MS 15000U
 #define NP2_WIFI_DHCP_TIMEOUT_MS 20000U
+#define NP2_WIFI_SCAN_TIMEOUT_MS 15000U
+#define NP2_WIFI_SCAN_DONE_BIT (1U << 0U)
+#define NP2_WIFI_RPC_FAILURES_BEFORE_HOSTED_RECOVERY 1U
 #define NP2_WIFI_STA_INACTIVE_TIME_SECONDS 6U
 #define NP2_DNS_REASSOCIATION_COOLDOWN_MS 60000U
 #define NP2_HOSTED_RECOVERY_WINDOW_MS (10U * 60U * 1000U)
@@ -42,6 +47,8 @@ static const char *const TAG = "np2_connect";
 #define NP2_HOSTED_STARTUP_TIMEOUT_MS 30000U
 #define NP2_HOSTED_STARTUP_TASK_STACK_BYTES (6U * 1024U)
 #define NP2_WIFI_CREDENTIAL_PERSIST_STABLE_MS 30000U
+#define NP2_HOSTED_RECOVERY_HTTPS_IDLE_MS 1000U
+#define NP2_HOSTED_RECOVERY_HTTPS_WAIT_MS 60000U
 
 typedef enum {
     CONNECTIVITY_REQUEST_JOIN = 0,
@@ -66,6 +73,7 @@ typedef struct {
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_request_lock = portMUX_INITIALIZER_UNLOCKED;
+static EventGroupHandle_t s_wifi_scan_events;
 static connectivity_diagnostic_status_t s_status = {
     .state = CONNECTIVITY_DIAGNOSTIC_STATE_IDLE,
     .last_result = ESP_OK,
@@ -77,6 +85,8 @@ static bool s_active_station_request_valid;
 static bool s_started;
 static bool s_wifi_events_registered;
 static bool s_hosted_recovery_in_progress;
+static bool s_hosted_recovery_pending;
+static uint8_t s_consecutive_wifi_rpc_failures;
 static esp_netif_t *s_station_netif;
 /*
  * esp_wifi_disconnect() is asynchronous.  When replacing a station
@@ -100,6 +110,43 @@ static bool s_credential_vault_write_attempted;
 
 static esp_err_t recover_hosted_link(void);
 static void set_status(connectivity_diagnostic_state_t state, esp_err_t result);
+
+static void observe_wifi_rpc_result(esp_err_t result)
+{
+    bool recovery_queued = false;
+    taskENTER_CRITICAL(&s_status_lock);
+    if (result != ESP_FAIL) {
+        s_consecutive_wifi_rpc_failures = 0;
+    } else if (result == ESP_FAIL && s_status.link_up && s_status.wifi_ready &&
+               !s_hosted_recovery_in_progress) {
+        if (s_consecutive_wifi_rpc_failures < UINT8_MAX) {
+            ++s_consecutive_wifi_rpc_failures;
+        }
+        if (esp_timer_get_time() >= s_recovery_cooldown_until_us &&
+            s_consecutive_wifi_rpc_failures >=
+                NP2_WIFI_RPC_FAILURES_BEFORE_HOSTED_RECOVERY &&
+            !s_hosted_recovery_pending) {
+            s_hosted_recovery_pending = true;
+            recovery_queued = true;
+        }
+    }
+    taskEXIT_CRITICAL(&s_status_lock);
+    if (recovery_queued) {
+        ESP_LOGW(TAG, "consecutive Wi-Fi RPC failures; scheduling bounded Hosted recovery");
+    }
+}
+
+static void observe_wifi_scan_rpc_result(esp_err_t result)
+{
+    if (result == ESP_FAIL) {
+        /* A scan runs over the same Hosted RPC channel as station traffic.
+         * A timed-out best-effort scan must not independently tear down the
+         * link; station retry supervision remains responsible for recovery. */
+        ESP_LOGW(TAG, "scan result RPC failed; leaving station link under supervision");
+        return;
+    }
+    observe_wifi_rpc_result(result);
+}
 
 static void hosted_startup_task(void *arg)
 {
@@ -278,6 +325,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 {
     (void)arg;
 
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        if (s_wifi_scan_events != NULL) {
+            (void)xEventGroupSetBits(s_wifi_scan_events, NP2_WIFI_SCAN_DONE_BIT);
+        }
+        return;
+    }
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
         const wifi_event_sta_connected_t *const connected = event_data;
         taskENTER_CRITICAL(&s_status_lock);
@@ -388,16 +442,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                      (unsigned int)reason);
             return;
         }
-        ESP_LOGW(TAG, "station disconnected; retry is handled by connectivity worker");
+        ESP_LOGW(TAG, "station disconnected (reason=%u); retry is handled by connectivity worker",
+                 (unsigned int)reason);
     }
 }
 
-/*
- * The Hosted transport itself owns reset54.  This callback only records a
- * fault and prevents the Wi-Fi worker from issuing RPCs on a dead SDIO link.
- * Recovery stays a separately gated operation until its full lifecycle has
- * physical evidence; neither this callback nor the UI can restart the P4.
- */
+/* The callback only updates state and schedules work. The connectivity worker
+ * owns bounded Hosted recovery; the event callback and UI never restart P4. */
 static void hosted_event_handler(void *arg, esp_event_base_t event_base,
                                  int32_t event_id, void *event_data)
 {
@@ -409,6 +460,8 @@ static void hosted_event_handler(void *arg, esp_event_base_t event_base,
 
     taskENTER_CRITICAL(&s_status_lock);
     if (event_id == EH_HOST_EVENT_TRANSPORT_UP) {
+        s_consecutive_wifi_rpc_failures = 0;
+        s_hosted_recovery_pending = false;
         s_status.link_up = true;
         if (!s_status.wifi_ready) {
             s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_LINK_UP;
@@ -431,6 +484,10 @@ static void hosted_event_handler(void *arg, esp_event_base_t event_base,
         s_retry_pending = false;
         s_status.state = CONNECTIVITY_DIAGNOSTIC_STATE_LINK_DOWN;
         s_status.last_result = ESP_ERR_INVALID_STATE;
+        s_consecutive_wifi_rpc_failures = 0;
+        if (!s_hosted_recovery_in_progress) {
+            s_hosted_recovery_pending = true;
+        }
         if (!s_hosted_recovery_in_progress && s_status.transport_failures < UINT32_MAX) {
             ++s_status.transport_failures;
         }
@@ -514,6 +571,7 @@ static esp_err_t configure_station_from_request(const connectivity_request_t *re
     set_station_deadline(CONNECTIVITY_DIAGNOSTIC_STATE_ASSOCIATING, ESP_OK,
                          NP2_WIFI_ASSOCIATION_TIMEOUT_MS);
     err = esp_wifi_connect();
+    observe_wifi_rpc_result(err);
     if (err != ESP_OK) {
         request_station_retry(err);
     }
@@ -640,15 +698,46 @@ static void process_request(connectivity_request_t *request)
             ESP_LOGI(TAG, "station configuration and durable credential cleared");
         }
     } else if (request->type == CONNECTIVITY_REQUEST_SCAN) {
-        const wifi_scan_config_t scan_cfg = {.show_hidden = false, .scan_type = WIFI_SCAN_TYPE_ACTIVE};
-        set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING, ESP_OK);
-        err = esp_wifi_scan_start(&scan_cfg, true);
+        const wifi_scan_config_t scan_cfg = {
+            .show_hidden = false,
+            .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        };
+        bool scan_ready = false;
+        taskENTER_CRITICAL(&s_status_lock);
+        scan_ready = s_status.link_up && s_status.wifi_ready;
+        taskEXIT_CRITICAL(&s_status_lock);
+
+        if (!scan_ready || s_wifi_scan_events == NULL) {
+            err = ESP_ERR_INVALID_STATE;
+        } else {
+            set_status(CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING, ESP_OK);
+            (void)xEventGroupClearBits(s_wifi_scan_events, NP2_WIFI_SCAN_DONE_BIT);
+            /* The hosted RPC timeout is 5 s. A blocking scan keeps the RPC
+             * open for the entire radio scan and can outlive that deadline.
+             * Start remotely without blocking, then wait for the forwarded
+             * SCAN_DONE event in this worker. */
+            err = esp_wifi_scan_start(&scan_cfg, false);
+            observe_wifi_scan_rpc_result(err);
+            if (err == ESP_OK) {
+                const EventBits_t scan_events = xEventGroupWaitBits(
+                    s_wifi_scan_events, NP2_WIFI_SCAN_DONE_BIT, pdTRUE, pdFALSE,
+                    pdMS_TO_TICKS(NP2_WIFI_SCAN_TIMEOUT_MS));
+                if ((scan_events & NP2_WIFI_SCAN_DONE_BIT) == 0U) {
+                    err = ESP_ERR_TIMEOUT;
+                    ESP_LOGW(TAG, "Wi-Fi scan timed out waiting for SCAN_DONE");
+                }
+            }
+        }
         if (err == ESP_OK) {
             uint16_t found = 0;
             err = esp_wifi_scan_get_ap_num(&found);
+            observe_wifi_scan_rpc_result(err);
             static wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
             uint16_t count = found < NP2_WIFI_SCAN_RESULTS_MAX ? found : NP2_WIFI_SCAN_RESULTS_MAX;
-            if (err == ESP_OK && count > 0U) err = esp_wifi_scan_get_ap_records(&count, records);
+            if (err == ESP_OK && count > 0U) {
+                err = esp_wifi_scan_get_ap_records(&count, records);
+                observe_wifi_scan_rpc_result(err);
+            }
             if (err == ESP_OK) {
                 taskENTER_CRITICAL(&s_status_lock);
                 s_status.access_points_found = found;
@@ -855,10 +944,22 @@ static void run_station_loop(void)
         taskENTER_CRITICAL(&s_status_lock);
         retry_requested = s_retry_pending;
         s_retry_pending = false;
+        const bool hosted_recovery_requested = s_hosted_recovery_pending;
+        s_hosted_recovery_pending = false;
         dns_reassociation_requested = s_dns_reassociation_pending;
         s_dns_reassociation_pending = false;
         online = s_status.online;
         taskEXIT_CRITICAL(&s_status_lock);
+
+        if (hosted_recovery_requested) {
+            retry_due_at_us = 0;
+            const esp_err_t recovery_result = recover_hosted_link();
+            if (recovery_result != ESP_OK) {
+                ESP_LOGW(TAG, "automatic Hosted recovery ended: %s",
+                         esp_err_to_name(recovery_result));
+            }
+            continue;
+        }
 
         if (online) {
             retry_due_at_us = 0;
@@ -890,6 +991,7 @@ static void run_station_loop(void)
             ESP_LOGW(TAG, "DNS policy requested one bounded reassociation");
             request_station_retry(ESP_ERR_TIMEOUT);
             const esp_err_t disconnect_err = esp_wifi_disconnect();
+            observe_wifi_rpc_result(disconnect_err);
             if (disconnect_err != ESP_OK && disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
                 ESP_LOGW(TAG, "DNS policy disconnect failed: %s",
                          esp_err_to_name(disconnect_err));
@@ -917,6 +1019,7 @@ static void run_station_loop(void)
             ESP_LOGW(TAG, "station association or DHCP deadline expired");
             request_station_retry(ESP_ERR_TIMEOUT);
             const esp_err_t disconnect_err = esp_wifi_disconnect();
+            observe_wifi_rpc_result(disconnect_err);
             if (disconnect_err != ESP_OK && disconnect_err != ESP_ERR_WIFI_NOT_CONNECT) {
                 ESP_LOGW(TAG, "station timeout disconnect failed: %s",
                          esp_err_to_name(disconnect_err));
@@ -931,6 +1034,7 @@ static void run_station_loop(void)
             set_station_deadline(CONNECTIVITY_DIAGNOSTIC_STATE_ASSOCIATING, ESP_OK,
                                  NP2_WIFI_ASSOCIATION_TIMEOUT_MS);
             const esp_err_t err = esp_wifi_connect();
+            observe_wifi_rpc_result(err);
             if (err != ESP_OK) {
                 request_station_retry(err);
                 ESP_LOGW(TAG, "station retry request failed: %s", esp_err_to_name(err));
@@ -941,6 +1045,11 @@ static void run_station_loop(void)
 
 static esp_err_t start_ram_only_wifi(void)
 {
+    if (s_wifi_scan_events == NULL) {
+        s_wifi_scan_events = xEventGroupCreate();
+        if (s_wifi_scan_events == NULL) return ESP_ERR_NO_MEM;
+    }
+
     const wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_err_t err = esp_wifi_init(&wifi_init_cfg);
     if (err != ESP_OK) {
@@ -1046,6 +1155,8 @@ static bool begin_hosted_recovery_cycle(void)
         memset(s_status.gateway, 0, sizeof(s_status.gateway));
         s_station_deadline_us = 0;
         s_retry_pending = false;
+        s_hosted_recovery_pending = false;
+        s_consecutive_wifi_rpc_failures = 0;
         s_hosted_recovery_in_progress = true;
         allowed = true;
     } else {
@@ -1060,6 +1171,30 @@ static bool begin_hosted_recovery_cycle(void)
 
 static esp_err_t recover_hosted_link(void)
 {
+    const int64_t idle_deadline_us = esp_timer_get_time() +
+        (int64_t)NP2_HOSTED_RECOVERY_HTTPS_WAIT_MS * 1000LL;
+    int64_t idle_since_us = 0;
+    while (esp_timer_get_time() < idle_deadline_us) {
+        network_validation_status_t network = {0};
+        network_validation_service_get_status(&network);
+        const int64_t now_us = esp_timer_get_time();
+        if (network.busy) {
+            idle_since_us = 0;
+        } else if (idle_since_us == 0) {
+            idle_since_us = now_us;
+        } else if (now_us - idle_since_us >=
+                   (int64_t)NP2_HOSTED_RECOVERY_HTTPS_IDLE_MS * 1000LL) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(NP2_CONNECTIVITY_POLL_MS));
+    }
+    if (idle_since_us == 0 ||
+        esp_timer_get_time() - idle_since_us <
+            (int64_t)NP2_HOSTED_RECOVERY_HTTPS_IDLE_MS * 1000LL) {
+        ESP_LOGW(TAG, "deferring Hosted recovery: HTTPS executor stayed busy");
+        return ESP_ERR_TIMEOUT;
+    }
+
     if (!begin_hosted_recovery_cycle()) {
         return ESP_ERR_TIMEOUT;
     }

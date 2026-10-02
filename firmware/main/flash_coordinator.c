@@ -83,6 +83,14 @@ _Static_assert(sizeof(NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE) <=
                    FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES,
                "CoinGecko API key buffer is too small");
 
+#ifndef NP2_DEVELOPMENT_BRAPI_API_KEY
+#define NP2_DEVELOPMENT_BRAPI_API_KEY ""
+#endif
+static const char NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE[] = NP2_DEVELOPMENT_BRAPI_API_KEY;
+_Static_assert(sizeof(NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE) <=
+                   FLASH_COORDINATOR_BRAPI_API_KEY_BYTES,
+               "Brapi API key buffer is too small");
+
 static const char *const TAG = "flash_coord";
 static const char *const NVS_PARTITION = "nvs";
 static const char *const NVS_NAMESPACE = "np2_diag";
@@ -269,6 +277,9 @@ static esp_err_t read_selected_offline_data(const cache_record_header_t *header,
     if (header == NULL || out_snapshot == NULL ||
         (header->payload_size != OFFLINE_DATA_V1_ENCODED_SIZE &&
          header->payload_size != OFFLINE_DATA_V3_ENCODED_SIZE &&
+         header->payload_size != OFFLINE_DATA_V4_ENCODED_SIZE &&
+         header->payload_size != OFFLINE_DATA_V5_ENCODED_SIZE &&
+         header->payload_size != OFFLINE_DATA_V6_ENCODED_SIZE &&
          header->payload_size != OFFLINE_DATA_ENCODED_SIZE)) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -2630,6 +2641,21 @@ esp_err_t flash_coordinator_copy_coingecko_api_key(char *out_key, size_t out_siz
 
     memset(out_key, 0, out_size);
     memcpy(out_key, NP2_DEVELOPMENT_COINGECKO_API_KEY_VALUE, key_length);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_copy_brapi_api_key(char *out_key, size_t out_size)
+{
+    if (out_key == NULL) return ESP_ERR_INVALID_ARG;
+    const size_t key_length = bounded_length(NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE,
+                                             sizeof(NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE));
+    if (key_length == 0U || key_length >= sizeof(NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE) ||
+        out_size <= key_length) {
+        if (out_size > 0U) memset(out_key, 0, out_size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    memset(out_key, 0, out_size);
+    memcpy(out_key, NP2_DEVELOPMENT_BRAPI_API_KEY_VALUE, key_length);
     return ESP_OK;
 }
 

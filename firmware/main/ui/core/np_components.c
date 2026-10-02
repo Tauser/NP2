@@ -89,7 +89,9 @@ void np_set_visible(lv_obj_t *obj, bool visible)
 
 static lv_obj_t *bare_box(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
+    if (parent == NULL) return NULL;
     lv_obj_t *obj = lv_obj_create(parent);
+    if (obj == NULL) return NULL;
     lv_obj_remove_style_all(obj);
     lv_obj_set_pos(obj, x, y);
     lv_obj_set_size(obj, w, h);
@@ -100,7 +102,9 @@ static lv_obj_t *bare_box(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int
 
 lv_obj_t *np_scene(lv_obj_t *parent)
 {
+    if (parent == NULL) return NULL;
     lv_obj_t *obj = lv_obj_create(parent);
+    if (obj == NULL) return NULL;
     lv_obj_remove_style_all(obj);
     lv_obj_add_style(obj, np_st_screen(), 0);
     lv_obj_set_pos(obj, 0, 0);
@@ -118,6 +122,7 @@ lv_obj_t *np_group(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 lv_obj_t *np_surface(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
     lv_obj_t *obj = bare_box(parent, x, y, w, h);
+    if (obj == NULL) return NULL;
     lv_obj_add_style(obj, np_st_surface(), 0);
     return obj;
 }
@@ -125,6 +130,7 @@ lv_obj_t *np_surface(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t 
 lv_obj_t *np_raised(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
     lv_obj_t *obj = bare_box(parent, x, y, w, h);
+    if (obj == NULL) return NULL;
     lv_obj_add_style(obj, np_st_raised(), 0);
     return obj;
 }
@@ -132,6 +138,7 @@ lv_obj_t *np_raised(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h
 lv_obj_t *np_glass(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
     lv_obj_t *obj = bare_box(parent, x, y, w, h);
+    if (obj == NULL) return NULL;
     lv_obj_set_style_bg_color(obj, np_c_surface(), 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_50, 0);
     lv_obj_set_style_border_color(obj, np_c_text_2(), 0);
@@ -145,6 +152,7 @@ lv_obj_t *np_glass(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 lv_obj_t *np_panel(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
     lv_obj_t *obj = bare_box(parent, x, y, w, h);
+    if (obj == NULL) return NULL;
     lv_obj_add_style(obj, np_st_panel(), 0);
     return obj;
 }
@@ -153,6 +161,7 @@ lv_obj_t *np_fill(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
                   lv_color_t color, lv_opa_t opa, int32_t radius)
 {
     lv_obj_t *obj = bare_box(parent, x, y, w, h);
+    if (obj == NULL) return NULL;
     lv_obj_set_style_bg_color(obj, color, 0);
     lv_obj_set_style_bg_opa(obj, opa, 0);
     lv_obj_set_style_radius(obj, radius, 0);
@@ -161,7 +170,9 @@ lv_obj_t *np_fill(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
 
 lv_obj_t *np_image(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
+    if (parent == NULL) return NULL;
     lv_obj_t *image = lv_image_create(parent);
+    if (image == NULL) return NULL;
     lv_obj_remove_style_all(image);
     lv_image_set_inner_align(image, LV_IMAGE_ALIGN_TOP_LEFT);
     lv_obj_set_pos(image, x, y);
@@ -199,7 +210,9 @@ lv_obj_t *np_label(lv_obj_t *parent, const char *text, const lv_font_t *font,
                    lv_color_t color, int32_t x, int32_t y, int32_t w,
                    lv_text_align_t align)
 {
+    if (parent == NULL) return NULL;
     lv_obj_t *obj = lv_label_create(parent);
+    if (obj == NULL) return NULL;
     lv_obj_add_style(obj, np_st_label(), 0);
     lv_obj_set_style_text_font(obj, font, 0);
     lv_obj_set_style_text_color(obj, color, 0);
@@ -486,15 +499,54 @@ static lv_obj_t *menu_grid_button(lv_obj_t *parent, int32_t x, int32_t y, int32_
 }
 
 static int32_t s_drawer_touch_start_x;
+#define NP_DRAWER_AUTO_CLOSE_MS 15000U
+
+static void drawer_timeout_cb(lv_timer_t *timer);
+static void drawer_delete_event_cb(lv_event_t *event);
+static void drawer_item_event_cb(lv_event_t *event);
 
 static void drawer_set_visible(lv_obj_t *overlay, bool visible)
 {
     if (overlay == NULL) return;
+    lv_timer_t *const close_timer = lv_obj_get_user_data(overlay);
     if (visible) {
         lv_obj_remove_flag(overlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(overlay);
+        if (close_timer != NULL) {
+            lv_timer_reset(close_timer);
+            lv_timer_resume(close_timer);
+        }
     } else {
         lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
+        if (close_timer != NULL) lv_timer_pause(close_timer);
+    }
+}
+
+static void drawer_timeout_cb(lv_timer_t *timer)
+{
+    lv_obj_t *const overlay = lv_timer_get_user_data(timer);
+    if (overlay != NULL) drawer_set_visible(overlay, false);
+}
+
+static void drawer_delete_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_DELETE) return;
+    lv_obj_t *const overlay = lv_event_get_target(event);
+    lv_timer_t *const close_timer = lv_obj_get_user_data(overlay);
+    if (close_timer != NULL) lv_timer_delete(close_timer);
+    lv_obj_set_user_data(overlay, NULL);
+}
+
+static void drawer_item_event_cb(lv_event_t *event)
+{
+    const lv_event_code_t code = lv_event_get_code(event);
+    lv_obj_t *const overlay = lv_event_get_user_data(event);
+    if (overlay == NULL) return;
+    if (code == LV_EVENT_PRESSED) {
+        lv_timer_t *const close_timer = lv_obj_get_user_data(overlay);
+        if (close_timer != NULL) lv_timer_reset(close_timer);
+    } else if (code == LV_EVENT_CLICKED) {
+        drawer_set_visible(overlay, false);
     }
 }
 
@@ -548,7 +600,8 @@ typedef enum {
     DRAWER_ICON_HOME = 0,
     DRAWER_ICON_WEATHER,
     DRAWER_ICON_MARKET,
-    DRAWER_ICON_CALENDAR,
+    DRAWER_ICON_IOT,
+    DRAWER_ICON_POMODORO,
     DRAWER_ICON_SETTINGS,
 } drawer_icon_t;
 
@@ -569,8 +622,11 @@ static void drawer_shape(lv_obj_t *item, drawer_icon_t kind, lv_color_t color,
         case DRAWER_ICON_MARKET:
             symbol = NP_ICON_MARKET;
             break;
-        case DRAWER_ICON_CALENDAR:
-            symbol = NP_ICON_CALENDAR;
+        case DRAWER_ICON_IOT:
+            symbol = NP_ICON_ROUTER;
+            break;
+        case DRAWER_ICON_POMODORO:
+            symbol = NP_ICON_CLOCK;
             break;
         case DRAWER_ICON_SETTINGS:
         default:
@@ -585,13 +641,13 @@ static void drawer_shape(lv_obj_t *item, drawer_icon_t kind, lv_color_t color,
 
 static lv_obj_t *drawer_item(lv_obj_t *drawer, int32_t y, drawer_icon_t kind, bool active)
 {
-    const lv_color_t bg = active ? np_c_accent() : np_c_surface();
     const lv_color_t fg = active ? np_c_text() : np_c_text_2();
 
     lv_obj_t *item = np_fill(drawer, 16, y, 52, 52,
-                             bg, LV_OPA_COVER, NP_RADIUS_TILE);
+                             np_c_surface(), LV_OPA_TRANSP, NP_RADIUS_TILE);
+    if (item == NULL) return NULL;
     lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
-    drawer_shape(item, kind, fg, bg);
+    drawer_shape(item, kind, fg, np_c_surface());
     return item;
 }
 
@@ -645,11 +701,31 @@ np_header_t np_header(lv_obj_t *parent)
 
     header.drawer_home_button =
         drawer_item(header.drawer, 20, DRAWER_ICON_HOME, true);
-    (void)drawer_item(header.drawer, 88,  DRAWER_ICON_WEATHER, false);
-    (void)drawer_item(header.drawer, 156, DRAWER_ICON_MARKET, false);
-    (void)drawer_item(header.drawer, 224, DRAWER_ICON_CALENDAR, false);
+    header.drawer_weather_button =
+        drawer_item(header.drawer, 88, DRAWER_ICON_WEATHER, false);
+    header.drawer_market_button = drawer_item(header.drawer, 156, DRAWER_ICON_MARKET, false);
+    header.drawer_iot_button = drawer_item(header.drawer, 224, DRAWER_ICON_IOT, false);
+    header.drawer_pomodoro_button = drawer_item(header.drawer, 292, DRAWER_ICON_POMODORO, false);
     header.drawer_settings_button =
-        drawer_item(header.drawer, 292, DRAWER_ICON_SETTINGS, false);
+        drawer_item(header.drawer, 360, DRAWER_ICON_SETTINGS, false);
+
+    lv_timer_t *const drawer_close_timer = lv_timer_create(
+        drawer_timeout_cb, NP_DRAWER_AUTO_CLOSE_MS, header.drawer_scrim);
+    if (drawer_close_timer != NULL) {
+        lv_obj_set_user_data(header.drawer_scrim, drawer_close_timer);
+        lv_timer_pause(drawer_close_timer);
+        lv_obj_add_event_cb(header.drawer_scrim, drawer_delete_event_cb,
+                            LV_EVENT_DELETE, NULL);
+        lv_obj_t *const items[] = {
+            header.drawer_home_button, header.drawer_weather_button,
+            header.drawer_market_button, header.drawer_iot_button,
+            header.drawer_pomodoro_button, header.drawer_settings_button,
+        };
+        for (size_t i = 0U; i < sizeof(items) / sizeof(items[0]); ++i) {
+            lv_obj_add_event_cb(items[i], drawer_item_event_cb,
+                                LV_EVENT_ALL, header.drawer_scrim);
+        }
+    }
 
     np_set_visible(header.drawer_scrim, false);
 
@@ -665,18 +741,52 @@ np_header_t np_header(lv_obj_t *parent)
     return header;
 }
 
+static void drawer_select_item(np_header_t *header, lv_obj_t *selected)
+{
+    if (header == NULL) return;
+    lv_obj_t *const items[] = {
+        header->drawer_home_button, header->drawer_weather_button,
+        header->drawer_market_button, header->drawer_iot_button,
+        header->drawer_pomodoro_button, header->drawer_settings_button,
+    };
+    for (size_t i = 0U; i < sizeof(items) / sizeof(items[0]); ++i) {
+        if (items[i] == NULL) continue;
+        const bool active = items[i] == selected;
+        lv_obj_set_style_bg_opa(items[i], LV_OPA_TRANSP, LV_PART_MAIN);
+        np_set_text_color(icon_label(items[i]),
+                          active ? np_c_text() : np_c_text_2());
+    }
+}
+
 void np_header_set_drawer_active(np_header_t *header, bool settings_active)
 {
     if (header == NULL) return;
+    drawer_select_item(header, settings_active ? header->drawer_settings_button
+                                               : header->drawer_home_button);
+}
 
-    np_set_bg_color(header->drawer_home_button,
-                    settings_active ? np_c_surface() : np_c_accent());
-    np_set_bg_color(header->drawer_settings_button,
-                    settings_active ? np_c_accent() : np_c_surface());
-    np_set_text_color(icon_label(header->drawer_home_button),
-                      settings_active ? np_c_text_2() : np_c_text());
-    np_set_text_color(icon_label(header->drawer_settings_button),
-                      settings_active ? np_c_text() : np_c_text_2());
+void np_header_set_drawer_weather_active(np_header_t *header, bool weather_active)
+{
+    if (header == NULL || !weather_active) return;
+    drawer_select_item(header, header->drawer_weather_button);
+}
+
+void np_header_set_drawer_market_active(np_header_t *header, bool market_active)
+{
+    if (header == NULL || !market_active) return;
+    drawer_select_item(header, header->drawer_market_button);
+}
+
+void np_header_set_drawer_iot_active(np_header_t *header, bool iot_active)
+{
+    if (header == NULL || !iot_active) return;
+    drawer_select_item(header, header->drawer_iot_button);
+}
+
+void np_header_set_drawer_pomodoro_active(np_header_t *header, bool active)
+{
+    if (header == NULL || !active) return;
+    drawer_select_item(header, header->drawer_pomodoro_button);
 }
 
 void np_header_set_connections(np_header_t *header, bool wifi_online,
@@ -889,8 +999,10 @@ static void spark_draw_event_cb(lv_event_t *event)
 np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
     np_spark_t spark = {0};
+    if (parent == NULL) return spark;
 
     spark.chart = lv_chart_create(parent);
+    if (spark.chart == NULL) return spark;
     lv_obj_remove_style_all(spark.chart);
     lv_obj_set_pos(spark.chart, x, y);
     lv_obj_set_size(spark.chart, w, h);
@@ -911,6 +1023,11 @@ np_spark_t np_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h
     lv_chart_set_point_count(spark.chart, 2U);
     spark.series = lv_chart_add_series(spark.chart, np_c_positive(),
                                        LV_CHART_AXIS_PRIMARY_Y);
+    if (spark.series == NULL) {
+        lv_obj_delete(spark.chart);
+        spark.chart = NULL;
+        return spark;
+    }
 
 #if LV_USE_CHART && LV_DRAW_SW_COMPLEX && NP_HAVE_LVGL_PRIVATE_DRAW
     /* O gradiente é inserido diretamente no draw task da linha do chart. */
@@ -927,6 +1044,15 @@ void np_spark_set(np_spark_t *spark, const int32_t *samples, uint8_t count,
                   int32_t w, int32_t h, lv_color_t color)
 {
     if (spark == NULL || spark->chart == NULL || spark->series == NULL) return;
+    /* Scene trees are rebuilt lazily. A stale cached handle must become a
+     * harmless no-op instead of reaching an LVGL setter after its parent was
+     * deleted. lv_obj_is_valid compares against the live display tree. */
+    if (!lv_obj_is_valid(spark->chart)) {
+        spark->chart = NULL;
+        spark->series = NULL;
+        spark->last_dot = NULL;
+        return;
+    }
 
     if (samples == NULL || count < 2U || w < 48 || h < 80) {
         np_set_visible(spark->chart, false);

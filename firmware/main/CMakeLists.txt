@@ -15,18 +15,18 @@ idf_component_register(
     SRCS "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
          "update_development.c" "cache_record.c" "offline_data_codec.c" "offline_data_provider.c" "offline_value_format.c" "data_refresh_scheduler.c" "weather_condition.c" "weather_asset_service.c"
          "ui/core/np_styles.c" "ui/core/np_form.c" "ui/core/np_components.c" "ui/core/np_feedback.c" "ui/core/np_modal.c" "ui/core/np_keyboard.c" "ui/core/np_confirm.c"
-         "ui/assets/np_weather_background_assets.c" "ui/assets/np_btc_tilted_icon.c"
-         "ui/screens/np_boot.c" "ui/screens/np_home.c"
+         "ui/assets/np_weather_background_assets.c" "ui/assets/np_weather_static_icons.c" "ui/assets/np_btc_tilted_icon.c"
+         "ui/screens/np_boot.c" "ui/screens/np_home.c" "ui/screens/np_weather.c" "ui/screens/np_market.c" "ui/screens/np_devices.c"
          "ui/screens/np_profile.c" "ui/screens/np_preferences.c"
          "ui/screens/settings/np_settings_display_sound.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
-         "ui/screens/np_navigation_manager.c" "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
+         "ui/screens/np_navigation_manager.c" "ui/screens/np_pomodoro.c" "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "pomodoro_service.c" "camera_stream_service.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "sonoff_lan_service.c" "onvif_discovery_service.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          ${NP2_FONT_SRCS}
     INCLUDE_DIRS "." "ui/core" "ui/screens"
     EMBED_TXTFILES "timezone_catalog.csv"
     REQUIRES esp_app_format esp_event esp_netif esp_psram esp_wifi espressif__esp_hosted
              espressif__esp_wifi_remote joltwallet__littlefs nvs_flash esp_driver_usb_serial_jtag
-             esp_http_client mbedtls app_update bootloader_support esp_driver_tsens
-             esp_driver_sdmmc fatfs sdmmc
+             espressif__mdns esp_http_client mbedtls app_update bootloader_support esp_driver_tsens
+             esp_driver_sdmmc fatfs sdmmc lwip esp_rom espressif__esp_h264
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_PRODUCT_FONTS=1)

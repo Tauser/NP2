@@ -7,6 +7,7 @@
 #include "offline_data_model.h"
 #include "connectivity_diagnostic.h"
 #include "user_profile.h"
+#include "pomodoro_service.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +136,23 @@ typedef struct {
     user_profile_t profile;
 } app_user_profile_projection_t;
 
+#define APP_IOT_MAX_CAMERAS 4U
+
+typedef struct {
+    char address[16];
+    char model[32];
+    bool online;
+} app_iot_camera_projection_t;
+
+typedef struct {
+    bool ready;
+    bool scan_busy;
+    uint32_t scan_generation;
+    uint8_t camera_count;
+    esp_err_t last_result;
+    app_iot_camera_projection_t cameras[APP_IOT_MAX_CAMERAS];
+} app_iot_projection_t;
+
 typedef struct {
     uint32_t revision;
     bool ready;
@@ -146,6 +164,8 @@ typedef struct {
     app_device_control_projection_t device_controls;
     app_system_projection_t system;
     app_user_profile_projection_t user_profile;
+    app_iot_projection_t iot;
+    pomodoro_projection_t pomodoro;
     bool time_trusted;
     uint32_t current_unix_s;
     uint32_t last_time_sync_unix_s;

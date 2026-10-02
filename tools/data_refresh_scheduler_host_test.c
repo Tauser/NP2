@@ -18,6 +18,12 @@ int main(void)
     assert(data_refresh_scheduler_take_due(&scheduler, 1LL, &domain));
     assert(domain == DATA_REFRESH_DOMAIN_USD_BRL);
     data_refresh_scheduler_note_result(&scheduler, domain, 1LL, true);
+    assert(data_refresh_scheduler_take_due(&scheduler, 1LL, &domain));
+    assert(domain == DATA_REFRESH_DOMAIN_FEAR_GREED);
+    data_refresh_scheduler_note_result(&scheduler, domain, 1LL, true);
+    assert(data_refresh_scheduler_take_due(&scheduler, 1LL, &domain));
+    assert(domain == DATA_REFRESH_DOMAIN_MARKET_INDICES);
+    data_refresh_scheduler_note_result(&scheduler, domain, 1LL, true);
     assert(!data_refresh_scheduler_take_due(&scheduler, 2LL, &domain));
 
     assert(data_refresh_scheduler_take_due(&scheduler,

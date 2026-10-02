@@ -109,12 +109,13 @@ void np_wifi_password_sync(np_wifi_password_t *view, uint8_t length, bool visibl
 {
     if (view == NULL || view->field == NULL) return;
     view->visible = visible;
-    char mask[64] = {0};
-    const uint8_t count = length < sizeof(mask) ? length : sizeof(mask) - 1U;
-    memset(mask, '*', count);
+    (void)length;
     view->syncing_mask = true;
-    lv_textarea_set_text(view->field, mask);
-    lv_textarea_set_password_mode(view->field, !visible);
+    /* The field is only a drawing surface. The service renders the masked or
+     * revealed characters in DRAW_MAIN; storing literal asterisks here made
+     * revealed characters overlap them and look different from the input. */
+    lv_textarea_set_text(view->field, "");
+    lv_textarea_set_password_mode(view->field, true);
     view->syncing_mask = false;
     np_set_text(lv_obj_get_child(view->reveal, 0),
                 visible ? NP_ICON_VISIBILITY_OFF : NP_ICON_VISIBILITY);

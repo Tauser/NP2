@@ -6,11 +6,18 @@
 #include "ui/screens/settings/np_wifi_password.h"
 
 static unsigned submits, cancels;
+static char entered_password[64];
+static size_t entered_password_length;
 static bool action(np_wifi_password_action_t kind, char character)
 {
-    (void)character;
     if (kind == NP_WIFI_PASSWORD_SUBMIT) ++submits;
-    if (kind == NP_WIFI_PASSWORD_CANCEL) ++cancels;
+    else if (kind == NP_WIFI_PASSWORD_CANCEL) ++cancels;
+    else if (kind == NP_WIFI_PASSWORD_APPEND && entered_password_length < sizeof(entered_password) - 1U) {
+        entered_password[entered_password_length++] = character;
+        entered_password[entered_password_length] = '\0';
+    } else if (kind == NP_WIFI_PASSWORD_BACKSPACE && entered_password_length > 0U) {
+        entered_password[--entered_password_length] = '\0';
+    }
     return true;
 }
 static uint32_t objects(lv_obj_t *root)
@@ -20,6 +27,18 @@ static uint32_t objects(lv_obj_t *root)
     return count;
 }
 static void click(lv_obj_t *obj) { lv_obj_send_event(obj, LV_EVENT_CLICKED, NULL); }
+static void press_keyboard_key(np_keyboard_t *keyboard, const char *label)
+{
+    uint32_t index = 0U;
+    for (; index < 128U; ++index) {
+        const char *const candidate = lv_keyboard_get_button_text(keyboard->keyboard, index);
+        if (candidate == NULL) break;
+        if (strcmp(candidate, label) == 0) break;
+    }
+    assert(index < 128U);
+    lv_buttonmatrix_set_selected_button(keyboard->keyboard, index);
+    lv_obj_send_event(keyboard->keyboard, LV_EVENT_VALUE_CHANGED, &index);
+}
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 {
     (void)area; (void)pixels;
@@ -163,15 +182,32 @@ int main(int argc, char **argv)
         assert(lv_textarea_get_password_mode(password.field));
         assert(np_keyboard_is_visible(&keyboard));
         assert(keyboard.target == NULL && keyboard.private_input_active);
+        if (cycle == 0U) {
+            entered_password_length = 0U;
+            entered_password[0] = '\0';
+            press_keyboard_key(&keyboard, "1#");
+            assert(entered_password_length == 0U);
+            assert(lv_keyboard_get_mode(keyboard.keyboard) == LV_KEYBOARD_MODE_SPECIAL);
+            press_keyboard_key(&keyboard, "7");
+            press_keyboard_key(&keyboard, "abc");
+            assert(strcmp(entered_password, "7") == 0);
+            press_keyboard_key(&keyboard, "ABC");
+            press_keyboard_key(&keyboard, "Q");
+            press_keyboard_key(&keyboard, "abc");
+            press_keyboard_key(&keyboard, "a");
+            assert(strcmp(entered_password, "7Qa") == 0);
+        }
         np_wifi_password_sync(&password, 63, false);
-        assert(strlen(lv_textarea_get_text(password.field)) == 63);
-        for (const char *p = lv_textarea_get_text(password.field); *p; ++p) assert(*p == '*');
+        assert(lv_textarea_get_text(password.field)[0] == '\0');
+        assert(lv_textarea_get_password_mode(password.field));
+        assert(!password.visible);
         lv_textarea_set_cursor_pos(password.field, 0);
         lv_textarea_add_text(password.field, "unexpected");
-        assert(strlen(lv_textarea_get_text(password.field)) == 63);
+        assert(lv_textarea_get_text(password.field)[0] == '\0');
         np_wifi_password_sync(&password, 8, true);
-        assert(!lv_textarea_get_password_mode(password.field));
-        assert(strcmp(lv_textarea_get_text(password.field), "********") == 0);
+        assert(lv_textarea_get_password_mode(password.field));
+        assert(lv_textarea_get_text(password.field)[0] == '\0');
+        assert(password.visible);
         click(password.connect);
         assert(!np_keyboard_is_visible(&keyboard));
         assert(keyboard.target == NULL && !keyboard.private_input_active);

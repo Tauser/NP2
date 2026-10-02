@@ -1244,3 +1244,341 @@ criada fora da passagem medida pelo gerenciador. O `content_host` compartilhado
 de uma tela de configurações. As raízes das demais telas permanecem lazy e
 podem ser evacuadas pela política de heap; todas as rotas exigem novo ensaio
 em placa, inclusive a investigação do WDT prolongado.
+
+## ADR-051 — Cadência original dos ícones animados de clima
+
+**Decisão:** Home e Clima reproduzem os quadros no intervalo `frame_ms` informado
+pelo pacote NPWI. Os assets atuais são amostrados a 8 quadros/s (125 ms por
+quadro), e a duração total de cada ciclo é calculada a partir desse intervalo.
+
+**Motivo e trade-off:** a Home havia duplicado o intervalo para 250 ms por quadro
+para reduzir carga do renderer por software e risco de starvation do IDLE0.
+Isso reduzia a animação a 4 quadros/s e dobrava a duração visual dos ciclos;
+Clima repetia o mesmo limite sem justificativa própria. Restaurar 125 ms não
+altera o tamanho dos pacotes nem a memória reservada, mas dobra a frequência de
+redesenho do ícone. O boot, a responsividade, o watchdog e a apresentação nas
+duas telas devem ser verificados fisicamente após a mudança.
+
+## ADR-052 — Dados da tela Mercado
+
+**Decisão:** a tela Mercado reutiliza a cotação de Bitcoin do executor HTTPS e
+expande uma única resposta autenticada da CoinGecko para Ethereum, Solana, BNB
+e XRP. Fear & Greed vem da API pública da Alternative.me, atualizada a cada 24
+horas, com retry após uma hora em caso de falha, e identificada junto ao dado.
+O snapshot offline v6 guarda esses cinco
+valores e continua lendo payloads v1 a v5. A navegação Mercado compartilha o
+shell e o drawer existentes; a UI só projeta o snapshot.
+
+**Limites da fonte:** S&P 500, Nasdaq e Ibovespa continuam visíveis sem cotação
+até haver uma fonte autorizada configurada. FRED exige chave por aplicação e
+alerta que séries podem ter copyright de terceiros; B3 distribui dados e
+índices por seus serviços licenciados. Não raspar páginas nem embutir chave ou
+cotação de exemplo. A tela preserva os três espaços até haver credencial e
+direito de exibição compatíveis.
+
+**Motivo e trade-off:** reunir os ativos digitais numa resposta reduz handshakes
+e mantém a regra de conexão única. O campo de preço em micros de dólar conserva
+precisão de XRP. O payload cresce de 275 para 341 bytes, ainda abaixo do limite
+versionado do cache. A resposta de sentimento é uma chamada adicional
+serializada e mostra a atribuição exigida pela Alternative.me.
+
+## ADR-053 — Cotações de índices via brapi
+
+**Decisão:** consultar `^BVSP`, `^GSPC` e `^IXIC` em uma chamada serializada
+`GET /api/quote/%5EBVSP,%5EGSPC,%5EIXIC` à brapi. O adaptador só publica cotações
+que retornem com o símbolo esperado, preço e horário local confiável; símbolo
+ausente permanece indisponível e não recebe valor de exemplo. A credencial fica
+na configuração local ignorada pelo Git e é enviada no cabeçalho
+`Authorization: Bearer`; não deve ser colocada na URL ou em logs. O snapshot v7
+acrescenta S&P 500 e Nasdaq e continua migrando cache v1–v6.
+
+**Limites:** a documentação pública consultada confirma a rota para `^BVSP`,
+mas não confirma cobertura de `^GSPC` e `^IXIC`. Esses símbolos só passam a ser
+exibidos se a resposta autenticada os trouxer com campos válidos. A brapi informa
+que não é distribuidora licenciada da B3. Esta decisão cobre a exibição no
+produto conforme os termos da brapi, não cria licença de distribuição B3 nem
+autoriza redistribuir dados brutos. Validar contrato, atraso e direitos de uso
+antes de distribuição comercial.
+
+**Motivo e trade-off:** um lote reduz conexões e mantém o executor HTTPS único.
+O payload offline passa de 341 para 363 bytes. A credencial local é embutida na
+imagem de desenvolvimento e deve migrar para o cofre de segredos de produção.
+Referências: [rota Ibovespa](https://brapi.dev/faq/buscar-ibov),
+[exemplos de autenticação](https://brapi.dev/docs/examples/typescript),
+[índices disponíveis](https://brapi.dev/faq/outros-indices) e
+[informações sobre licença B3](https://brapi.dev/faq/a-brapi-e-distribuidora-licenciada-da-b3).
+
+## ADR-054 — Consultas individuais de índices na brapi
+
+**Decisão:** a API aceita um ativo por chamada. Esta decisão substitui apenas a
+estratégia de lote do ADR-053: o executor consulta `^BVSP`, `^GSPC` e `^IXIC`
+em três requisições HTTPS sequenciais, mantendo no máximo uma conexão em voo.
+Cada resultado atualiza somente seu próprio campo; falha parcial preserva as
+demais cotações e marca como desatualizado apenas o ativo que falhou.
+
+**Trade-off:** passam a ocorrer até três handshakes por ciclo de índices. A
+cadência permanece em cinco minutos e as chamadas compartilham o limite de
+tempo do executor; se o orçamento acabar, os valores ainda não consultados
+permanecem indisponíveis ou desatualizados até o próximo ciclo.
+
+## ADR-055 — Atualização horária dos índices no plano gratuito
+
+**Decisão:** o ciclo normal de `^BVSP`, `^GSPC` e `^IXIC` passa a ocorrer a cada
+60 minutos. A retentativa depois de falha permanece em dois minutos; as três
+requisições continuam sequenciais e passam pelo executor único.
+
+**Motivo e trade-off:** a documentação atual da brapi informa atualização de
+cerca de 30 minutos no plano Gratuito, uma cotação por chamada e limite de
+15.000 chamadas mensais. Um ciclo horário consome até 2.160 chamadas mensais
+em operação contínua, contra 25.920 na cadência anterior de cinco minutos.
+Assim, o polling normal fica menos frequente que a recência de origem, mas os
+dados podem ficar mais antigos entre ciclos. A retentativa curta só é usada
+após falha e permite recuperação mais rápida; se falhas persistentes ocorrerem,
+elas ainda podem consumir chamadas da cota. Referências: [limites da brapi](https://brapi.dev/faq/quais-as-limitacoes)
+e [delay por plano](https://brapi.dev/faq/qual-a-diferenca-real-no-atraso-delay-dos-dados-entre-os-planos).
+
+## ADR-056 — Primeira tela IoT e caminho de integração SONOFF
+
+**Decisão:** a primeira tela IoT mostra somente Dispositivos e Sensores; Cenas
+ficam fora deste incremento. O usuário confirmou que tem SONOFF TX1C, TX2C e
+TX3C e usa somente o app eWeLink. A tela não cria dispositivos ou leituras de
+demonstração e mantém os estados vazios até uma fonte real estar conectada. O
+primeiro caminho técnico é o protocolo LAN Zeroconf implementado pela
+comunidade SonoffLAN (`_ewelink._tcp`, porta 8081 e endpoints `/zeroconf/*`).
+TX1C, TX2C e TX3C constam na matriz SonoffLAN como modelos locais, com 1, 2 e
+3 canais (UIID 6, 7 e 8, firmware 3.8.0 na matriz consultada). Isso sustenta
+um candidato de compatibilidade, não valida os aparelhos/firmwares físicos do
+usuário; descoberta, estado e acionamento de todos os canais ainda exigem
+teste na bancada. Não é necessário escolher Matter para estes modelos.
+
+**Motivo e trade-off:** a documentação SonoffLAN descreve suporte a firmware
+original via rede local e informa que a lista de dispositivos e chaves de
+cifragem vem dos servidores eWeLink, ficando depois armazenada localmente.
+Com o firmware original, `devicekey` é necessária para decifrar atualizações e
+cifrar comandos; mDNS por si só só descobre metadados de LAN e não substitui
+essa credencial. A obtenção da chave precisa ser desenhada sem expor senha ou
+chave em UI, eventos, logs ou URLs. Qualquer persistência passa pelo
+FlashCoordinator e exige decidir a forma de provisionamento e proteção em
+repouso antes de integrar conta eWeLink. A recomendação do mantenedor é tratar
+LAN como caminho sujeito a indisponibilidade e validar reconexão/timeout. A API
+DIY oficial é outro protocolo e não é requisito para esses três modelos.
+Referências: [implementação SonoffLAN](https://github.com/AlexxIT/SonoffLAN),
+[matriz de modelos SonoffLAN](https://github.com/AlexxIT/SonoffLAN/blob/master/DEVICES.md)
+e [ferramentas do modo DIY oficial](https://github.com/itead/Sonoff_Devices_DIY_Tools).
+
+## ADR-057 — Autorização eWeLink por OAuth 2.0
+
+**Decisão:** seguir o fluxo OAuth 2.0 oficial do eWeLink para vincular a conta e
+buscar a lista de dispositivos e suas `devicekey`. O NovaPanel não coleta nem
+envia a senha da conta eWeLink. A autorização ocorre na página do eWeLink e
+retorna ao fluxo local do painel; depois, o controle dos TX1C/TX2C/TX3C segue
+por Zeroconf na LAN. Credenciais de aplicação e tokens ficam fora do código,
+logs, AppState e view-models; persistência passa pelo FlashCoordinator.
+
+**Motivo e trade-off:** o portal oficial exige cadastro e aprovação de uma
+aplicação de desenvolvedor, com URL de retorno registrada. Para desenvolvedor
+pessoal, a documentação atualmente indica autorização OAuth 2.0, acesso
+gratuito limitado e disponibilidade restrita de interfaces/dispositivos. A
+documentação OAuth lista `devicekey` no registro de dispositivo e define o
+intercâmbio do código de autorização por tokens. Isso evita colocar a senha da
+conta na aplicação embarcada, mas depende da aprovação da aplicação e de
+confirmar a URL de retorno aceita pelo portal antes de implementar o callback.
+Tokens e chaves locais continuam sensíveis: o protótipo ainda não tem NVS
+Encryption/Flash Encryption ativados; teste de bancada não equivale a proteção
+contra extração física. Referências: [OAuth 2.0 oficial](https://github.com/CoolKit-Technologies/eWeLink-API/blob/main/en/OAuth2.0.md),
+[limites de desenvolvedor pessoal](https://github.com/CoolKit-Technologies/eWeLink-API/blob/main/en/Pricing.md)
+e [API oficial de dispositivos](https://github.com/CoolKit-Technologies/eWeLink-API/blob/main/en/APICenterV2.md).
+
+## ADR-058 — Descoberta local assíncrona dos SONOFF
+
+**Decisão:** usar o componente `espressif/mdns` em versão fixada para pesquisar
+`_ewelink._tcp` na rede local. A pesquisa e resolução de serviços rodam fora da
+task LVGL; a interface recebe apenas um snapshot limitado de metadados públicos
+(tipo anunciado, ID e endereço local), sem chaves ou tokens. A descoberta não
+aciona interruptores nem confere compatibilidade além do modelo anunciado.
+
+**Motivo e trade-off:** TX1C/TX2C/TX3C anunciam serviço local conforme a
+implementação SonoffLAN. mDNS é o mecanismo apropriado para descobrir endereço
+e porta sem pedir IP manual. A consulta tem duração e quantidade máximas para
+não bloquear a UI nem permitir crescimento sem limite. O canal local só será
+habilitado após a autorização OAuth obter a chave do dispositivo e a validação
+do payload por modelo. Referências: [mDNS ESP-IDF 5.5](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/protocols/mdns.html)
+e [protocolo LAN SonoffLAN](https://github.com/AlexxIT/SonoffLAN/blob/master/custom_components/sonoff/core/ewelink/local.py).
+
+## ADR-059 — Pomodoro local integrado ao AppState
+
+**Decisão:** a tela Pomodoro usa o serviço de domínio chamado pelo `app_loop`;
+comandos de iniciar/pausar, zerar e escolher duração passam pelo EventBus e o
+AppState projeta o tempo restante e os totais para a task LVGL. A contagem usa
+relógio monotônico; os totais diários reiniciam à meia-noite local quando a hora
+é confiável. A duração personalizada fica entre 1 e 99 minutos. Contadores são
+voláteis e reiniciam com o painel; persistência e pausas de descanso ficam fora
+deste incremento.
+
+**Motivo e trade-off:** mantém a UI sem temporizador de domínio e respeita o
+escritor único de estado. O timer continua atualizando sem rede. A contagem não
+sobrevive ao reboot e o fluxo implementado fecha ciclos de foco sem alternar
+automaticamente para descanso; isso reduz o escopo da primeira tela e deixa a
+política de histórico/descanso para uma decisão posterior.
+
+## ADR-060 — aviso sonoro ao concluir Pomodoro
+
+**Decisão:** quando o serviço transita para concluído, `app_loop` solicita uma
+sequência de três notas em `device_control_service`. Um latch impede repetir o
+pedido enquanto o estado concluído continuar publicado. O serviço de controles
+reproduz o áudio em sua própria task e respeita o volume atual.
+
+**Motivo e trade-off:** reaproveita o codec e a task de áudio existentes, sem
+bloquear `app_loop` nem a task LVGL. Se o áudio não estiver pronto ou o volume
+estiver em zero, a solicitação não toca som; o encerramento visual do ciclo
+continua normal.
+
+## ADR-061 — Primeiro dispositivo IoT: descoberta da câmera Tapo C200
+
+**Decisão:** iniciar a integração da Tapo C200 pela descoberta ONVIF local e
+pela apresentação da câmera e do estado online/offline na lista de
+Dispositivos. A busca WS-Discovery é assíncrona, limitada a quatro câmeras e
+publica somente modelo anunciado e endereço IPv4 no `AppState`; a tela não faz
+I/O de rede. Após a primeira busca manual, a presença é atualizada a cada
+60 segundos. Os endereços descobertos e o estado são voláteis nesta etapa. O
+vídeo RTSP e a persistência de cadastro ficam para incrementos posteriores.
+Nenhum usuário ou senha da câmera é coletado nesta etapa.
+
+**Motivo e trade-off:** a TP-Link documenta a C200 com ONVIF Profile S,
+serviço ONVIF na porta 2020 e RTSP na porta 554. A transmissão oferece
+`/stream1` em alta qualidade e `/stream2` em qualidade padrão. O app Tapo exige
+uma conta local da câmera separada da conta Tapo para integrar terceiros; ela
+não é necessária para descobrir um serviço ONVIF anunciado. Adiar a captura da
+credencial mantém segredo fora do `AppState`, eventos, logs e armazenamento até
+definir o caminho protegido. O painel só anuncia online após receber uma
+resposta WS-Discovery; uma câmera vista anteriormente permanece na lista como
+offline quando deixa de responder. Essa primeira etapa não valida autenticação,
+RTSP, PTZ ou exibição de vídeo. RTSP/ONVIF devem ficar na LAN confiável; não
+expor as portas da câmera à Internet.
+
+O escopo de vídeo foi atualizado pelo ADR-062; a descoberta e a lista continuam
+sendo a primeira etapa visível da integração.
+
+Referências: [guia oficial TP-Link RTSP/ONVIF](https://www.tp-link.com/br/support/faq/2680/),
+[FAQ oficial Tapo ONVIF/RTSP](https://www.tp-link.com/br/support/faq/4465/),
+[especificação de discovery ONVIF](https://www.onvif.org/wp-content/uploads/2022/07/ONVIF_Profile_A_Client_Test_Specification_22.06.pdf),
+[ESP-IDF 5.5 sockets BSD](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-guides/lwip.html).
+
+## ADR-062 — RTSP ao vivo da Tapo C200 no painel
+
+**Decisão:** iniciar a visualização ao vivo usando a URL de baixa resolução
+`rtsp://<ip>:554/stream2` (640×360), com cliente RTSP/RTP interno e decoder
+H.264 Espressif fixado no manifesto e no lock. O cliente suporta autenticação
+por cabeçalho, mantém o endpoint sem segredos e limita o tamanho de pacotes e
+quadros. A recepção/decodificação fica em worker próprio;
+somente a task LVGL apresenta os quadros por um buffer limitado. Usuário e senha
+da Conta da Câmera são recebidos pela UI local e enviados por mailbox privada,
+sem passar por AppState, EventBus, logs, URL registrada ou dump. Nesta primeira
+etapa permanecem somente em RAM e precisam ser digitados novamente após reboot;
+retenção depende de um cofre apropriado para credenciais da câmera.
+
+**Motivo e trade-off:** a TP-Link documenta stream2 como fluxo RTSP padrão e
+exige a Conta da Câmera para clientes de terceiros. A documentação atual da
+Espressif lista H.264 acelerado no P4 como codificação; o decoder H.264 do
+componente `esp_h264` é por software e entrega I420, que precisa ser convertido
+para RGB565 antes de ser exibido. A resolução menor limita memória, CPU e
+tráfego em relação ao stream1 1080p, mas a taxa real de quadros precisa ser
+medida na placa junto do LVGL e da conectividade C6. A tela publica quadros
+através de um objeto de imagem LVGL e dos buffers de renderização existentes;
+não escreve diretamente no DSI nem substitui os framebuffers do display. Vídeo
+usa PSRAM em buffers previamente dimensionados. A latência depende da câmera,
+da rede, da decodificação e do ciclo de renderização; não é garantida em 50 ms.
+RTSP/ONVIF permanecem restritos à LAN confiável; não abrir portas da câmera à
+Internet. O componente `espp/rtsp` foi rejeitado na implementação porque não
+oferece autenticação RTSP e registra as requisições completas, incompatível
+com a política de segredos. Referências: [guia oficial TP-Link](https://www.tp-link.com/br/support/faq/2680/),
+[decoder `esp_h264`](https://components.espressif.com/components/espressif/esp_h264/versions/1.4.1/readme).
+
+## ADR-063 — Autenticação das consultas SOAP ONVIF da Tapo
+
+**Decisão:** autenticar a leitura `GetVideoEncoderConfigurationOptions` com
+WS-Security `UsernameToken` usando `PasswordDigest`, nonce aleatório e
+timestamp UTC; conservar HTTP Digest para RTSP. O usuário e senha vêm somente
+da mailbox volátil da sessão e não são registrados nem persistidos. A consulta
+permanece estritamente somente de leitura.
+
+**Motivo e trade-off:** a C200 respondeu `GetCapabilities` sem autenticação e
+devolveu HTTP 400 / fault de autorização para a consulta de opções quando o
+cliente não enviou autenticação SOAP. A especificação ONVIF prevê o perfil
+UsernameToken para serviços que não usam HTTP Digest; o `PasswordDigest`
+evita transmitir a senha em texto claro pela LAN. O timestamp exige relógio UTC
+confiável, e o suporte específico da versão de firmware da câmera ainda precisa
+ser validado em bancada. Nenhum método `Set*` é usado. Referências:
+[ONVIF Core Security](https://www.onvif.org/specs/core/ONVIF-Core-Specification-v241.pdf)
+e [ONVIF Application Programmer's Guide](https://www.onvif.org/wp-content/uploads/2016/12/ONVIF_WG-APG-Application_Programmers_Guide-1.pdf).
+
+## ADR-064 — Varredura Wi-Fi assíncrona via ESP-Hosted
+
+**Decisão:** iniciar scans com `esp_wifi_scan_start(..., false)` e aguardar o
+evento encaminhado `WIFI_EVENT_SCAN_DONE` no worker de conectividade, com
+timeout local de 15 s. Recusar o scan antes de chamar o driver quando o
+transporte Hosted ou Wi-Fi não estiver marcado como pronto. O scan não dispara
+recovery por sua duração normal; o fallback para RPCs sem resposta está
+definido no ADR-065.
+
+**Motivo e trade-off:** ESP-Hosted usa RPC síncrona com timeout padrão de 5 s,
+enquanto um scan bloqueante mantém a chamada aberta até o rádio concluir todos
+os canais. Desacoplar o início da conclusão evita que a duração normal do scan
+seja confundida com ausência de resposta RPC. A espera local limita o worker e
+preserva a serialização dos pedidos; o usuário ainda vê uma falha se o C6 ou o
+transporte não encaminhar `SCAN_DONE`. Um erro RPC real segue a política
+limitada de recuperação do ADR-065 e o gate de Hosted/C6 do ADR-013.
+
+## ADR-065 — Recovery limitado após ausência de resposta RPC do Wi-Fi
+
+**Decisão:** a primeira chamada à API `esp_wifi` que retorne `ESP_FAIL`,
+enquanto Hosted e Wi-Fi constam como prontos, agenda recovery no
+worker de conectividade. O evento Hosted `TRANSPORT_FAILURE/DOWN` também
+agenda o mesmo caminho. Nenhuma chamada de teardown/reinit ocorre dentro do
+callback de evento, da UI ou da task LVGL. O worker usa `recover_hosted_link()`
+e respeita o limite já definido no ADR-013: no máximo três ciclos em dez
+minutos, seguidos de cooldown de cinco minutos. Recovery não reinicia o P4 e
+usa exclusivamente o ciclo de reset do C6 pertencente ao ESP-Hosted.
+
+**Motivo e trade-off:** após a perda de rede, chamadas de scan, disconnect e
+connect registraram `eh_host_feat_rpc: request: no response` por 5 s e
+retornaram `ESP_FAIL`, embora o estado local ainda marcasse o transporte como
+ativo. Sem um evento Hosted de queda, o worker repetia associações sem tentar
+restabelecer o plano de controle. A primeira falha RPC já consumiu o timeout de
+5 s; iniciar recovery nesse ponto evita desperdiçar outro timeout repetindo
+uma chamada em um canal de controle sem resposta. Desconexões reportadas pelo
+evento normal `WIFI_EVENT_STA_DISCONNECTED` continuam usando somente retry de
+associação; só `ESP_FAIL` em RPC ou evento de falha Hosted inicia recovery. O
+limite e cooldown existentes contêm ciclos repetidos; o resultado ainda
+precisa ser observado em bancada após flash, e não prova estabilidade da rede
+ou do SDIO.
+
+## ADR-066 — Cadência diária para Fear & Greed
+
+**Decisão:** consultar a API Fear & Greed da Alternative.me a cada 24 horas
+após sucesso e tentar novamente após uma hora em caso de falha. A tela Mercado
+continua exibindo o valor mais recente disponível sem solicitar uma atualização
+ao abrir a tela.
+
+**Motivo e trade-off:** a própria fonte informa que calcula e publica esse
+índice diariamente e fornece `time_until_update` para a última leitura. Uma
+consulta a cada 15 minutos repetia até 96 pedidos por dia para um valor que não
+muda com essa frequência. A cadência diária reduz tráfego HTTPS e mantém o
+dado compatível com a frequência da fonte; uma falha pode deixar o valor
+desatualizado por mais tempo, mitigada pelo retry horário. Referência: [API e
+frequência oficial da Alternative.me](https://alternative.me/crypto/fear-and-greed-index/).
+
+## ADR-067 — Cadência diária para índices de mercado
+
+**Decisão:** consultar `^BVSP`, `^GSPC` e `^IXIC` a cada 24 horas após
+sucesso; em falha, tentar novamente após uma hora. As três consultas brapi
+continuam sequenciais no executor HTTPS único, com atualização parcial por
+ativo.
+
+**Motivo e trade-off:** a cadência horária anterior gerava até 72 requisições
+brapi por dia para três índices cuja origem tem atraso de cerca de 30 minutos.
+O ciclo diário reduz o consumo de dados e chamadas; os valores podem ficar
+menos recentes e uma falha mantém os dados antigos por mais tempo, mitigada
+pelo retry horário. Essa frequência é uma política de consumo do painel, não
+uma alegação de que as fontes publiquem valores somente uma vez ao dia.
+Complementa a redução de Fear & Greed registrada no ADR-066.

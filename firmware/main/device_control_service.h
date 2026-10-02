@@ -43,6 +43,8 @@ esp_err_t device_control_set_volume(uint8_t percent);
 esp_err_t device_control_set_night_mode(bool enabled);
 /* Queues one short PCM chime on the device-control task at the saved volume. */
 esp_err_t device_control_play_notification_tone(void);
+/* Queues a three-note completion chime on the device-control task. */
+esp_err_t device_control_play_pomodoro_alarm(void);
 
 void device_control_get_status(device_control_status_t *out_status);
 

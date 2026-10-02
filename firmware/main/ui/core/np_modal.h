@@ -20,6 +20,7 @@ typedef struct {
     lv_obj_t *subtitle;
     lv_obj_t *close_button;
     lv_obj_t *content;
+    void *close_button_user_data;
     np_modal_close_cb_t before_hide;
     void *before_hide_user_data;
 } np_modal_t;
@@ -33,6 +34,8 @@ void np_modal_create(np_modal_t *modal, lv_obj_t *parent,
 void np_modal_set_close_callback(np_modal_t *modal,
                                  np_modal_close_cb_t callback,
                                  void *user_data);
+/* Rebind after a containing view with an embedded modal is returned by value. */
+void np_modal_rebind(np_modal_t *modal);
 void np_modal_show(np_modal_t *modal);
 void np_modal_hide(np_modal_t *modal);
 bool np_modal_is_visible(const np_modal_t *modal);

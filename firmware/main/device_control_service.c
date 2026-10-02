@@ -24,6 +24,8 @@
 #define DEVICE_CONTROL_POLL_MS            100U
 #define DEVICE_CONTROL_SAVE_DELAY_MS      500U
 #define DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES 768U
+#define DEVICE_CONTROL_POMODORO_NOTE_SAMPLES 2048U
+#define DEVICE_CONTROL_POMODORO_GAP_SAMPLES 1024U
 #define DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS 350U
 
 static const char *const TAG = "device_controls";
@@ -36,6 +38,7 @@ static bool s_started;
 static bool s_brightness_pending;
 static bool s_volume_pending;
 static bool s_notification_tone_pending;
+static bool s_pomodoro_alarm_pending;
 static uint8_t s_requested_brightness;
 static uint8_t s_requested_volume;
 static uint8_t s_dirty_mask;
@@ -211,13 +214,14 @@ static void apply_night_schedule(void)
     portEXIT_CRITICAL(&s_lock);
 }
 
-static void fill_notification_tone(int16_t *samples, uint8_t phase_step)
+static void fill_tone_samples(int16_t *samples, uint32_t sample_count,
+                              uint8_t phase_step)
 {
     uint8_t phase = 0U;
-    for (uint32_t i = 0U; i < DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES; ++i) {
+    for (uint32_t i = 0U; i < sample_count; ++i) {
         const int32_t triangle =
             ((phase < 50U ? (int32_t)phase : 100 - (int32_t)phase) * 2) - 50;
-        const uint32_t remaining = DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES - 1U - i;
+        const uint32_t remaining = sample_count - 1U - i;
         const int32_t envelope = i < 40U ? (int32_t)i :
                                  remaining < 40U ? (int32_t)remaining : 40;
         samples[i] = (int16_t)((triangle * 360 * envelope) / 40);
@@ -237,12 +241,46 @@ static void play_pending_notification_tone(void)
     int16_t samples[DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES];
     const uint8_t phase_steps[] = {3U, 4U};
     for (uint32_t i = 0U; i < sizeof(phase_steps) / sizeof(phase_steps[0]); ++i) {
-        fill_notification_tone(samples, phase_steps[i]);
+        fill_tone_samples(samples, DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES,
+                          phase_steps[i]);
         const esp_err_t result = codec_result(esp_codec_dev_write(
             s_speaker, (void *)samples, sizeof(samples)));
         if (result != ESP_OK) {
             ESP_LOGW(TAG, "Notification tone unavailable: %s", esp_err_to_name(result));
             return;
+        }
+    }
+}
+
+static void play_pending_pomodoro_alarm(void)
+{
+    bool pending = false;
+    portENTER_CRITICAL(&s_lock);
+    pending = s_pomodoro_alarm_pending;
+    s_pomodoro_alarm_pending = false;
+    portEXIT_CRITICAL(&s_lock);
+    if (!pending || s_speaker == NULL) return;
+
+    int16_t samples[DEVICE_CONTROL_POMODORO_NOTE_SAMPLES];
+    int16_t silence[DEVICE_CONTROL_POMODORO_GAP_SAMPLES] = {0};
+    const uint8_t phase_steps[] = {3U, 4U, 5U};
+    for (uint32_t i = 0U; i < sizeof(phase_steps) / sizeof(phase_steps[0]); ++i) {
+        fill_tone_samples(samples, DEVICE_CONTROL_POMODORO_NOTE_SAMPLES,
+                          phase_steps[i]);
+        esp_err_t result = codec_result(esp_codec_dev_write(
+            s_speaker, (void *)samples, sizeof(samples)));
+        if (result != ESP_OK) {
+            ESP_LOGW(TAG, "Pomodoro alarm unavailable: %s", esp_err_to_name(result));
+            return;
+        }
+        if (i + 1U < sizeof(phase_steps) / sizeof(phase_steps[0])) {
+            result = codec_result(esp_codec_dev_write(
+                s_speaker, (void *)silence, sizeof(silence)));
+            if (result != ESP_OK) {
+                ESP_LOGW(TAG, "Pomodoro alarm gap unavailable: %s",
+                         esp_err_to_name(result));
+                return;
+            }
         }
     }
 }
@@ -362,6 +400,7 @@ static void device_control_task(void *arg)
             apply_pending_controls();
             apply_night_schedule();
             play_pending_notification_tone();
+            play_pending_pomodoro_alarm();
             finish_save_if_complete();
             submit_dirty_profile();
         }
@@ -476,6 +515,24 @@ esp_err_t device_control_play_notification_tone(void)
     }
     s_notification_tone_pending = true;
     s_last_notification_tone_tick = now;
+    const TaskHandle_t task = s_task;
+    portEXIT_CRITICAL(&s_lock);
+
+    xTaskNotifyGive(task);
+    return ESP_OK;
+}
+
+esp_err_t device_control_play_pomodoro_alarm(void)
+{
+    portENTER_CRITICAL(&s_lock);
+    const uint8_t effective_volume =
+        s_volume_pending ? s_requested_volume : s_status.volume_percent;
+    if (!s_started || !s_status.ready || !s_status.audio_ready ||
+        s_task == NULL || effective_volume == 0U) {
+        portEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_pomodoro_alarm_pending = true;
     const TaskHandle_t task = s_task;
     portEXIT_CRITICAL(&s_lock);
 

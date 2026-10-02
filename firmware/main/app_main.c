@@ -5,13 +5,16 @@
 
 #include "app_state.h"
 #include "board_bringup.h"
+#include "camera_stream_service.h"
 #include "connectivity_diagnostic.h"
 #include "device_control_service.h"
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
 #include "notification_service.h"
+#include "onvif_discovery_service.h"
 #include "onboarding_service.h"
 #include "provisioning_service.h"
+#include "sonoff_lan_service.h"
 #include "time_service.h"
 #include "update_boot_supervisor.h"
 #include "weather_asset_service.h"
@@ -68,6 +71,24 @@ void app_main(void)
     if (connectivity_err != ESP_OK) {
         ESP_LOGE(TAG, "Phase 3 connectivity probe unavailable: %s",
                  esp_err_to_name(connectivity_err));
+    }
+
+    const esp_err_t sonoff_lan_err = sonoff_lan_service_start();
+    if (sonoff_lan_err != ESP_OK) {
+        ESP_LOGE(TAG, "Sonoff LAN discovery unavailable: %s",
+                 esp_err_to_name(sonoff_lan_err));
+    }
+
+    const esp_err_t onvif_discovery_err = onvif_discovery_service_start();
+    if (onvif_discovery_err != ESP_OK) {
+        ESP_LOGE(TAG, "ONVIF camera discovery unavailable: %s",
+                 esp_err_to_name(onvif_discovery_err));
+    }
+
+    const esp_err_t camera_stream_err = camera_stream_service_start();
+    if (camera_stream_err != ESP_OK) {
+        ESP_LOGE(TAG, "Camera stream service unavailable: %s",
+                 esp_err_to_name(camera_stream_err));
     }
 
     const esp_err_t onboarding_err = onboarding_service_start();

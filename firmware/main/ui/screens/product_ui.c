@@ -6,12 +6,19 @@
 #include <time.h>
 
 #include "app_state.h"
+#include "app_event_bus.h"
+#include "camera_stream_service.h"
 #include "device_control_service.h"
+#include "network_validation_service.h"
+#include "sonoff_lan_service.h"
 #include "flash_coordinator.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "offline_value_format.h"
 #include "np_screens.h"
+#include "np_weather.h"
+#include "np_market.h"
+#include "np_pomodoro.h"
 #include "np_profile.h"
 #include "np_preferences.h"
 #include "np_navigation_manager.h"
@@ -39,6 +46,10 @@ typedef struct {
     enum {
         PRODUCT_SCREEN_BOOT = 0,
         PRODUCT_SCREEN_HOME,
+        PRODUCT_SCREEN_WEATHER,
+        PRODUCT_SCREEN_MARKET,
+        PRODUCT_SCREEN_IOT,
+        PRODUCT_SCREEN_POMODORO,
         PRODUCT_SCREEN_PROFILE,
         PRODUCT_SCREEN_PREFERENCES,
         PRODUCT_SCREEN_DISPLAY_SOUND,
@@ -55,6 +66,10 @@ typedef struct {
     np_navigation_manager_t navigation;
     np_boot_view_t boot;
     np_home_view_t home;
+    np_weather_view_t weather;
+    np_market_view_t market;
+    np_pomodoro_view_t pomodoro;
+    np_devices_view_t devices;
     np_profile_view_t profile;
     np_preferences_view_t preferences;
     np_settings_display_sound_view_t display_sound;
@@ -90,13 +105,14 @@ typedef struct {
     bool boot_saved_network_seen;
     bool home_transition_pending;
     bool navigation_pending;
+    bool wifi_scan_pending;
+    uint32_t wifi_scan_idle_since_tick;
     bool profile_editor_pending;
     bool notification_feedback_initialized;
     bool syncing_notification_controls;
     bool syncing_night_control;
     bool home_data_rendered;
     bool display_sound_callbacks_initialized;
-    bool notification_callbacks_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
     uint32_t system_scene_object_count;
@@ -116,6 +132,7 @@ static void wifi_add_open_async(void *user_data);
 static void wifi_password_open_async(void *user_data);
 static void wifi_forget_open_async(void *user_data);
 static void wifi_scan_event_cb(lv_event_t *event);
+static void wifi_entry_scan_retry_tick(void);
 static void wifi_forget_event_cb(lv_event_t *event);
 static void discard_wifi_password(void);
 static void discard_wifi_confirmation(void);
@@ -123,6 +140,7 @@ static void discard_system_confirmation(void);
 static void system_restart_event_cb(lv_event_t *event);
 static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 static void scene_navigation_event_cb(lv_event_t *event);
+static void iot_action_event_cb(lv_event_t *event);
 static void release_current_scene(void);
 static void profile_identity_event_cb(lv_event_t *event);
 static void profile_editor_open_async(void *user_data);
@@ -137,6 +155,8 @@ static bool navigation_build(void *context, uintptr_t page);
 static void navigation_enter(void *context, uintptr_t page);
 static void navigation_failed(void *context, uintptr_t page);
 static uint32_t scene_object_count(lv_obj_t *root);
+static void update_weather_screen(const app_ui_projection_t *projection);
+static void update_market_screen(const app_ui_projection_t *projection);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -265,7 +285,7 @@ static void settings_control_event_cb(lv_event_t *event)
 
 static void install_notification_callbacks(np_settings_notifications_t *notifications)
 {
-    if (s_ui.notification_callbacks_initialized || notifications->general_switch == NULL) return;
+    if (notifications == NULL || notifications->general_switch == NULL) return;
     lv_obj_add_event_cb(notifications->general_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)0U);
     lv_obj_add_event_cb(notifications->sound_switch, notification_switch_event_cb,
@@ -276,12 +296,13 @@ static void install_notification_callbacks(np_settings_notifications_t *notifica
         lv_obj_add_event_cb(notifications->test_button, notifications_test_event_cb,
                             LV_EVENT_CLICKED, NULL);
     }
-    s_ui.notification_callbacks_initialized = true;
 }
 
 static void install_display_sound_callbacks(void)
 {
-    if (s_ui.display_sound_callbacks_initialized) return;
+    if (active_display_controls()->brightness_slider == NULL ||
+        active_display_controls()->volume_slider == NULL ||
+        active_display_controls()->night_switch == NULL) return;
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
     s_ui.projected_brightness = projection.device_controls.brightness_percent;
@@ -639,12 +660,59 @@ static void wifi_manage_event_cb(lv_event_t *event)
 static void wifi_scan_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    if (connectivity_diagnostic_request_scan() == ESP_OK) {
+    if (s_ui.wifi_scan_pending) return;
+    s_ui.wifi_scan_pending = true;
+    s_ui.wifi_scan_idle_since_tick = 0U;
+    if (active_wifi()->scan_button != NULL) {
+        lv_obj_add_state(active_wifi()->scan_button, LV_STATE_DISABLED);
+    }
+    if (s_ui.active_screen == PRODUCT_SCREEN_WIFI) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
-                               "Buscando redes", NULL, 1800U);
-    } else {
+                               "Busca solicitada", "Aguardando a rede", 1800U);
+    }
+}
+
+static void wifi_entry_scan_retry_tick(void)
+{
+    if (!s_ui.wifi_scan_pending) return;
+    if (s_ui.active_screen != PRODUCT_SCREEN_WIFI) {
+        s_ui.wifi_scan_pending = false;
+        s_ui.wifi_scan_idle_since_tick = 0U;
+        return;
+    }
+
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    if (connectivity.state == CONNECTIVITY_DIAGNOSTIC_STATE_SCANNING) {
+        s_ui.wifi_scan_pending = false;
+        s_ui.wifi_scan_idle_since_tick = 0U;
+        return;
+    }
+
+    network_validation_status_t network = {0};
+    network_validation_service_get_status(&network);
+    if (network.busy) {
+        s_ui.wifi_scan_idle_since_tick = 0U;
+        return;
+    }
+
+    if (s_ui.wifi_scan_idle_since_tick == 0U) {
+        s_ui.wifi_scan_idle_since_tick = lv_tick_get();
+        return;
+    }
+    if (lv_tick_elaps(s_ui.wifi_scan_idle_since_tick) < 1000U) return;
+
+    s_ui.wifi_scan_pending = false;
+    s_ui.wifi_scan_idle_since_tick = 0U;
+    const esp_err_t scan_result = connectivity_diagnostic_request_scan();
+    if (scan_result != ESP_OK) {
+        if (active_wifi()->scan_button != NULL) {
+            lv_obj_clear_state(active_wifi()->scan_button, LV_STATE_DISABLED);
+        }
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Busca indisponivel", NULL, 2200U);
+        ESP_LOGW(TAG, "Wi-Fi scan could not be queued: %s",
+                 esp_err_to_name(scan_result));
     }
 }
 
@@ -817,19 +885,23 @@ static void update_header(np_header_t *header,
         }
         char greeting[USER_PROFILE_NAME_BYTES + 16U] = {0};
         (void)snprintf(greeting, sizeof(greeting), "%s, %s", salutation, first_name);
-        np_set_text(header->brand_nova, greeting);
-        if (lv_obj_get_width(header->brand_nova) != 420) {
-            lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(header->brand_nova, 420);
+        if (header->brand_nova != NULL) {
+            np_set_text(header->brand_nova, greeting);
+            if (lv_obj_get_width(header->brand_nova) != 420) {
+                lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
+                lv_obj_set_width(header->brand_nova, 420);
+            }
         }
         np_set_visible(header->brand_panel, false);
         np_set_text(header->user_greeting, "");
         np_set_visible(header->user_greeting, false);
     } else {
-        np_set_text(header->brand_nova, "Nova");
-        if (lv_obj_get_width(header->brand_nova) != 64) {
-            lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(header->brand_nova, 64);
+        if (header->brand_nova != NULL) {
+            np_set_text(header->brand_nova, "Nova");
+            if (lv_obj_get_width(header->brand_nova) != 64) {
+                lv_label_set_long_mode(header->brand_nova, LV_LABEL_LONG_DOT);
+                lv_obj_set_width(header->brand_nova, 64);
+            }
         }
         np_set_visible(header->brand_panel, true);
         np_set_text(header->user_greeting, "");
@@ -984,6 +1056,21 @@ static void update_weather(const app_ui_projection_t *projection)
     np_set_text(s_ui.home.weather_feels_like.value, "--");
     np_set_text(s_ui.home.weather_uv.value, "--");
 #endif
+}
+
+static void update_weather_screen(const app_ui_projection_t *projection)
+{
+    np_weather_set_icon_source(&s_ui.weather, projection->weather_assets.icon_source);
+    np_weather_sync(&s_ui.weather, &projection->offline_data.weather);
+}
+
+static void update_market_screen(const app_ui_projection_t *projection)
+{
+    if (projection == NULL || s_ui.market.root == NULL) return;
+    update_clock(projection);
+    update_header(&s_ui.shell_header, projection, false);
+    np_header_set_drawer_market_active(&s_ui.shell_header, true);
+    np_market_sync(&s_ui.market, &projection->offline_data);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1461,6 +1548,18 @@ static void navigation_shell_create(void)
     lv_obj_add_event_cb(s_ui.shell_header.drawer_home_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_weather_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_WEATHER);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_market_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_MARKET);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_iot_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_IOT);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_pomodoro_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_POMODORO);
     lv_obj_add_event_cb(s_ui.shell_header.drawer_settings_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
@@ -1534,6 +1633,8 @@ static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
 
+    wifi_entry_scan_retry_tick();
+
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
 
@@ -1581,6 +1682,27 @@ static void refresh_timer_cb(lv_timer_t *timer)
     } else if (projection.revision != s_ui.rendered_revision &&
                s_ui.active_screen == PRODUCT_SCREEN_HOME) {
         update_home(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_WEATHER) {
+        update_header(&s_ui.shell_header, &projection, false);
+        np_header_set_drawer_weather_active(&s_ui.shell_header, true);
+        update_weather_screen(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_MARKET) {
+        update_market_screen(&projection);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_IOT) {
+        update_header(&s_ui.shell_header, &projection, false);
+        np_header_set_drawer_iot_active(&s_ui.shell_header, true);
+        s_ui.rendered_revision = projection.revision;
+    } else if (projection.revision != s_ui.rendered_revision &&
+               s_ui.active_screen == PRODUCT_SCREEN_POMODORO) {
+        update_header(&s_ui.shell_header, &projection, false);
+        np_header_set_drawer_pomodoro_active(&s_ui.shell_header, true);
+        np_pomodoro_sync(&s_ui.pomodoro, &projection.pomodoro);
         s_ui.rendered_revision = projection.revision;
     } else if (projection.revision != s_ui.rendered_revision &&
                s_ui.active_screen == PRODUCT_SCREEN_DISPLAY_SOUND) {
@@ -1638,6 +1760,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
             show_home(&projection);
         }
     }
+
+    if (s_ui.active_screen == PRODUCT_SCREEN_IOT) {
+        np_devices_sync(&s_ui.devices, &projection.iot);
+        np_devices_refresh_discovery(&s_ui.devices);
+    }
 }
 
 static void release_current_scene(void)
@@ -1659,6 +1786,7 @@ static void release_current_scene(void)
         s_ui.settings_value_bubble_timer = NULL;
     }
     np_keyboard_hide(&s_ui.keyboard);
+    np_devices_close_camera(&s_ui.devices);
     np_profile_close_editor(&s_ui.profile);
     discard_wifi_add();
     discard_wifi_password();
@@ -1668,6 +1796,9 @@ static void release_current_scene(void)
      * fragments the LVGL heap under repeated navigation. Hidden roots do not
      * draw; only their small, fixed object trees remain allocated. */
     np_set_visible(s_ui.home.root, false);
+    np_set_visible(s_ui.weather.root, false);
+    np_set_visible(s_ui.devices.root, false);
+    np_set_visible(s_ui.pomodoro.root, false);
     np_set_visible(s_ui.profile.root, false);
     np_set_visible(s_ui.preferences.root, false);
     np_set_visible(s_ui.display_sound.root, false);
@@ -1685,6 +1816,10 @@ static void release_current_scene(void)
 static void navigation_leave(void *context, uintptr_t page)
 {
     (void)context;
+    if (page == PRODUCT_SCREEN_WIFI) {
+        s_ui.wifi_scan_pending = false;
+        s_ui.wifi_scan_idle_since_tick = 0U;
+    }
     release_current_scene();
     if (page == PRODUCT_SCREEN_PREFERENCES && s_ui.preferences.profile_button != NULL &&
         lv_obj_get_parent(s_ui.preferences.profile_button) == s_ui.shell) {
@@ -1744,6 +1879,7 @@ static void navigation_reclaim_for_build(uintptr_t destination)
     const uint32_t reserve = navigation_legacy_cached(destination) ? 16U * 1024U
         : (destination == PRODUCT_SCREEN_WIFI || destination == PRODUCT_SCREEN_TIMEZONE)
             ? 40U * 1024U
+        : destination == PRODUCT_SCREEN_MARKET ? 48U * 1024U
         : (destination == PRODUCT_SCREEN_HOME || destination == PRODUCT_SCREEN_PREFERENCES)
             ? 24U * 1024U : 30U * 1024U;
     const uintptr_t candidates[] = {
@@ -1781,7 +1917,15 @@ static void navigation_clean(void *context, uintptr_t page)
     s_ui.home_data_rendered = false;
     s_ui.rendered_weather_icon_source = NULL;
     s_ui.preferences = (np_preferences_view_t){0};
+    s_ui.weather = (np_weather_view_t){0};
+    s_ui.market = (np_market_view_t){0};
+    s_ui.devices = (np_devices_view_t){0};
+    s_ui.pomodoro = (np_pomodoro_view_t){0};
     if (s_ui.navigation.destination != PRODUCT_SCREEN_HOME &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_WEATHER &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_MARKET &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_IOT &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_POMODORO &&
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
     }
@@ -1794,13 +1938,82 @@ static bool navigation_build(void *context, uintptr_t page)
     navigation_shell_create();
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
-    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_WEATHER ||
+        page == PRODUCT_SCREEN_MARKET ||
+        page == PRODUCT_SCREEN_IOT ||
+        page == PRODUCT_SCREEN_POMODORO ||
+        page == PRODUCT_SCREEN_PREFERENCES) {
         if (page == PRODUCT_SCREEN_HOME) {
             s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
             if (s_ui.home.root == NULL) return false;
+            lv_obj_add_event_cb(s_ui.home.weather_card, scene_navigation_event_cb,
+                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_WEATHER);
             s_ui.home_data_rendered = false;
             update_home(&projection);
             s_ui.active_screen = PRODUCT_SCREEN_HOME;
+        } else if (page == PRODUCT_SCREEN_WEATHER) {
+            s_ui.weather = np_weather_build_with_header(s_ui.content_host, &s_ui.shell_header);
+            if (s_ui.weather.root == NULL) return false;
+            update_header(&s_ui.shell_header, &projection, false);
+            np_header_set_drawer_weather_active(&s_ui.shell_header, true);
+            update_weather_screen(&projection);
+            s_ui.active_screen = PRODUCT_SCREEN_WEATHER;
+        } else if (page == PRODUCT_SCREEN_MARKET) {
+            s_ui.market = np_market_build_with_header(s_ui.content_host, &s_ui.shell_header);
+            if (s_ui.market.root == NULL) return false;
+            lv_mem_monitor_t market_heap = {0};
+            lv_mem_monitor(&market_heap);
+            ESP_LOGI(TAG, "Market LVGL memory after build: free=%u largest=%u used=%u%%",
+                     (unsigned)market_heap.free_size,
+                     (unsigned)market_heap.free_biggest_size,
+                     (unsigned)market_heap.used_pct);
+            update_market_screen(&projection);
+            s_ui.active_screen = PRODUCT_SCREEN_MARKET;
+        } else if (page == PRODUCT_SCREEN_IOT) {
+            s_ui.devices = np_devices_build_with_header(s_ui.content_host,
+                                                         &s_ui.shell_header);
+            if (s_ui.devices.root == NULL) return false;
+            np_devices_rebind(&s_ui.devices);
+            for (uint8_t i = 0U; i < APP_IOT_MAX_CAMERAS; ++i) {
+                lv_obj_add_event_cb(s_ui.devices.camera_cards[i],
+                                    iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            }
+            lv_obj_add_event_cb(s_ui.devices.camera_stream_start_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_stream_stop_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_viewer_modal.close_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.add_device_button, iot_action_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.add_sensor_button, iot_action_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.scan_button, iot_action_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_scan_button, iot_action_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_address_check_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_address_input, NP_KEYBOARD_MODE_NUMERIC);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_username_input, NP_KEYBOARD_MODE_TEXT);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_password_input, NP_KEYBOARD_MODE_PASSWORD);
+            lv_obj_add_event_cb(s_ui.devices.modal_close_button, iot_action_event_cb,
+                                LV_EVENT_CLICKED, NULL);
+            update_header(&s_ui.shell_header, &projection, false);
+            np_header_set_drawer_iot_active(&s_ui.shell_header, true);
+            s_ui.active_screen = PRODUCT_SCREEN_IOT;
+        } else if (page == PRODUCT_SCREEN_POMODORO) {
+            s_ui.pomodoro = np_pomodoro_build_with_header(s_ui.content_host,
+                                                          &s_ui.shell_header);
+            if (s_ui.pomodoro.root == NULL) return false;
+            np_pomodoro_bind(&s_ui.pomodoro);
+            np_pomodoro_sync(&s_ui.pomodoro, &projection.pomodoro);
+            update_header(&s_ui.shell_header, &projection, false);
+            np_header_set_drawer_pomodoro_active(&s_ui.shell_header, true);
+            s_ui.active_screen = PRODUCT_SCREEN_POMODORO;
         } else {
             s_ui.preferences = np_preferences_build_with_header(s_ui.content_host,
                                                                   &s_ui.shell_header,
@@ -1821,8 +2034,11 @@ static bool navigation_build(void *context, uintptr_t page)
             s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
         }
         s_ui.rendered_revision = projection.revision;
-        np_set_visible(page == PRODUCT_SCREEN_HOME ? s_ui.home.root : s_ui.preferences.root,
-                       true);
+        np_set_visible(page == PRODUCT_SCREEN_HOME ? s_ui.home.root :
+                       page == PRODUCT_SCREEN_WEATHER ? s_ui.weather.root :
+                       page == PRODUCT_SCREEN_MARKET ? s_ui.market.root :
+                       page == PRODUCT_SCREEN_IOT ? s_ui.devices.root :
+                       page == PRODUCT_SCREEN_POMODORO ? s_ui.pomodoro.root : s_ui.preferences.root, true);
         return true;
     }
 
@@ -1957,6 +2173,14 @@ static bool navigation_build(void *context, uintptr_t page)
     if (install_header_callbacks) {
         lv_obj_add_event_cb(header->drawer_home_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+        lv_obj_add_event_cb(header->drawer_weather_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_WEATHER);
+        lv_obj_add_event_cb(header->drawer_market_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_MARKET);
+        lv_obj_add_event_cb(header->drawer_iot_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_IOT);
+        lv_obj_add_event_cb(header->drawer_pomodoro_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_POMODORO);
         lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED,
                             (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
@@ -1980,7 +2204,15 @@ static bool navigation_build(void *context, uintptr_t page)
 static void navigation_enter(void *context, uintptr_t page)
 {
     (void)context;
-    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_PREFERENCES) {
+    if (page == PRODUCT_SCREEN_WIFI) {
+        s_ui.wifi_scan_pending = true;
+        s_ui.wifi_scan_idle_since_tick = 0U;
+    }
+    if (page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_WEATHER ||
+        page == PRODUCT_SCREEN_MARKET ||
+        page == PRODUCT_SCREEN_IOT ||
+        page == PRODUCT_SCREEN_POMODORO ||
+        page == PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, true);
         lv_obj_move_foreground(s_ui.shell);
     }
@@ -2297,6 +2529,103 @@ static void scene_navigation_event_cb(lv_event_t *event)
     if (destination == (uintptr_t)s_ui.active_screen) return;
     if (np_navigation_request(&s_ui.navigation, destination)) {
         s_ui.navigation_pending = true;
+    }
+}
+
+static void iot_action_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.active_screen != PRODUCT_SCREEN_IOT) return;
+    const lv_obj_t *target = lv_event_get_target(event);
+    for (uint8_t camera = 0U; camera < APP_IOT_MAX_CAMERAS; ++camera) {
+        if (target == s_ui.devices.camera_cards[camera]) {
+            np_devices_open_camera(&s_ui.devices, camera);
+            return;
+        }
+    }
+    if (target == s_ui.devices.add_device_button) {
+        np_devices_open_add(&s_ui.devices, false);
+    } else if (target == s_ui.devices.add_sensor_button) {
+        np_devices_open_add(&s_ui.devices, true);
+    } else if (target == s_ui.devices.scan_button) {
+        s_ui.devices.onvif_scan_selected = false;
+        np_set_text(s_ui.devices.modal_description,
+                    "Escolha a integração para buscar dispositivos disponíveis "
+                    "na rede local.");
+        const esp_err_t result = sonoff_lan_service_request_scan();
+        if (result != ESP_OK) {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Busca indisponivel",
+                                   result == ESP_ERR_TIMEOUT
+                                       ? "Aguarde a busca atual terminar"
+                                       : "Servico local ainda nao iniciou",
+                                   2400U);
+        }
+    } else if (target == s_ui.devices.camera_scan_button) {
+        app_ui_projection_t projection = {0};
+        app_state_get_ui_projection(&projection);
+        s_ui.devices.onvif_seen_generation = projection.iot.scan_generation;
+        s_ui.devices.onvif_scan_selected = true;
+        np_set_text(s_ui.devices.modal_description,
+                    "No app Tapo, habilite ONVIF e crie uma conta local da "
+                    "câmera, separada da conta Tapo. Use a mesma rede Wi-Fi.");
+        np_set_text(s_ui.devices.scan_status, "Buscando câmeras ONVIF na rede...");
+        np_set_text(s_ui.devices.scan_results, "");
+        np_set_visible(s_ui.devices.camera_address_label, true);
+        np_set_visible(s_ui.devices.camera_address_input, true);
+        np_set_visible(s_ui.devices.camera_address_check_button, true);
+        const esp_err_t result = app_event_bus_post_onvif_scan_request();
+        if (result != ESP_OK) {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Busca indisponivel",
+                                   "Nao foi possivel iniciar a busca ONVIF",
+                                   2400U);
+        }
+    } else if (target == s_ui.devices.camera_address_check_button) {
+        const char *const address = lv_textarea_get_text(
+            s_ui.devices.camera_address_input);
+        app_ui_projection_t projection = {0};
+        app_state_get_ui_projection(&projection);
+        s_ui.devices.onvif_seen_generation = projection.iot.scan_generation;
+        s_ui.devices.onvif_scan_selected = true;
+        const esp_err_t result = app_event_bus_post_onvif_address_request(address);
+        if (result == ESP_OK) {
+            np_set_text(s_ui.devices.scan_status,
+                        "Verificando serviço ONVIF na porta 2020...");
+            np_set_text(s_ui.devices.scan_results, "");
+            np_keyboard_hide(&s_ui.keyboard);
+        } else {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Endereço inválido",
+                                   "Informe um IPv4 privado, como 192.168.1.8",
+                                   2400U);
+        }
+    } else if (target == s_ui.devices.camera_stream_start_button) {
+        const char *const username = lv_textarea_get_text(
+            s_ui.devices.camera_username_input);
+        const char *const password = lv_textarea_get_text(
+            s_ui.devices.camera_password_input);
+        const char *const address = s_ui.devices.camera_ipv4[
+            s_ui.devices.selected_camera];
+        const esp_err_t result = camera_stream_service_play(address, username,
+                                                            password);
+        if (result == ESP_OK) {
+            np_keyboard_hide(&s_ui.keyboard);
+            np_set_text(s_ui.devices.camera_stream_status,
+                        "Conectando à câmera…");
+        } else {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Não foi possível iniciar",
+                                   "Informe usuário e senha da Conta da Câmera.",
+                                   2600U);
+        }
+    } else if (target == s_ui.devices.camera_stream_stop_button) {
+        (void)camera_stream_service_stop();
+        np_set_text(s_ui.devices.camera_stream_status, "Vídeo parado.");
+    } else if (target == s_ui.devices.camera_viewer_modal.close_button) {
+        np_keyboard_hide(&s_ui.keyboard);
+    } else if (target == s_ui.devices.modal_close_button) {
+        np_modal_hide(&s_ui.devices.add_modal);
     }
 }
 

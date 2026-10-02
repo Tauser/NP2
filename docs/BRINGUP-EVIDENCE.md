@@ -3158,3 +3158,1174 @@ cortes de energia; esses gates continuam pendentes.
   `idf.py -p COM8 monitor` restaurou `brightness=100 volume=65` e mostrou a
   Home aos 8,045 s. O valor alterado de volume não foi verificado em reboot
   nesta captura; soak prolongado permanece aberto.
+
+### 2026-10-01 — Ajuste da tela Clima
+
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, confirmada pelo boot;
+  flash/PSRAM de 32 MiB, EK79007 e GT911. C6 conectou por SDIO com ESP-Hosted
+  3.0.6 nos dois lados, RPC v2 e SW_AGGR. O hash da imagem C6 instalada não
+  foi coletado; nenhum flash do C6 foi executado.
+- A tela Clima permite quebra de linha nas descrições diárias, zera borda e
+  padding herdados dos cards e mantém o card de detalhes sem título. Títulos e
+  descrições continuam alinhados como na referência; o conteúdo foi ajustado
+  dentro dos cards sem centralizar a composição dos textos.
+- Os ícones de previsão, nascer/pôr do sol e detalhes usam o pacote oficial
+  `@meteocons/svg-static` 0.1.0, estilo fill, com licença em
+  `design/clima/static/LICENSE`. O gerador `tools/build_meteocons_static.py`
+  seleciona 24 SVGs e gera as versões 32 × 32 e 48 × 48 como descritores LVGL
+  ARGB8888 embutidos no firmware. Isso não adiciona leitura de SVG em execução
+  nem alocação de PSRAM. O ícone principal continua animado, carregado da
+  microSD.
+- Build limpo ESP-IDF 5.5.4, target `esp32p4`, comando
+  `idf.py -B build/weather-meteocons-final-20261001 -D IDF_TARGET=esp32p4 build`.
+  Imagem `0x309700` B, com 62% livres na menor partição de 8 MiB. SHA-256 P4:
+  `B4771687DD427F7BF3371C58CF48B10BE0813185FD552E82BC892CC7031D64B0`.
+  Configuração efetiva: RGB565, três framebuffers, rotação 180°,
+  `TRIPLE_PARTIAL`, auto-suspend da flash desligado e Wi-Fi remoto.
+- `idf.py -B build/weather-meteocons-final-20261001 -p COM8 app-flash` gravou
+  somente a aplicação em `0x20000`; `Hash of data verified`. A captura de
+  `idf.py -B build/weather-meteocons-final-20261001 -p COM8 monitor` confirmou
+  P4 v1.3, display/touch, UI LVGL RGB565/180°/`TRIPLE_PARTIAL`/3 FBs, C6
+  3.0.6/RPC v2/SW_AGGR, microSD e ícone animado 24 × 160 × 160. Home visível
+  aos 19,004 s. A associação Wi-Fi caiu com motivos 2 e 205; DNS/NTP/HTTPS não
+  foram confirmados nesta captura. Nenhum panic ou watchdog apareceu durante
+  os ~19 s observados. O operador não navegou até Clima nesta captura; sua
+  apresentação na tela física ainda requer inspeção visual.
+
+### 2026-10-01 — Cadência dos ícones animados
+
+- Inspeção do pipeline identificou que `tools/build_weather_icons.py` amostra
+  os SVGs a 8 quadros/s (`125 ms`), enquanto Home e Clima definiam duração de
+  `250 ms` por quadro. Ambos exibiam 4 quadros/s e levavam o dobro do tempo por
+  ciclo. Home havia recebido esse limite junto com uma mudança de renderer SW
+  para reduzir carga; Clima herdou o limite sem motivo próprio.
+- Home e Clima agora calculam a duração por `frame_count * frame_ms` do pacote
+  NPWI, sem alterar os dados dos frames ou o orçamento de PSRAM. Build limpo
+  ESP-IDF 5.5.4/`esp32p4`:
+  `idf.py -B build/weather-animation-20261001 -D IDF_TARGET=esp32p4 build`.
+  Imagem `0x309700` B, 62% livres no menor slot de 8 MiB. SHA-256 P4:
+  `2D3C129064C6E1EBAA686B475AD0B9E563FCE26F2DBB1A09982EE36973158822`.
+- `idf.py -B build/weather-animation-20261001 -p COM8 app-flash` gravou só a
+  aplicação P4 em `0x20000` e confirmou `Hash of data verified`. Boot frio na
+  Waveshare ESP32-P4 v1.3 confirmou display RGB565/180°/`TRIPLE_PARTIAL`/3 FBs,
+  microSD e pacote animado de 24 quadros, 160 × 160; C6 3.0.6 negociou RPC v2 e
+  SW_AGGR. Home visível aos 11,985 s. DNS/NTP/HTTPS concluíram com `ESP_OK`.
+  Cerca de 60 s de monitoramento não registraram panic ou watchdog. O quadro
+  serial confirma o carregamento e a estabilidade curta, mas a fluidez visual
+  foi conferida pelo operador na tela física e confirmada como fluida. Soak
+longo continua aberto.
+
+# 2026-10-01 — Mercado v6, altcoins e Fear & Greed
+
+Implementado e gravado no P4 o primeiro fluxo de dados da tela Mercado. O
+snapshot offline v6 guarda Bitcoin, Ethereum, Solana, BNB, XRP e Fear & Greed;
+cache v1 a v5 continua sendo migrado com os campos novos indisponíveis. Os
+ativos cripto vieram em uma consulta CoinGecko, e Fear & Greed em uma consulta
+serializada da Alternative.me. A tela mostra a atribuição `Alternative.me` ao
+lado do indicador. O usuário pediu para manter todos os blocos da referência;
+S&P 500, Nasdaq e Ibovespa seguem visíveis, porém indisponíveis enquanto não
+houver uma fonte de dados e licença compatíveis configuradas.
+
+**Placa e baseline:** Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash
+NOR 32 MiB, PSRAM 32 MiB; BSP 3.0.1, ESP-IDF 5.5.4, LVGL 9.5.0, target
+`esp32p4`, RGB565, rotação 180°, `TRIPLE_PARTIAL`, três framebuffers. C6
+reportou 3.0.6, RPC v2 e SDIO SW_AGGR negociado; C6 não foi gravado.
+
+**Referências de imagem e execução:** HEAD base `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`;
+árvore de trabalho alterada. P4 `firmware/build/np2_p4.bin`, SHA-256
+`0E8B78DF45B6E56D1ACE8FD62CE7177D015FF8D7EA9E39A05007064A6DEE7058`, tamanho
+`0x30c2c0` bytes, 62% da partição de app livre. ELF SHA-256
+`3BA3185C808EFF27CFD852214174827536F5B010901C4BDB8404CFDF54B126A8`. A
+referência do firmware C6 existente em
+`coprocessor/build/c6-repro-final-20260913/eh_cp_ota_coprocessor_ota.bin` tem
+SHA-256 `6B4E50892CDB750318D2A192F6254447A335673EFFB67E225D3E30D02941FA61`
+(1,108,256 bytes); no boot, host e slave reportaram `3.0.6` compatível.
+
+**Comandos e resultados:**
+
+- `gcc -std=c11 -Wall -Wextra -Werror` nos testes host de codec, providers e
+  scheduler — PASS.
+- `idf.py build` com o ambiente do build configurado para Python 3.14 e IDF
+  5.5.4 — PASS; partição e tamanhos acima confirmados.
+- `idf.py -p COM8 flash` — PASS, hashes de cada segmento verificados pelo
+  esptool; hard reset concluído.
+- `idf.py -p COM8 monitor` — boot chegou à UI Home; SDIO 4-bit, RPC v2 e
+  SW_AGGR levantaram; Wi-Fi obteve `192.168.1.16`; HTTPS/NTP concluíram.
+  Provedores CoinGecko/BTC+altcoins, Open-Meteo, BCB/PTAX e Alternative.me
+  reportaram `ESP_OK`; o cache offline publicou geração 692. O primeiro boot
+  havia identificado limite de corpo insuficiente para Alternative.me; o
+  limite foi aumentado para 512 bytes, refeito o build e a gravação, e o
+  endpoint confirmou `ESP_OK` nos boots seguintes, incluindo a imagem com o
+  ajuste visual final. Nenhum flash C6 ocorreu.
+
+**Limites desta evidência:** o boot e as atualizações de dados foram observados
+na placa; não houve navegação por toque nem inspeção fotográfica da composição
+Mercado. Esta evidência não valida estabilidade gráfica nem autoriza release.
+
+### 2026-10-01 — Mercado: tipografia e distribuição dos cards
+
+Ajustado o card BTC: `US$` menor e separado do preço, variação em menor escala,
+indicador de status apenas como ponto, e USD/BRL movido para a quarta coluna da
+linha inferior do card. O painel Fear & Greed foi ampliado e os três cards de
+índices redistribuídos no espaço liberado. Os glifos Material Symbols de seta
+para cima/baixo foram adicionados à fonte de 48 px; a variação exibe também o
+sinal negativo. Os cards continuam sem bordas.
+
+Os valores de S&P 500 e Nasdaq continuam indisponíveis e o campo de Ibovespa
+segue sem serviço de atualização. Nenhuma cotação foi simulada. O feed atual de
+Fear & Greed continua sendo Alternative.me; sua atribuição foi mantida junto ao
+valor conforme as condições da API. A tela Mercado aguarda confirmação de uma
+fonte com direitos de exibição para os três índices.
+
+**Placa e configuração efetiva:** Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4
+v1.3, flash NOR 32 MiB, PSRAM 32 MiB; BSP 3.0.1, ESP-IDF 5.5.4, LVGL 9.5.0,
+target `esp32p4`, RGB565, rotação 180°, `TRIPLE_PARTIAL`, três framebuffers,
+`CONFIG_SPI_FLASH_AUTO_SUSPEND=n`. C6 reportou ESP-Hosted 3.0.6, RPC v2 e
+SDIO SW_AGGR negociado; C6 não foi gravado. SHA-256 de `firmware/sdkconfig`:
+`32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+
+**Build e gravação:** base `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`,
+árvore de trabalho alterada. `idf.py build` — PASS; imagem `0x309250` bytes,
+62% da partição mínima de app livre. SHA-256 de `firmware/build/np2_p4.bin`:
+`9C0E4EAE8B311CC974AAE81BC81BFA0E954CA3D33115F5A2CCC468CD7D717D99`.
+ELF SHA-256 `F7B6C9C4230F12A1CD70E87C14ADDAE4EBA2F37F3C0735A5CCF903989DDB3894`.
+`idf.py -p COM8 app-flash` gravou a aplicação em `0x20000`; esptool confirmou
+`Hash of data verified` e executou hard reset. O firmware C6 de referência
+`coprocessor/build/c6-repro-final-20260913/eh_cp_ota_coprocessor_ota.bin`
+permanece com SHA-256 `6B4E50892CDB750318D2A192F6254447A335673EFFB67E225D3E30D02941FA61`;
+não foi alterado.
+
+**Boot observado:** `idf.py -p COM8 monitor` confirmou inicialização do
+display/touch, UI Home visível aos 19,013 s, C6 3.0.6/RPC v2/SW_AGGR e IP
+`192.168.1.16`. Os refreshes de Bitcoin/altcoins, clima e USD/BRL terminaram
+com `ESP_OK`; o monitor foi encerrado após o agendamento do próximo domínio.
+Não houve watchdog nos cerca de 29 s capturados. A navegação e o layout Mercado
+após esta gravação ainda precisam de inspeção visual na placa.
+
+### 2026-10-01 — Mercado: tipografia BTC alinhada à Home
+
+O preço principal do BTC voltou a usar `NP_FONT_BRAND` (64 px), como o card de
+Bitcoin da Home; `US$` usa `NP_FONT_SM`. A variação passou para `NP_FONT_LG`,
+igual ao texto de variação das altcoins. As setas agora usam os glyphs Material
+`NP_ICON_RISE`/`NP_ICON_FALL` da fonte de 24 px, seguindo a implementação da
+Home. Nenhuma outra composição da tela foi alterada.
+
+Build limpa ESP-IDF 5.5.4, target `esp32p4`, em
+`firmware/build/market-btc-typography-20261001`: `0x309250` bytes, 62% livres
+na menor partição de 8 MiB. SHA-256 P4:
+`4619739D981D7568AE3F9E0A603D3B5F3CA17DA703EEBAF17C7633526F1EBA04`;
+ELF `CDD86CBD590D9CCE82E97E810A58B3FEBD312D4721FF3454EC44F641FBB0F481`;
+`sdkconfig` `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+`idf.py -B build/market-btc-typography-20261001 -p COM8 app-flash` gravou a
+aplicação em `0x20000`; esptool confirmou `Hash of data verified` e hard reset.
+
+Captura `idf.py ... monitor`: placa Waveshare P4 v1.3, display RGB565,
+rotação 180°, `TRIPLE_PARTIAL`, três FB; C6 3.0.6 pareado, RPC v2 e SDIO
+SW_AGGR. Home ficou visível aos 12,004 s; Wi-Fi obteve `192.168.1.16` e os
+refreshes sequenciais de mercado, clima, câmbio e Fear & Greed terminaram com
+`ESP_OK`. Esta captura não incluiu navegação até Mercado nem inspeção visual da
+tipografia após o flash.
+
+### 2026-10-01 — Mercado: gráfico BTC, setas e USD/BRL em linha
+
+O gráfico BTC foi ampliado para `598 × 202` px, com 5 px em cada lateral e
+criado antes dos textos para permanecer no fundo do card. A posição usa a mesma
+área vertical de gráfico da Home; preço e variação ficam por cima. Setas das
+altcoins, USD/BRL e faixa de índices agora usam `NP_ICON_RISE/FALL`, os glyphs
+Material Rounded de tendência já empregados na Home. Os widgets receberam
+largura para mostrar o glyph completo dentro do espaço disponível. A variação
+USD/BRL passou para a mesma linha da cotação, na quarta coluna do card BTC.
+
+Build incremental ESP-IDF 5.5.4/`esp32p4` em
+`firmware/build/market-btc-typography-20261001`: imagem `0x309250` bytes,
+62% livres na menor partição. SHA-256 P4:
+`DCC4D20BB32A0E0CF4179D18E3F8724DF3C3CED59BC54B8EA84B3858DC856FBE`;
+ELF `109F9932DC1B141B60805A61CBAA36F453A98E2405ADE40EBE0642C106D5FC9D`.
+`idf.py -B build/market-btc-typography-20261001 -p COM8 app-flash` gravou
+somente a aplicação P4 em `0x20000`; esptool confirmou `Hash of data verified`
+e hard reset.
+
+Boot frio capturado no monitor serial: placa P4 v1.3; display RGB565/180°,
+`TRIPLE_PARTIAL`/3 FB; C6 3.0.6, RPC v2 e SW_AGGR; Wi-Fi recebeu
+`192.168.1.16`; Home visível aos 12,963 s; refreshes de mercado, clima, câmbio
+e Fear & Greed concluídos com `ESP_OK`. Monitoramento curto de aproximadamente
+17 s sem panic ou WDT. Não houve navegação até Mercado nem inspeção visual nesta
+captura.
+
+### 2026-10-01 — Fear & Greed: medidor semicircular segmentado
+
+O card agora mostra um arco semicircular de cinco faixas coloridas (medo
+extremo, medo, neutro, ganância e ganância extrema), com gaps entre faixas,
+marcador branco posicionado pelo valor, número e classificação. Para manter o
+desenho dentro do padding de 5 px do card de `300 × 120` px, o arco foi
+redesenhado como polilinhas elípticas de 8 px, com pontos entre x=11..289 e
+y=31..108. As linhas ficam dentro de x=7..293 e y=27..112 após considerar a
+espessura. O marcador de 12 px permanece dentro de x=5..295 e y=25..114 em
+toda a escala. `Fear & Greed` e a atribuição `Alternative.me` permanecem no
+topo. Segmentos removem estilos herdados antes de aplicar suas cores.
+
+Build incremental ESP-IDF 5.5.4/`esp32p4` em
+`firmware/build/market-btc-typography-20261001`: imagem `0x30a4f0` bytes,
+62% livres na menor partição. SHA-256 P4:
+`87D38B84BAADC2DEA5B1C3E27011588FCC4CE0A80C216E2D42E10C55C690350C`;
+ELF `5B6885AB7C0B8D2009595AFD4C69F0B40549E15FD8555F21782AF18FE222E9C1`;
+`sdkconfig` `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+`idf.py -B build/market-btc-typography-20261001 -p COM8 app-flash` gravou
+somente a aplicação em `0x20000`; esptool confirmou `Hash of data verified`
+e hard reset.
+
+Boot em Waveshare P4 v1.3: RGB565/180°, `TRIPLE_PARTIAL`/3 FB; C6 3.0.6, RPC
+v2 e SDIO SW_AGGR; Wi-Fi recebeu `192.168.1.16`; Home visível aos 10,004 s.
+Quatro ciclos sequenciais de refresh, incluindo o domínio de Fear & Greed,
+terminaram com `ESP_OK`. Sem panic ou WDT nos cerca de 15 s capturados. Nesta
+captura o equipamento permaneceu na Home; a tela Mercado não foi inspecionada
+visualmente após a gravação.
+
+### 2026-10-01 — Fear & Greed: composição compacta do medidor
+
+O card de 300 × 120 px segue a referência enviada: título no topo, meia-lua
+contínua à esquerda, valor dentro da abertura e classificação ao lado. O arco
+tem pontas arredondadas e degradê contínuo pelas cinco cores anteriores:
+`#FF454D`, `#F28A32`, `#F3D13A`, `#8BCB35` e `#08C995`. O número e a
+classificação usam a cor interpolada na posição atual do valor. Um marcador
+circular branco com contorno escuro indica a posição correspondente ao valor
+atual no arco. A atribuição `Alternative.me` foi removida conforme pedido
+anterior. O raio de 67 px e a espessura de 14 px mantêm o arco e o marcador
+dentro da área útil do card, respeitando os 5 px das bordas.
+
+Build limpo ESP-IDF 5.5.4/`esp32p4` em
+`firmware/build/fear-greed-marker-clean-20261001`: imagem `0x30a380` bytes,
+62% livres na menor partição. SHA-256 P4:
+`D1F7BE86C783D16AF57300D883F0A00DF630DBBA18AFE085366662D7B9C7751E`;
+ELF `963FB7923ED241DE85FAC694315A02CC84CE4D22F9995644ECCE8A538D158A2D`;
+`firmware/sdkconfig` `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+`idf.py -B build/market-btc-typography-20261001 -p COM8 app-flash` gravou
+somente o P4 em `0x20000`; esptool confirmou `Hash of data verified` e hard
+reset.
+
+Boot frio capturado na Waveshare ESP32-P4 v1.3: display EK79007 inicializado,
+RGB565/180°, `TRIPLE_PARTIAL`/3 FB; C6 3.0.6 negociou RPC v2 e SDIO SW_AGGR;
+Wi-Fi recebeu `192.168.1.16`. Home visível aos 13,014 s e quatro refreshes
+terminaram com `ESP_OK`. Sem panic ou WDT durante a captura de cerca de 17 s.
+
+Build limpo concluído em diretório separado. O binário desse build foi gravado
+em COM8 em 2026-10-01; o esptool verificou o hash dos dados e concluiu o hard
+reset. Boot capturado: display e touch inicializados, C6 3.0.6 negociou RPC v2
+e SDIO SW_AGGR, Wi-Fi recebeu `192.168.1.16`, e Home ficou visível aos
+13,014 s. Não houve panic ou WDT nos 15 s observados. A tela Mercado e o
+marcador não foram inspecionados visualmente nesta captura.
+O operador ainda precisa navegar até Mercado para inspeção visual do novo
+arco; esta captura confirma o boot, mas não sua apresentação física.
+
+### 2026-10-01 — glifo dos indicadores de mercado
+
+A fonte Material Symbols Rounded de 48 px foi regenerada incluindo o glifo
+`currency_exchange` (U+EF92), usado pelos cards S&P 500 e Nasdaq, que estava
+ausente da fonte e por isso não aparecia. Build limpo ESP-IDF 5.5.4/`esp32p4`
+em `firmware/build/market-index-icons-clean-20261001`: imagem `0x30aa60`
+bytes, 62% livres na menor partição. SHA-256 P4:
+`6385C3D9BCFDED9FF1FA18020BC608A29E96726326306E1DE1C660AC49A24011`.
+`idf.py -B build/market-index-icons-clean-20261001 -p COM8 app-flash` gravou
+somente a aplicação P4 em `0x20000`; esptool confirmou `Hash of data verified`
+e hard reset.
+
+Boot frio capturado na Waveshare P4 v1.3: display EK79007 e touch inicializados,
+RGB565/180° com `TRIPLE_PARTIAL`/3 FB; C6 3.0.6 negociou RPC v2 e SDIO SW_AGGR;
+Wi-Fi recebeu `192.168.1.16`. Home V2 ficou visível aos 19,225 s; quatro
+refreshes de conectividade terminaram com `ESP_OK`. Sem panic ou WDT nos cerca
+de 32 s capturados. A tela Mercado não foi inspecionada visualmente nesta
+captura. S&P 500, Nasdaq e Ibovespa continuam sem cotações até a escolha de uma
+fonte com permissão de exibição; nenhum valor foi simulado.
+
+### 2026-10-01 — tentativa intermediária de ícone no Ibovespa
+
+O badge foi temporariamente trocado para `NP_ICON_RISE`. Após esclarecimento do
+responsável, essa opção foi substituída pelo mesmo glifo de mercado dos cards
+S&P 500 e Nasdaq, registrado na entrada seguinte. O caractere `NP_ICON_ARROW_UP`
+usado antes era um chevron e aparecia como `^`. Build limpo ESP-IDF
+5.5.4/`esp32p4` em `firmware/build/ibovespa-rise-icon-clean-20261001`: imagem
+`0x30ab10` bytes, 62% livres na menor partição. SHA-256 P4:
+`EA00E276FC4746200060926338E48ED8CC2D4D1ECEA3DCE390C651AB014830F9`.
+`idf.py -B build/ibovespa-rise-icon-clean-20261001 -p COM8 app-flash` gravou
+somente a aplicação P4 em `0x20000`; esptool confirmou `Hash of data verified`
+e hard reset.
+
+Boot frio capturado na Waveshare P4 v1.3: display EK79007 e touch inicializados,
+RGB565/180° com `TRIPLE_PARTIAL`/3 FB; C6 3.0.6 negociou RPC v2 e SDIO SW_AGGR;
+Wi-Fi e quatro refreshes HTTPS concluíram com `ESP_OK`. Sem panic ou WDT nos
+cerca de 40 s capturados. A tela Mercado não foi inspecionada visualmente.
+
+### 2026-10-01 — ícone de mercado no card Ibovespa
+
+Conforme esclarecimento do responsável, o badge do Ibovespa usa agora
+`NP_ICON_MARKET`, o mesmo glifo U+EF92 (`currency_exchange`) dos cards S&P 500 e
+Nasdaq; o badge mantém o fundo verde. Build limpo ESP-IDF 5.5.4/`esp32p4` em
+`firmware/build/market-ibovespa-market-icon-clean-20261001`: imagem `0x30ab10`
+bytes, 62% livres na menor partição. SHA-256 P4:
+`645BCFE16CD7CD54267BB73DF60EBD70C4EE898298FAD083F6B034FBCADEF922`.
+`idf.py -B build/market-ibovespa-market-icon-clean-20261001 -p COM8 app-flash`
+gravou somente a aplicação P4 em `0x20000`; esptool confirmou
+`Hash of data verified` e hard reset.
+
+Boot frio capturado na Waveshare P4 v1.3: display EK79007 e touch inicializados,
+RGB565/180° com `TRIPLE_PARTIAL`/3 FB; navegação e refreshes HTTPS apareceram no
+log serial. Sem panic ou WDT nos cerca de 40 s capturados. O card não foi
+inspecionado visualmente após o flash.
+### 2026-10-01 — Brapi para Ibovespa, S&P 500 e Nasdaq
+
+- Board: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3; revisão C6 não
+  alterada. Worktree baseado em `80c489d` com alterações locais.
+- Build limpo ESP-IDF 5.5.4, alvo `esp32p4`, diretório
+  `firmware/build/market-brapi-clean-20261001`. Comando: ativar
+  `C:\esp\v5.5.4\esp-idf\export.bat` e executar
+  `idf.py -B build\market-brapi-clean-20261001 build` de `firmware/`.
+- Imagem P4: `0x30b780` bytes, 62% livres na menor partição. SHA-256:
+  `BB6ACE29C344FE9806C15C4E5064B1E0B0F4E0A4822C300F70C57C51EF8D2FEB`.
+  `firmware/sdkconfig` SHA-256:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+- Flash: `idf.py -B build\market-brapi-clean-20261001 -p COM8 app-flash`;
+  somente aplicação P4 em `0x20000`. Esptool confirmou `Hash of data verified`
+  e hard reset. Não foram gravados bootloader, tabela de partições ou C6.
+- Boot serial: display EK79007 e touch GT911 iniciados; PSRAM 32 MiB; C6
+  ESP-Hosted 3.0.6 nos dois lados, RPC v2 e SDIO SW_AGGR negociados; Wi-Fi
+  recebeu IP. Home completou a transição. Quatro refreshes de produto
+  terminaram com `ESP_OK`; o refresh de índices foi agendado e informou chave
+  brapi indisponível (`ESP_ERR_INVALID_SIZE`), pois a configuração local está
+  vazia. Assim, não há confirmação física de cotações nem de suporte real para
+  `^GSPC` e `^IXIC`. Sem panic ou watchdog nos cerca de 40 s de log capturado.
+- C6: não gravado; artefato preexistente
+  `eh_cp_ota_coprocessor_ota.bin`, SHA-256
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Os testes host do parser Brapi (três símbolos e resposta parcial), do cache
+  offline v6/v7 e do scheduler passaram com GCC C11 e `-Wall -Wextra -Werror`.
+
+### 2026-10-01 — Brapi com uma chamada por ativo
+
+- Worktree baseado em `80c489d`; board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B,
+  P4 v1.3. C6 não alterado.
+- Build limpo ESP-IDF 5.5.4, alvo `esp32p4`, em
+  `firmware/build/market-brapi-single-clean-20261001`. Imagem P4 `0x30b850`
+  bytes, 62% livres na menor partição. SHA-256:
+  `C9815C30ABE2AFE418F4F14C2813544CD3D4D4A62C4D113A7178C06263ECC6BF`.
+  `firmware/sdkconfig` SHA-256:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+- Flash por `idf.py -B build\market-brapi-single-clean-20261001 -p COM8
+  app-flash`: somente a aplicação em `0x20000`. Esptool confirmou
+  `Hash of data verified` e hard reset; bootloader, partições e C6 não foram
+  gravados.
+- Monitor COM8 inicialmente retornou `PermissionError(13)` por processos Python
+  residuais do ambiente IDF. Após encerrá-los, o monitor abriu normalmente.
+  Display EK79007, touch GT911 e P4 inicializaram; C6 negociou ESP-Hosted 3.0.6,
+  RPC v2 e SDIO SW_AGGR. Home iniciou.
+- A conexão Wi-Fi foi rejeitada com motivo `202` antes de obter IP. As três
+  chamadas brapi não foram executadas nesta inicialização; portanto os dados e
+  a cobertura dos símbolos no serviço ainda não foram confirmados na placa.
+  Não houve panic ou watchdog nos aproximadamente 90 s capturados.
+- Host tests do parser por resposta individual, cache v6/v7 e scheduler
+  passaram com GCC C11 e `-Wall -Wextra -Werror`. A chave permanece somente na
+  configuração local ignorada pelo Git.
+
+### 2026-10-01 — espaçamento dos valores nos cards de índices
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3; C6 não alterado.
+  Worktree baseado em `80c489d5ed2808c9501b2dd474baa7ad5b051dcb` com mudanças
+  locais. Os textos dos cards S&P 500, Nasdaq e Ibovespa foram deslocados de
+  x=58 para x=68, deixando 12 px entre o badge de 48 px (x=8) e os textos; o
+  ícone de variação foi deslocado 10 px e o percentual 14 px, deixando 6 px
+  entre o glyph da seta e o texto. Os três índices exibem a unidade `pts`, pois
+  suas cotações são pontos de índice, não preços em moeda.
+- Build limpo ESP-IDF 5.5.4, alvo `esp32p4`, diretório
+  `firmware/build/market-card-spacing-clean-20261001`, usando
+  `idf.py -B build\market-card-spacing-clean-20261001 build`. Imagem P4
+  `0x30b860` bytes, 62% livres na menor partição. SHA-256:
+  `16D193CC485304EE83FB541BBBB38548F554EA0AEA06817F8F22DBCEB4CE3F23`.
+  `firmware/sdkconfig` SHA-256:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+- Flash por `idf.py -B build\market-card-spacing-clean-20261001 -p COM8
+  app-flash`: somente aplicação P4 em `0x20000`; esptool confirmou
+  `Hash of data verified` e hard reset. Bootloader, partições e C6 não foram
+  gravados.
+- Monitor COM8 abriu. P4 v1.3, PSRAM 32 MiB, display EK79007, touch GT911,
+  RGB565/180° com `TRIPLE_PARTIAL`/3 FB iniciaram. C6 3.0.6 negociou RPC v2 e
+  SDIO SW_AGGR. Home iniciou, Wi-Fi recebeu `192.168.1.16` e os cinco refreshes
+  sequenciais de dados terminaram com `dns=ESP_OK ntp=ESP_OK https=ESP_OK`.
+  Sem panic ou watchdog nos cerca de 18 s capturados. A apresentação dos cards
+  de Mercado não foi inspecionada visualmente nesta captura.
+
+### 2026-10-01 — cadência horária dos índices
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3; C6 não gravado.
+  Worktree baseado em `80c489d5ed2808c9501b2dd474baa7ad5b051dcb` com mudanças
+  locais. A consulta normal dos índices passa a ocorrer a cada 60 minutos;
+  retry após falha segue em 2 minutos.
+- Build limpo ESP-IDF 5.5.4, alvo `esp32p4`, diretório
+  `firmware/build/market-indices-hourly-clean-20261001`, comando
+  `idf.py -B build\market-indices-hourly-clean-20261001 build`. Imagem P4
+  `0x30b860` bytes, 62% livres na menor partição. SHA-256:
+  `F023D2E9990D4B0D9A40AFD6315AD99DF2E63C7E4ED84300D5A923277893CB26`.
+  `firmware/sdkconfig` SHA-256:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+- Flash por `idf.py -B build\market-indices-hourly-clean-20261001 -p COM8
+  app-flash`: somente aplicação P4 em `0x20000`; esptool confirmou
+  `Hash of data verified` e hard reset. Bootloader, tabela de partições e C6
+  não foram gravados.
+- Monitor COM8: P4 v1.3, PSRAM 32 MiB, display EK79007 e touch GT911
+  inicializados; C6 3.0.6 negociou RPC v2 e SDIO SW_AGGR. Wi-Fi recebeu
+  `192.168.1.16`; os cinco domínios de refresh terminaram com
+  `dns=ESP_OK ntp=ESP_OK https=ESP_OK`. Sem panic ou watchdog nos cerca de 20 s
+  capturados.
+
+### 2026-10-01 — primeira tela IoT
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash de 32 MiB e
+  PSRAM de 32 MiB; commit base `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`,
+  com mudanças locais. A tela foi adicionada ao drawer; contém somente
+  Dispositivos e Sensores, sem cenas ou dados de demonstração. Os botões de
+  adição abrem a orientação do gateway. A rota e a aparência IoT ainda precisam
+  de inspeção visual por toque na placa.
+- Build limpo ESP-IDF 5.5.4, target `esp32p4`, com `idf.py fullclean` e
+  `idf.py build`. Imagem `firmware/build/np2_p4.bin`: `0x30c6b0` bytes, 62%
+  livres na menor partição. Depois do build limpo, ajustei os ícones para o
+  subset Material de 24 px e rodei `idf.py build` incremental. SHA-256 final da
+  imagem gravada:
+  `DBB0DECAE78D51B1BC0B0737CE46F0713FA515B58EEF1C03758C2428FF11BAD2`.
+  SHA-256 de `firmware/sdkconfig`:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+  Configuração efetiva: target `esp32p4`, tabela customizada,
+  `CONFIG_SPIRAM_XIP_FROM_PSRAM=y`,
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desabilitado. Hash da tabela de partições:
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- Comando de gravação: `idf.py -p COM8 flash monitor`, ESP-IDF 5.5.4. O
+  esptool verificou os hashes gravados e executou hard reset; esta gravação
+  atualizou bootloader, tabela de partições, dados OTA e aplicação P4 conforme
+  os `flash_args` do build. O monitor registrou P4 v1.3, display EK79007,
+  GT911, RGB565, rotação 180°, `TRIPLE_PARTIAL` com 3 framebuffers e PSRAM de
+  32 MiB. O C6 informou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR negociados;
+  recebeu IP `192.168.1.16`. A aplicação chegou à Home sem panic ou watchdog
+  durante os cerca de 24 s capturados após o reset.
+- C6 não foi gravado nesta operação; artefato registrado em evidência anterior
+  com SHA-256 `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+  Esta evidência confirma build, gravação e boot básico; não confirma a rota IoT
+  por toque nem a integração com gateway ou dispositivos SONOFF.
+- Após a correção dos ícones, `idf.py -p COM8 app-flash monitor` regravou somente
+  a aplicação; esptool verificou o hash e o P4 reiniciou. O segundo boot
+  repetiu a inicialização de display, touch, PSRAM e Hosted/C6; a Home abriu e o
+  Wi-Fi recebeu IP. O monitor foi encerrado após a captura para liberar COM8.
+
+### 2026-10-01 — integração SONOFF TX1C/TX2C/TX3C
+
+- O usuário confirmou os modelos TX1C, TX2C e TX3C. A matriz atual do projeto
+  comunitário SonoffLAN lista os três como locais: UIID 6/7/8, respectivamente
+  1/2/3 canais, firmware 3.8.0 na entrada da matriz. Isso é evidência de
+  compatibilidade reportada pelo mantenedor, não validação física dos aparelhos
+  do usuário. mDNS `_ewelink._tcp` anuncia metadados; com firmware original,
+  `devicekey` ainda é necessária para decifrar estado e cifrar comandos. A chave
+  é obtida da conta eWeLink no fluxo SonoffLAN. A tela mostra os modelos e o
+  requisito da chave, sem iniciar cadastro ou controle ainda.
+- Build incremental ESP-IDF 5.5.4, target `esp32p4`: passou. Imagem
+  `0x30c6f0` bytes, 62% livres na partição de 8 MiB. SHA-256:
+  `5A5C60CB1688537910849FBDE28768DB42A38502369C4E4750A130F434C451E0`.
+  SHA-256 de `sdkconfig`:
+  `32622AC03EE0DB5AA03E8EE5F0993D76FB7D3A7621AF537E1852B2578E64AFC0`.
+- `idf.py -p COM8 app-flash monitor` gravou somente a aplicação P4; esptool
+  confirmou `Hash of data verified`. Boot em P4 v1.3 confirmou display, touch,
+  PSRAM, ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR. Wi-Fi obteve IP
+  `192.168.1.16` e as verificações DNS/NTP/HTTPS capturadas terminaram com
+  `ESP_OK`. C6 não foi gravado. Monitor encerrado para liberar COM8. A rota IoT
+  não foi inspecionada por toque e os interruptores não foram testados.
+
+### 2026-10-01 — descoberta mDNS dos SONOFF (flash bloqueado)
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR 32 MiB,
+  PSRAM 32 MiB; revisão local baseada em `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`.
+  Alteração fixa `espressif/mdns` 1.5.3 e faz a busca `_ewelink._tcp` em worker,
+  exibindo até oito IDs/endereço/tipo sem chave. C6 permanece no hash conhecido
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`; não foi
+  gravado.
+- `idf.py fullclean` foi tentado, mas não concluiu: Windows retornou
+  `PermissionError(WinError 32)` para `firmware/build/log/idf_py_stderr_output_134140`,
+  arquivo aberto por outro processo. Em seguida, `idf.py build` regenerou o
+  projeto e compilou com sucesso no ESP-IDF 5.5.4, target `esp32p4`. Binário P4
+  `0x3164c0` bytes, com `0x4e9b40` bytes livres na partição de 8 MiB. SHA-256 do
+  binário `7572F45D05E0548B9B3F513F18DFF5DEB72727EB4F2656DF112D61136C9D9ADC`;
+  `sdkconfig` `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND=n`; target e configuração customizada
+  `esp32p4`/partições confirmados durante o build.
+- `idf.py -p COM8 flash monitor` não gravou: esptool retornou
+  `PermissionError(13, 'Acesso negado')` ao abrir COM8. A inspeção de processos
+  identificou o monitor ESP-IDF do VS Code (`esp_idf_monitor`, PID 52160) e o
+  comando `idf.py -p COM8 app-flash monitor` (PID 56328) mantendo a porta.
+  Nenhum processo foi encerrado. Sem flash, boot, inspeção visual ou teste mDNS
+  físico nesta rodada; repetir `app-flash monitor` quando o monitor liberar
+  COM8. Build aprovado não comprova descoberta nem compatibilidade dos TX1C/TX2C/TX3C.
+
+### 2026-10-01 — resultado da gravação IoT após liberar COM8
+
+- A COM8 estava ocupada por processos órfãos `idf.py -p COM8 app-flash monitor`
+  e `esp_idf_monitor`, iniciados às 14:06. O usuário confirmou que não tinha
+  monitor aberto. Os processos antigos foram encerrados; a COM8 voltou a estar
+  disponível. Nenhuma janela ou processo do VS Code foi fechado.
+- `idf.py -p COM8 app-flash monitor` gravou apenas a aplicação P4 em `0x20000`;
+  esptool reportou `Hash of data verified` e hard reset. Imagem ESP-IDF 5.5.4,
+  target `esp32p4`, tamanho `0x3164c0`, SHA-256
+  `7572F45D05E0548B9B3F513F18DFF5DEB72727EB4F2656DF112D61136C9D9ADC`.
+  `sdkconfig` SHA-256 `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela SHA-256 `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Hash conhecido do C6 `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`;
+  C6 não foi gravado.
+- Boot serial observado por cerca de 48 s: P4 v1.3, flash 32 MiB, PSRAM
+  32 MiB, EK79007/GT911 e `TRIPLE_PARTIAL`/3 FB iniciados. C6 3.0.6 negociou
+  SDIO streaming, RPC v2 e SW_AGGR. A aplicação chegou à Home; Wi-Fi recebeu
+  `192.168.1.16`. Cinco verificações DNS/NTP/HTTPS terminaram com `ESP_OK`.
+  Sem panic ou watchdog na captura. A conexão passou por duas retentativas antes
+  de receber IP. O monitor iniciado nesta sessão foi encerrado para liberar COM8.
+- O boot não testa a consulta `_ewelink._tcp`: a busca precisa ser acionada pela
+  interface e ainda requer ensaio físico com TX1C/TX2C/TX3C na mesma rede. A
+  rota de cadastro/controle e a autorização OAuth seguem pendentes da aprovação
+  da aplicação eWeLink.
+
+- **Relato do operador após a gravação:** ao acionar “Buscar dispositivos na
+  rede” na tela IoT, o painel encontrou três dispositivos. Isso confirma a
+  descoberta `_ewelink._tcp` na rede local para os aparelhos presentes; ainda
+  não confirma a identificação individual dos modelos, obtenção de `devicekey`
+  nem acionamento. Não foram copiados IDs ou endereços para este registro.
+
+### 2026-10-01 — correções nas telas de configurações
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash 32 MiB e PSRAM
+  32 MiB; código baseado no commit `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`
+  com mudanças locais. Ajustado o registro de callbacks quando Tela e som e
+  Notificações são recriadas; a senha Wi-Fi agora é desenhada uma única vez a
+  partir do buffer privado, sem asteriscos residuais sobrepostos; a fonte Material
+  de 48 px usa a fonte de 24 px como fallback para os glifos que faltam.
+- Build ESP-IDF 5.5.4, target `esp32p4`, comando `idf.py build`. Imagem P4
+  `0x3164c0` bytes, com `0x4e9b40` bytes livres na menor partição; SHA-256
+  `0931D13ED6D91ABF83DE664BEE231A665EE94F19680A1D724671E63FB27B45FD`.
+  `sdkconfig` SHA-256
+  `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela de partições SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração efetiva: `esp32p4`, `CONFIG_SPIRAM_XIP_FROM_PSRAM=y` e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desabilitado.
+- Gravação final da aplicação: `idf.py -p COM8 app-flash`; esptool confirmou
+  `Hash of data verified` e hard reset. O monitor `idf.py -p COM8 monitor`
+  capturou o boot e foi encerrado para liberar a COM8. P4 v1.3, display EK79007,
+  GT911, PSRAM 32 MiB, C6 ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR iniciaram;
+  controles locais restauraram brilho/volume em 100/100 e a aplicação chegou à
+  Home sem panic ou watchdog nos cerca de 13 s capturados. C6 permaneceu sem
+  gravação; hash conhecido
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Teste host de preferências de notificação passou (restauração, coalescência,
+  alteração durante gravação, falhas e som); o teste de provisionamento por
+  toque passou (validação, máscara, revelação, limites e limpeza); e o teste de
+  UI Wi-Fi passou (paginação, seleção, bloqueio por estado e 100 ciclos de vida).
+  O script `tools/scripts/host_check.sh` não está presente neste checkout. O boot
+  não exercita os controles por toque; a conferência interativa das telas permanece
+  pendente.
+
+### 2026-10-01 — correção da digitação no teclado Wi-Fi
+
+- O evento de tecla era lido depois do callback padrão do LVGL, que pode trocar
+  o mapa do teclado no mesmo toque. O índice selecionado passava então a apontar
+  para outro caractere. Agora o texto da tecla é capturado no preprocessamento
+  do evento, antes da troca de mapa, e consumido pelo callback da aplicação.
+- Regressão host em `tools/run_settings_wifi_ui_host_test.ps1`: passou. Cobriu
+  alternância para símbolos e letras, digitação de número, maiúscula/minúscula,
+  máscara da senha e 100 ciclos de vida da tela; a sequência digitada foi
+  preservada sem caractere extra. Nenhuma senha real foi usada ou registrada.
+- Build ESP-IDF 5.5.4 para `esp32p4` aprovado; imagem P4 com 3.237.056 bytes
+  (`0x3164c0`), SHA-256
+  `734F270BF590BB564E4A2ECA8D6E78AD72C82482125F1356E2E34A3AC8240F54`.
+  `sdkconfig` SHA-256
+  `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela de partições SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração efetiva: target `esp32p4`, XIP pela PSRAM habilitado e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desabilitado.
+- `idf.py -p COM8 app-flash monitor` gravou a aplicação P4; esptool confirmou
+  `Hash of data verified`. Boot observado até `Home V2 visible`, com P4 v1.3,
+  flash/PSRAM de 32 MiB, display EK79007, touch GT911 e C6 ESP-Hosted 3.0.6
+  (RPC v2/SW_AGGR) iniciados. Monitor encerrado após a captura para liberar COM8.
+  C6 não foi gravado; hash conhecido
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- O teste confirma o fluxo do componente e o boot; ainda falta validar na tela
+  física a digitação de uma senha de teste após esta gravação.
+
+### 2026-10-01 — ícones em botões das telas de configuração
+
+- Causa: rótulos de botões eram renderizados somente com a fonte Montserrat,
+  sem fallback Material; caracteres de ícone nos textos de ação ficavam vazios.
+  O estilo compartilhado dos botões agora usa uma cópia da fonte de texto com
+  fallback para `NP_FONT_ICON`, para que o mesmo componente exiba texto e ícone.
+- Regressão da UI Wi-Fi: `tools/run_settings_wifi_ui_host_test.ps1` passou,
+  incluindo paginação, seleção, estados, máscara e 100 ciclos de vida. Build
+  ESP-IDF 5.5.4, target `esp32p4`, aprovado; imagem P4 de 3.237.184 bytes
+  (`0x316540`), SHA-256
+  `162D6B271C5B0E87CFF9CBF65513FD610C5F9C2D4FD9789B79EE4032BABDF09B`.
+  `sdkconfig` SHA-256
+  `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela de partições SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `idf.py -p COM8 app-flash monitor` gravou a aplicação P4 e esptool confirmou
+  `Hash of data verified`. Boot chegou a `Home V2 visible`; P4 v1.3, flash e
+  PSRAM 32 MiB, EK79007, GT911 e C6 Hosted 3.0.6 com RPC v2/SW_AGGR iniciaram.
+  Monitor encerrado para liberar COM8. C6 não foi gravado. O boot não confirma
+  visualmente cada ícone de botão; a correção altera o fallback compartilhado.
+
+### 2026-10-01 — tela Pomodoro
+
+- Adicionada a tela Pomodoro à navegação compartilhada. O serviço mantém o
+  cronômetro monotônico no `app_loop`; os comandos da tela passam pelo EventBus.
+  A interface oferece 5, 10, 25 e 50 minutos, duração personalizada de 1 a 99
+  minutos, iniciar/pausar/zerar e resumo diário de ciclos e tempo focado.
+- Teste host `tools/pomodoro_service_host_test.c` compilado com GCC C11 e
+  `-Wall -Wextra -Werror`; passou. `git diff --check` sem erros.
+- Build ESP-IDF 5.5.4 para `esp32p4` aprovado; imagem P4 de 3.239.344 bytes
+  (`0x317db0`), SHA-256
+  `CF98E9F3181F3B84D36A1DEF99583CE484EDDCFE166C5BD246F3C14FE9F8CA56`.
+  Menor partição de app: `0x800000`, com `0x4e8250` bytes livres. `sdkconfig`
+  SHA-256 `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F`;
+  tabela compilada SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração efetiva: target `esp32p4`, XIP pela PSRAM habilitado e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desabilitado.
+- `idf.py -p COM8 app-flash monitor` gravou somente o app P4; esptool confirmou
+  `Hash of data verified` e hard reset. Boot observado até `Home V2 visible`;
+  display EK79007, touch GT911, PSRAM 32 MiB e C6 ESP-Hosted 3.0.6 com RPC v2 e
+  SDIO SW_AGGR iniciaram. O Wi-Fi recebeu IP `192.168.1.16`; verificações de
+  rede concluíram DNS, NTP e HTTPS sem erro. C6 não foi gravado.
+- A navegação até a tela Pomodoro e os toques nos controles ainda precisam de
+  conferência visual no display. Os contadores diários são voláteis e reiniciam
+  após reboot, conforme ADR-059.
+
+### 2026-10-01 — ajuste de layout e alarme do Pomodoro
+
+- Reorganizados os botões em uma fileira compacta na ordem 5, 10, 25, 50 e
+  Personalizar; o círculo e o contador agora têm posições calculadas para manter
+  espaçamento com os botões. O botão principal alinha ícone e rótulo e alterna
+  entre Iniciar/Pausar e play/pause.
+- Ao concluir o ciclo, `app_loop` solicita uma vez o toque curto pelo serviço de
+  controles de áudio. A reprodução segue na task do serviço e respeita o volume.
+- Teste host Pomodoro passou com GCC C11 e warnings tratados como erros; build
+  ESP-IDF 5.5.4 para `esp32p4` aprovado. Imagem P4 de 3.243.568 bytes
+  (`0x317e30`), SHA-256
+  `078F4DDAE38659A5412FB372658B5BF229C94EF7158ECB627A3119873DF37838`;
+  menor partição de app com `0x4e81d0` bytes livres. `sdkconfig` e tabela
+  compilada mantêm os hashes registrados acima; XIP pela PSRAM habilitado e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` desabilitado.
+- Aplicação gravada em `ota_0` pela COM8. O monitor confirmou app em `0x20000`,
+  display EK79007, touch GT911, PSRAM de 32 MiB, C6 Hosted 3.0.6 (RPC v2/SW_AGGR)
+  e a transição para `Home V2 visible`; Wi-Fi recebeu IP. Monitor encerrado e
+  COM8 liberada; C6 não foi gravado.
+- Ainda falta conferir visualmente o novo espaçamento, rótulos e toque sonoro
+  ao concluir um ciclo no display.
+
+### 2026-10-01 — alinhamento do contador, cartões e botões do Pomodoro
+
+- O contador passou a usar um único label centralizado pela largura do círculo.
+  Ícone, valor e descrição dos dois cartões “Hoje” agora usam posições
+  calculadas a partir da altura real das fontes e das caixas.
+- Ícone e texto de Iniciar/Pausar agora ficam em um fluxo horizontal centralizado
+  pelo LVGL. O callback do X do modal foi refeito após o retorno da view para
+  apontar para o endereço persistente da tela.
+- O alarme de conclusão usa três notas ascendentes com pequenos intervalos,
+  enfileiradas para reprodução pela task de áudio existente; áudio desligado ou
+  volume zero continuam em silêncio.
+- Build ESP-IDF 5.5.4 para `esp32p4` e teste host do Pomodoro passaram. Imagem P4
+  de 3.244.432 bytes (`0x318190`), SHA-256
+  `40E04FC83502FEA05633A2B1344DAFF1B38C2796FE2968208112199F43F61C9B`; menor
+  partição de app com `0x4e7e70` bytes livres. `sdkconfig` e tabela compilada
+  mantêm os hashes registrados na evidência anterior.
+- `idf.py -p COM8 app-flash monitor` gravou somente o app P4 e esptool confirmou
+  `Hash of data verified`. Boot observado até `Home V2 visible`; display EK79007,
+  touch GT911, PSRAM de 32 MiB e C6 Hosted 3.0.6 com RPC v2/SW_AGGR iniciaram.
+  Wi-Fi recebeu `192.168.1.16`; DNS, NTP e HTTPS concluíram com `ESP_OK`.
+  Monitor encerrado e COM8 liberada; C6 não foi gravado.
+- Ainda falta conferir visualmente no display o contador, os cartões “Hoje”, o
+  botão principal e o X do modal. O alarme requer esperar um ciclo completo ou
+  encurtar a duração para testá-lo.
+
+### 2026-10-01 — redesign da tela Pomodoro
+
+- Refiz a hierarquia da página em duas áreas: timer circular ampliado e controles
+  de duração/ação à esquerda; resumo diário à direita. Os cards de hoje usam
+  painel sem borda, com ícone, número e legenda empilhados e centralizados.
+- O estado da sessão agora fica explícito (pronto, em foco, pausado ou concluído),
+  a duração personalizada recebe destaque quando selecionada e o botão secundário
+  passou a exibir “Zerar”. O conteúdo do contador e sua fase são centralizados
+  como um único bloco no círculo.
+- Build limpo em diretório temporário com ESP-IDF 5.5.4, Python 3.14.4, target
+  `esp32p4`; build incremental após o ajuste final também passou. Imagem de
+  3.245.248 bytes (`0x3184c0`), SHA-256
+  `930F853FA5DDDD672D8DD45FA7F040FC683D1FA3DD07ED2C3B18B64ECA0688C5`;
+  `0x4e7b40` bytes livres na menor partição de app. `sdkconfig` e partição
+  compilada mantêm os hashes registrados acima.
+- O flash P4 foi tentado pela COM8, mas o esptool recebeu `PermissionError(13)`.
+  A inspeção identificou um `idf_monitor.py -p COM8` ainda ativo em um terminal
+  integrado do VS Code. O processo foi preservado; esta imagem não foi gravada.
+  Sem boot novo, a tela Pomodoro ainda requer inspeção visual física. C6 não foi
+  alterado.
+
+### 2026-10-01 — correção de estouro de pilha na descoberta ONVIF
+
+- O usuário observou `Stack overflow in task onvif_discovery` durante o uso do
+  firmware. A task tinha 5 KiB e a rotina mantinha até 2 KiB de resposta XML,
+  além do buffer da sonda e dados de parsing, na pilha. Aumentada para 10 KiB;
+  após cada varredura, o serviço agora registra a margem livre e avisa quando
+  ela fica abaixo de 1.5 KiB.
+- Build ESP-IDF 5.5.4 para `esp32p4` passou usando o ambiente Python 3.14.4 que
+  já configurava o diretório incremental. Imagem de 3.265.664 bytes
+  (`0x31d480`), SHA-256
+  `5042547F92BE505AAD68A50D2925185C9F107CA614AFE82EF63EB09748B149E3`;
+  menor partição de app com `0x4e2b80` bytes livres. `sdkconfig` SHA-256
+  `424C82D40949B6FA8A707166AE77FC1A65C7347C1E817177E85976108A82E31F` e
+  tabela compilada SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- Flash solicitado pela COM8 falhou antes da escrita: esptool recebeu
+  `PermissionError(13)`, porta ocupada ou indisponível. Portanto, a correção
+  ainda não está gravada nem validada em hardware; repetir flash/monitor após
+  liberar COM8 e conferir `task stack margin free` durante uma busca ONVIF.
+  C6 não foi alterado.
+- Nova tentativa em 2026-10-01: `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2_build_drawer_timer -p COM8 flash monitor` completou depois que a porta foi
+  liberada. Esptool confirmou `Hash of data verified` para bootloader, app,
+  tabela e `otadata`, e executou hard reset. O app `80c489d-dirty` iniciou no
+  P4 v1.3, inicializou display triple-partial, LVGL, microSD e Hosted C6
+  3.0.6/RPC v2/SW_AGGR; chegou a `Home V2 visible` e recebeu IP
+  `192.168.1.16`. A busca ONVIF ainda não foi acionada nesta sessão, portanto
+  a margem de pilha e a ausência de crash durante a busca permanecem pendentes.
+- Flash da versão com verificação manual por IPv4 concluído na COM8. Esptool
+  confirmou `Hash of data verified` para bootloader, aplicação, tabela de
+  partições e `otadata`, seguido de hard reset. Aplicação P4 de 3.268.304 bytes
+  (`0x31ded0`), SHA-256
+  `3C053681C7646D1285E642F1483728103025004F8503F7C836466AB8A775F7A5`.
+- Boot observado: display/LVGL e C6 Hosted 3.0.6 iniciaram; `Home V2 visible`,
+  Wi-Fi conectado e endereço do painel `192.168.1.16`. O PC alcançou
+  `192.168.1.8:2020`; esse teste não comprova a rota TCP a partir do P4.
+- A interface permite informar o IPv4 manualmente quando a descoberta multicast
+  não recebe respostas. A validação do P4 e a presença da Tapo na lista seguem
+  pendentes até informar `192.168.1.8` e tocar em “Verificar IP”; não declarar
+  câmera online antes desse resultado. O monitor atual permanece ligado na
+  sessão de trabalho para capturar a busca; C6 não foi gravado.
+- Verificação manual no painel concluída após informar `192.168.1.8`: log do P4
+  `ONVIF discovery complete result=ESP_OK cameras=1 datagrams=0 probe_matches=0
+  rejected=0 direct_endpoints_up=1`; margem da pilha da task: 3.632 bytes. O
+  usuário confirmou que a câmera apareceu na lista. Isso comprova conectividade TCP
+  do P4 ao serviço ONVIF na porta 2020 e estado online; autenticação ONVIF e vídeo
+  RTSP ainda não foram testados. Nenhum estouro de pilha observado nesta busca.
+
+### 2026-10-01 — ajuste do card da câmera IoT
+
+- O card de câmera foi reduzido de 464×82 para 420×68 px, centralizado na grade
+  de duas colunas. O ícone genérico foi trocado pelo Material Symbols Rounded
+  `photo_camera` (U+E412), incluído na fonte LVGL de 24 px. Removido o texto
+  “Online”; o estado permanece indicado somente pela bolinha colorida.
+- Build limpo ESP-IDF 5.5.4, Python 3.14.4, target `esp32p4`: passou. Aplicação
+  de 3.268.352 bytes (`0x31df00`), SHA-256
+  `22AB583B734AC77CA3EF3A9F1BC94F68D0E6263526DE03F415ACF575690E1E7B`; menor
+  partição de app com `0x4e2100` bytes livres.
+- `idf.py -p COM8 app-flash monitor` gravou o app P4 em `0x20000`; esptool
+  confirmou `Hash of data verified`. Boot chegou a `Home V2 visible`, C6
+  Hosted 3.0.6/RPC v2/SW_AGGR iniciou e o painel recebeu `192.168.1.16`.
+  Monitor encerrado; COM8 liberada. C6 não foi gravado. A inspeção visual do
+  card após este flash ainda depende de conferência no display.
+
+### 2026-10-02 — correção do início do RTSP da Tapo C200
+
+- Ao tocar em “Iniciar vídeo” após preencher a Conta da Câmera, o stream não
+  iniciava. A primeira requisição RTSP `OPTIONS` não enviava a linha em branco
+  que encerra os cabeçalhos; a negociação podia ficar aguardando resposta antes
+  de chegar à autenticação. Corrigida a montagem das requisições. A interface
+  agora informa respostas RTSP 401 (credenciais rejeitadas), 403 (acesso
+  negado), 461 (transporte não aceito) ou falta de resposta. Logs contêm apenas
+  método e código/errno, nunca usuário, senha ou cabeçalhos.
+- Build ESP-IDF 5.5.4, Python 3.14.4, target `esp32p4`, árvore baseada em
+  `80c489d` com alterações locais: passou. Aplicação com 3.373.824 bytes
+  (`0x337b00`), SHA-256
+  `D009178C234631A221DDFCD1ECACAD54CF61D8720C01AF1948363A79B7FDA671`;
+  menor partição de app com `0x4c8500` bytes livres. `sdkconfig` SHA-256
+  `551CAD23C8343C9C18900A0863E20AFB40D62B2392F88760060D1E49183B3F04`;
+  tabela de partições compilada SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- COM8 identificada por esptool como ESP32-P4 v1.3. Flash completado e hashes
+  de bootloader, aplicação, tabela e `otadata` verificados. Boot observado com
+  ESP-IDF 5.5.4, flash de 32 MiB, PSRAM de 32 MiB, display/LVGL, C6 Hosted
+  3.0.6 com RPC v2/SW_AGGR, worker RTSP iniciado e Wi-Fi conectado em
+  `192.168.1.16`. Monitor encerrado e COM8 liberada; C6 não foi gravado.
+- Ainda falta testar “Iniciar vídeo” com a conta local no painel após esta
+  correção. O boot valida o firmware e os serviços-base, mas não comprova
+  autenticação RTSP, decodificação ou render de quadros da Tapo.
+
+### 2026-10-02 — diagnóstico RTSP e tentativa de stream alternativo
+
+- O monitor COM8 capturou duas tentativas no firmware anterior: cada uma
+  recebeu `OPTIONS 200`, `DESCRIBE 401` seguido de `DESCRIBE 200` após Digest,
+  `SETUP 200` e `PLAY 200`. A autenticação foi aceita. Logo depois, o decoder
+  TinyH264 reportou `profile_idc is error` e rejeitou o SPS. O decoder
+  `esp_h264` 1.4.1 usado pelo projeto documenta suporte somente a Constrained
+  Baseline; portanto, o erro não é de usuário/senha nem de porta RTSP.
+- Adicionada tentativa de `/stream8` seguida de `/stream2` se a decodificação
+  falhar, além de mensagem explícita de perfil incompatível. Build incremental
+  ESP-IDF 5.5.4, Python 3.14.4, target `esp32p4`: passou. Aplicação de
+  3.374.496 bytes (`0x337da0`), SHA-256
+  `9B9DB68530E84F9BC0BE8326DAC2B7D69F5D63AD3B3C40CDBB26BE0A397DA601`;
+  menor partição com `0x4c8260` bytes livres.
+- COM8 confirmou ESP32-P4 v1.3; `idf.py app-flash` concluiu com `Hash of data
+  verified` e hard reset. Boot chegou a `Home V2 visible` com display/LVGL e
+  C6 Hosted 3.0.6/RPC v2/SW_AGGR. O monitor foi reaberto para capturar o teste
+  de `/stream8`; autenticação e render dessa nova tentativa ainda pendentes.
+- A captura foi encerrada sem uma nova requisição RTSP após este flash; COM8
+  liberada. Os dois logins confirmados nos logs ocorreram antes desta versão.
+- Depois, o usuário iniciou o vídeo no firmware gravado e confirmou que a tela
+  mostrou “perfil não compatível”. Isso confirma que a nova versão chegou ao
+  caminho de rejeição do decoder após tentar o fluxo alternativo. Como o
+  monitor não estava conectado durante essa tentativa, não há captura RTSP que
+  identifique o SPS de cada URL nem confirme novamente os códigos de resposta.
+- Adicionada instrumentação limitada para registrar uma vez por stream apenas
+  `profile_idc`, flags de restrição e `level_idc` do SPS, junto de `/stream8` ou
+  `/stream2`; nenhum dado de autenticação é impresso. Build incremental com
+  ESP-IDF 5.5.4, target `esp32p4`, Python 3.14.4: passou; binário de
+  3.374.720 bytes (`0x337e80`), 60% livres na menor partição de app, SHA-256
+  `E25C11C5595EEA346C5080C1A43B812A88225494EEFDF75BEE6F658A5E6984A3`.
+  `idf.py -p COM8 app-flash` gravou somente a aplicação P4 em `0x20000` e
+  confirmou `Hash of data verified`; placa reconhecida como ESP32-P4 v1.3.
+  Boot observado: Home visível, Wi-Fi em `192.168.1.16`, RTSP disponível.
+- Na tentativa seguinte, `/stream8` respondeu `DESCRIBE 200` após Digest, mas
+  não avançou até SETUP; `/stream2` respondeu `OPTIONS 200`, `DESCRIBE 401`
+  seguido de `DESCRIBE 200`, `SETUP 200` e `PLAY 200`. O SPS de `/stream2`
+  reportou `profile_idc=77`, `constraints=0x00`, `level_idc=31` (H.264 Main).
+  TinyH264 rejeitou esse perfil, confirmando incompatibilidade do decoder; o
+  usuário informou que um aplicativo no PC reproduz a câmera normalmente.
+- No mesmo monitor houve um panic separado: Instruction access fault em
+  `np_modal_hide` (PC `0x0000fffe`, retorno em `np_modal.c:81`) após tentativas
+  de rede/C6 sem resposta. O painel reiniciou e voltou ao Home; após o reboot
+  a sessão RTSP da câmera negociou e revelou o SPS acima. Esse crash de UI
+  requer investigação independente antes de declarar o teste estável.
+- Acrescentada uma consulta ONVIF somente de leitura antes da tentativa RTSP:
+  `GetCapabilities` obtém e valida o XAddr Media na mesma câmera; em seguida,
+  `GetVideoEncoderConfigurationOptions` é chamado sem tokens, solicitando as
+  opções genéricas definidas pela especificação ONVIF. O log deve mostrar
+  somente os perfis H.264 reconhecidos; nenhum XML bruto, usuário ou senha é
+  registrado. Não existe chamada a `SetVideoEncoderConfiguration`. Os campos
+  de credencial permanecem no modal em RAM para permitir nova tentativa e são
+  apagados quando o modal fecha.
+- Build ESP-IDF 5.5.4, target `esp32p4`, Python 3.14.4: passou; imagem de
+  3.378.800 bytes (`0x338e70`), 60% livres na menor partição de app, SHA-256
+  `622F44D98805307AEC133A5A7CA5B24D602B2D9E4CB537BBE7993702EDC4C66F`.
+  `idf.py -p COM8 app-flash` gravou somente a aplicação P4 em `0x20000` e
+  verificou o hash. Boot confirmado no P4 v1.3, display/LVGL, Hosted C6
+  3.0.6/RPC v2/SW_AGGR, Wi-Fi `192.168.1.16` e Home visível. A consulta
+  ONVIF aguarda nova ação no painel; ainda não há resultado da câmera.
+- Na ação seguinte do usuário, o monitor registrou que RTSP passou por
+  `OPTIONS 200`, Digest em `DESCRIBE` (`401` seguido de `200`), `SETUP 200` e
+  `PLAY 200`. O SPS voltou a indicar H.264 Main (`profile_idc=77`,
+  `constraints=0x00`, `level_idc=31`), rejeitado pelo TinyH264. A etapa ONVIF
+  `GetCapabilities` obteve um XAddr Media válido, mas
+  `GetVideoEncoderConfigurationOptions` retornou HTTP 400. Esse resultado não
+  determina quais perfis a câmera suporta.
+- Adicionados logs separados para sucesso do `GetCapabilities` e falha da
+  consulta de opções, com reconhecimento em whitelist de fault codes SOAP
+  (`ActionNotSupported`, `InvalidArgVal`, `NoProfile` e
+  `AuthenticationFailed`). Nenhum XML ou texto livre da câmera é impresso.
+  Build limpo ESP-IDF 5.5.4, target `esp32p4`, Python 3.14.4: passou; imagem
+  de 3.379.264 bytes (`0x339040`), 60% livres na menor partição de app, SHA-256
+  `072FB5A5534D5B4C34D2282F05580317171F1C55F15A9A4A7EBE25F4199F5ABE`.
+  `idf.py -p COM8 app-flash monitor` gravou somente a aplicação P4 em
+  `0x20000` e confirmou `Hash of data verified`. Boot chegou à Home; Hosted
+  C6 3.0.6/RPC v2/SW_AGGR iniciou e o Wi-Fi recuperou `192.168.1.16` após
+  tentativas iniciais de associação. C6 não foi gravado. A captura com os logs
+  mais específicos ainda depende de repetir “Iniciar vídeo” nesta versão.
+- Na repetição solicitada, a câmera apareceu após uma busca sem resposta e o
+  teste foi executado sem novo crash. `GetCapabilities` passou e validou o
+  endpoint Media; `GetVideoEncoderConfigurationOptions` respondeu HTTP 400
+  com fault de autenticação SOAP. RTSP voltou a concluir Digest, `SETUP 200`
+  e `PLAY 200`; `/stream2` reportou H.264 Main e o decoder rejeitou o SPS.
+  O usuário confirmou que concluiu o teste.
+- Alterada a consulta ONVIF de opções para enviar WS-Security
+  `UsernameToken/PasswordDigest` com nonce aleatório e timestamp UTC. A senha
+  não vai em texto claro, não é persistida e não é registrada. A consulta segue
+  read-only. O ADR-063 registra a escolha e os limites. Build limpo ESP-IDF
+  5.5.4, target `esp32p4`, Python 3.14.4: passou; imagem de 3.392.672 bytes
+  (`0x33c4a0`), 60% livres na menor partição de app, SHA-256
+  `635036EE3ED8DD82D75308CD2DCA4E7845A6D8C4A582960A2D619AECB119C7AF`.
+  `idf.py -p COM8 app-flash monitor` gravou somente o app P4 em `0x20000` e
+  confirmou `Hash of data verified`. Após encerrar o monitor obsoleto da sessão
+  anterior, o boot chegou à Home; Hosted C6 3.0.6/RPC v2/SW_AGGR iniciou e o
+  Wi-Fi recebeu `192.168.1.16`. A repetição desta consulta ainda está pendente.
+  Nenhuma operação `Set*` foi implementada ou enviada.
+- Repetição concluída em 2026-10-02 na COM8 após a gravação da versão com
+  UsernameToken. A câmera foi descoberta (`cameras=1`, `direct_endpoints_up=1`)
+  e a task terminou com margem livre de pilha de 3.636 bytes, sem crash.
+  `GetCapabilities` validou o endpoint Media. A chamada de
+  `GetVideoEncoderConfigurationOptions` recebeu HTTP 200, mas não foi
+  reconhecida como resposta com `H264Options` nem como fault conhecido
+  (`fault=unclassified`); portanto, os perfis suportados continuam
+  desconhecidos. RTSP em `/stream2` completou `OPTIONS 200`, Digest
+  (`DESCRIBE 401` seguido de `200`), `SETUP 200` e `PLAY 200`; o SPS indicou
+  `profile_idc=77`, `constraints=0x00`, `level_idc=31` (H.264 Main), rejeitado
+  pelo TinyH264. Monitor COM8 encerrado após a captura. Nenhuma operação
+  `Set*` foi enviada.
+
+### 2026-10-02 — margem de memória e diagnóstico da tela Mercado
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3; C6 permaneceu em
+  ESP-Hosted 3.0.6/RPC v2/SW_AGGR, sem gravação. Imagem C6 de referência:
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`;
+  esse hash não foi lido da placa nesta sessão. Worktree baseado em `80c489d`
+  com alterações locais preservadas.
+- Para a tela Mercado, a navegação passa a liberar caches até reservar 48 KiB
+  do pool LVGL de 64 KiB; o gauge Fear & Greed agenda 24 arcos em vez de 64.
+  Após construir a tela, o firmware registra memória LVGL livre/maior bloco.
+  Desconexões Wi-Fi agora registram também `reason=`.
+- Build limpo ESP-IDF 5.5.4, Python 3.14.4, target `esp32p4`, em
+  `firmware/build/market-connectivity-fix-20261002`; imagem `0x33c570` bytes,
+  com `0x4c3a90` bytes livres na menor partição de app. SHA-256 P4:
+  `658668C2E8861F32F7AD15268F2FC0043A8A0DD5758EEEA1734C84917956C288`;
+  `firmware/sdkconfig` SHA-256
+  `551CAD23C8343C9C18900A0863E20AFB40D62B2392F88760060D1E49183B3F04`;
+  tabela de partições SHA-256
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `idf.py -B build/market-connectivity-fix-20261002 -p COM8 app-flash monitor`
+  gravou somente o app P4 em `0x20000`; esptool confirmou `Hash of data
+  verified`. Boot capturado por cerca de 32 s: PSRAM 32 MiB, display/touch,
+  C6 3.0.6/RPC v2/SW_AGGR e IP `192.168.1.16`; Home ficou visível. Não houve
+  evento `STA_DISCONNECTED`, panic ou reboot na captura. Bitcoin, clima,
+  Fear & Greed e índices retornaram `ESP_OK`; USD/BRL expirou uma vez em
+  `ESP_ERR_TIMEOUT`, sem queda do link Wi-Fi observada. A tela Mercado não foi
+  aberta por toque nesta sessão, então a correção de navegação ainda requer
+  confirmação física. Monitor COM8 foi encerrado; C6 e dados de usuário não
+  foram alterados.
+- O usuário então reproduziu a falha ao entrar em Mercado: o log mostrou
+  `free=21996`, `largest=20936`, `used=64%` no pool LVGL após construir a tela,
+  seguido por `Load access fault`, `MTVAL=0x28`, no setter de estilo do LVGL.
+  A pilha fornecida mistura deleção de objeto, criação do drawer, sparkline e
+  atualização de Home/Wi-Fi; não prova uma única origem, mas aponta para uso de
+  handle LVGL inválido ou corrupção, não para esgotamento simples do pool nesse
+  instante. O SHA truncado do ELF (`3a104c2ba`) coincide com o prefixo do ELF
+  gravado na captura anterior; o aviso de checksum do app, por si só, não
+  localiza a causa.
+- Foram adicionadas verificações de alocação nula às primitivas centrais de UI
+  e validação de validade do objeto antes de reutilizar um chart sparkline.
+  Build limpo ESP-IDF 5.5.4/Python 3.14.4, target `esp32p4`, em
+  `firmware/build/market-crashfix-20261002`: passou; imagem `0x33c670` bytes,
+  com `0x4c3990` bytes livres na menor partição. SHA-256 P4:
+  `685F572CC21AEF01D90F63579964332C720D81CCF9D5BC08DA968FAEEA697240`;
+  ELF SHA-256 `45B90F849174054A558CD2A46E55A370BBB27C4FCF36D57F2882C41DD24ED7F`;
+  `sdkconfig` SHA-256
+  `551CAD23C8343C9C18900A0863E20AFB40D62B2392F88760060D1E49183B3F04`;
+  `partitions.csv` SHA-256
+  `F33F93A1147944297C72DDA9BD1F92E074B8B8070171A5BB2D4301C52B6B25CC`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` permanece desabilitado/não definido.
+- A tentativa de gravar somente o app P4 em `0x20000` falhou antes de abrir a
+  sessão de flash: `esptool` recebeu acesso negado em COM8 e o Windows reportou
+  que COM8 não está disponível; nenhuma porta serial foi enumerada. Logo, esta
+  imagem não foi gravada e não há novo boot capturado. C6 não foi acessado.
+  Repetir o flash e testar a navegação de Mercado com o ELF desta mesma versão
+  quando a placa reaparecer no USB. A flutuação do Wi-Fi permanece sem
+  diagnóstico conclusivo; o boot anterior teve uma expiração HTTPS isolada sem
+  evento `STA_DISCONNECTED` observado.
+- Após o usuário realizar o flash e testar a imagem
+  `market-crashfix-20261002`, informou que o travamento parou. Este é um
+  resultado de teste físico relatado pelo usuário; não foi enviada nova captura
+  serial. Em seguida confirmou que a conexão Wi-Fi também permaneceu estável
+  até o momento. A observação ainda é inicial e relatada pelo usuário, sem nova
+  captura serial ou duração definida; não constitui gate de estabilidade.
+
+### 2026-10-02 — scan Wi-Fi via ESP-Hosted sem RPC bloqueante
+
+- O usuário relatou que, após perder a rede, novas buscas repetiam
+  `eh_host_feat_rpc: request: no response ... msg_id=286 (5000 ms)` e
+  `Wi-Fi scan request failed: ESP_FAIL`. A implementação anterior chamava
+  `esp_wifi_scan_start(..., true)`, mantendo a RPC síncrona até concluir todos
+  os canais; o ESP-Hosted tem timeout RPC padrão de 5 s. Isso pode conflitar
+  com a duração real do scan e explica os logs sem provar sozinho que o SDIO
+  esteja travado.
+- Implementado ADR-064: scan inicia sem bloqueio e o worker espera
+  `WIFI_EVENT_SCAN_DONE` até 15 s. A solicitação é recusada sem RPC quando o
+  estado local informa Hosted/Wi-Fi não pronto. Não há recovery C6 automático;
+  a recuperação continua pelo comando de manutenção e seu limite/cooldown.
+- Build limpo ESP-IDF 5.5.4/Python 3.14.4, target `esp32p4`, em
+  `firmware/build/wifi-async-scan-20261002`: passou; imagem `0x33c7b0` bytes,
+  com `0x4c3850` bytes livres na menor partição. SHA-256 P4:
+  `BB5C853F96C8F71C9D9AB073C73A24D677178ED3AC532F72D43ED1BEC0E33F75`;
+  ELF SHA-256
+  `3E656DEDDD81E4D004B1AE8330F3AAAC5EC674DBB3FC9A19B45DAD37E6CD5539`;
+  `sdkconfig` SHA-256
+  `551CAD23C8343C9C18900A0863E20AFB40D62B2392F88760060D1E49183B3F04`;
+  tabela de partições SHA-256
+  `F33F93A1147944297C72DDA9BD1F92E074B8B8070171A5BB2D4301C52B6B25CC`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` e
+  `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE` continuam desativados.
+- A COM8 segue indisponível no Windows, sem portas seriais enumeradas. A
+  imagem não foi gravada; boot, scan assíncrono real e estado após perda de
+  SDIO aguardam flash e ensaio físico. C6 não foi acessado.
+
+### 2026-10-02 — recuperação limitada para RPC Wi-Fi sem resposta
+
+- Novos logs do usuário mostraram chamadas de `esp_wifi_disconnect` e
+  `esp_wifi_connect` sem resposta RPC por 5 s, embora o estado local ainda
+  marcasse Hosted ativo. Implementado ADR-065 inicialmente com duas falhas
+  `ESP_FAIL` consecutivas agendando `recover_hosted_link()` no worker; evento Hosted
+  `TRANSPORT_FAILURE/DOWN` agenda a mesma operação. O ciclo permanece limitado
+  a três por 10 minutos, com cooldown de 5 minutos, não reinicia o P4 e deixa
+  reset54 sob propriedade do ESP-Hosted. A varredura assíncrona permanece ativa.
+- Build ESP-IDF 5.5.4/Python 3.14.4 com target explícito `esp32p4`, em
+  `firmware/build/wifi-hosted-rpc-recovery-20261002`: passou. App P4
+  `0x33c9b0` bytes; espaço livre na menor partição `0x4c3650` bytes (60%).
+  SHA-256 da imagem: `3BBB39CBB1252979B09E65B8C3B37040D4A9C2AFA3B634138FA2E7B55AF4CD92`;
+  ELF: `3DA8B748DB3E1C0F58960461D0CBF973A71446B2837BE50BEE036CC31F565F78`;
+  configuração efetiva gerada (`config/sdkconfig.cmake`):
+  `CCDD25C1BF226D6921A7E83FCBC768573B193E1521F8665AA6F7ADAE59DBABB0`;
+  partições: `F33F93A1147944297C72DDA9BD1F92E074B8B8070171A5BB2D4301C52B6B25CC`.
+  `IDF_TARGET=esp32p4`. `CONFIG_SPI_FLASH_AUTO_SUSPEND` e
+  `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE` estão vazios/desligados.
+- O Windows continua sem enumerar portas seriais e `mode COM8` informa que a
+  porta não está disponível. Esta imagem ainda não foi gravada; não há boot
+  capturado nem ensaio físico do recovery. C6 não foi acessado.
+
+### 2026-10-02 — antecipação do recovery após a primeira RPC sem resposta
+
+- Ajustado o gatilho do ADR-065 para agendar recovery já na primeira chamada
+  `esp_wifi` que retorne `ESP_FAIL` enquanto Hosted e Wi-Fi constam prontos.
+  A falha já consumiu o timeout RPC de 5 s; a mudança evita esperar outra
+  tentativa sem resposta. `WIFI_EVENT_STA_DISCONNECTED` normal continua
+  disparando retry de associação, sem reiniciar Hosted/C6.
+- Build limpo ESP-IDF 5.5.4, target explícito `esp32p4`, em
+  `firmware/build/wifi-hosted-first-rpc-recovery-20261002`: passou. App P4
+  `0x33c9b0` bytes; espaço livre na menor partição `0x4c3650` bytes (60%).
+  SHA-256 da imagem: `2B389AE0E11D348069F662A8E0B14D36030E4FF15F4D70C749A834F4D04A0563`;
+  ELF: `76FE2CAD34834AD618F4DFDBF8E8FD66C4A61062054EA8B560DADD9EAA74848C`;
+  configuração efetiva gerada (`config/sdkconfig.cmake`):
+  `CCDD25C1BF226D6921A7E83FCBC768573B193E1521F8665AA6F7ADAE59DBABB0`;
+  partições: `F33F93A1147944297C72DDA9BD1F92E074B8B8070171A5BB2D4301C52B6B25CC`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` e
+  `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE` estão desligados.
+- Análise da correlação relatada: CoinGecko busca Bitcoin e quatro altcoins em
+  uma chamada; os três endpoints brapi para índices rodam sequencialmente no
+  domínio `MARKET_INDICES`, normalmente a cada hora e com retry de dois minutos
+  se falhar. O scheduler é independente da tela Mercado; abrir a tela não
+  inicia essa sequência. Os logs enviados não incluem a linha
+  `product refresh scheduled domain=4` imediatamente antes da queda, portanto
+  a coincidência temporal ainda não foi confirmada.
+- Na tentativa de gravação do agente, a COM8 estava indisponível e o Windows
+  negou enumeração das portas seriais; a gravação não pôde ser feita nessa
+  sessão. C6 não foi acessado.
+- Depois, o usuário informou que gravou o build recomendado
+  `wifi-hosted-first-rpc-recovery-20261002` (P4 SHA-256
+  `2B389AE0E11D348069F662A8E0B14D36030E4FF15F4D70C749A834F4D04A0563`) e
+  relatou que a conexão não está mais caindo ao entrar em Mercado. É uma
+  observação física preliminar relatada pelo usuário; não há captura serial,
+  duração do ensaio ou confirmação do log de recovery, portanto não fecha o
+  gate de estabilidade de rede/Hosted. C6 não foi gravado.
+
+### 2026-10-02 — reduzir consulta de Fear & Greed para frequência diária
+
+- Alterada a cadência do domínio Fear & Greed para 24 horas após sucesso e
+  retry após uma hora em caso de falha. A Alternative.me atualiza o índice
+  diariamente; o polling anterior de 15 minutos gerava até 96 consultas por dia
+  para esse dado. Decisão registrada no ADR-066.
+- O build correspondente foi interrompido após o usuário solicitar também a
+  cadência diária para S&P 500, Nasdaq e Ibovespa; nenhum resultado desse build
+  parcial foi usado como evidência.
+
+### 2026-10-02 — cadência diária para Fear & Greed e índices de mercado
+
+- Aplicada a mesma política aos índices `^BVSP`, `^GSPC` e `^IXIC`: domínio
+  consulta em série a cada 24 horas após sucesso e tenta novamente após uma
+  hora em caso de falha. O domínio permanece separado e atualiza parcialmente
+  por ativo. Decisão registrada no ADR-067.
+- Bancada: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR e PSRAM
+  de 32 MiB; base Git `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`, árvore de
+  trabalho com alterações locais. C6 reportou ESP-Hosted 3.0.6; não foi
+  gravado. Hash C6 de referência `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`
+  não foi lido da placa nesta sessão.
+- Build limpo ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `firmware/build/market-refresh-daily-20261002`: passou. App P4
+  `0x33c9b0` bytes; `0x4c3650` bytes livres na menor partição (60%). SHA-256
+  P4 `B39AFA25F15A792D0A656124D3D4EC34E8D0E979649490658761306F5CB2407D`;
+  ELF `A2D29B7386C0FA371D8E6A551427988E37294C47DC52622B25731AE88B72A8DC`;
+  configuração efetiva gerada `CCDD25C1BF226D6921A7E83FCBC768573B193E1521F8665AA6F7ADAE59DBABB0`;
+  partições `F33F93A1147944297C72DDA9BD1F92E074B8B8070171A5BB2D4301C52B6B25CC`.
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND` e
+  `CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE` estão desligados.
+- `idf.py -B build/market-refresh-daily-20261002 -p COM8 -b 460800 app-flash monitor`
+  gravou somente o app em `0x20000`; esptool confirmou `Hash of data verified`
+  e hard reset. Boot observado por cerca de 44 s: Hosted/C6 3.0.6 subiu, a
+  estação recebeu `192.168.1.16`, Home ficou visível e os domínios Bitcoin,
+  clima, USD/BRL, Fear & Greed e índices (`domain=0..4`) concluíram com
+  `dns=ESP_OK ntp=ESP_OK https=ESP_OK`. Sem panic ou desconexão Wi-Fi na janela
+  capturada. A inicialização microSD expirou e o firmware usou o ícone estático
+  de clima; não impediu UI ou rede. O monitor foi encerrado; C6 e partições não
+  foram alterados.
+
+### 2026-10-02 — busca automática ao entrar na tela Wi-Fi
+
+- A tela sincronizava a projeção da rede e só solicitava scan no callback do
+  botão; não havia solicitação de scan no evento de entrada da navegação. O scan
+  de boot também é omitido quando credenciais salvas são restauradas para
+  priorizar associação, DHCP e NTP. Por isso a lista podia continuar mostrando
+  os resultados anteriores ao abrir Configurações > Wi-Fi.
+- Na primeira tentativa de scan automático, a página Wi-Fi foi aberta enquanto
+  o executor HTTPS ainda tratava `domain=3`. O RPC de `esp_wifi_scan_start`
+  expirou (`msg_id=286` após 5 s); o recovery Hosted foi agendado e a
+  renegociação SW_AGGR abortou por não alocar buffers de 15872 B, causando
+  panic/reset do P4. Esta primeira imagem foi substituída. A implementação
+  atual mantém o scan de entrada pendente até o executor HTTPS permanecer
+  ocioso por 1 s; sair da tela cancela a pendência. Um `ESP_FAIL` isolado no
+  início do scan não dispara recovery Hosted: a supervisão da estação ainda
+  pode iniciá-lo após falha de associação/RPC observada.
+- Os controles foram movidos para o cabeçalho do painel: adicionar rede é um
+  botão com ícone `+`; buscar usa o ícone Material `refresh`, ao lado. O texto
+  de estado vazio instrui a usar atualizar.
+- Bancada: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR e PSRAM
+  de 32 MiB; base Git `80c489d5ed2808c9501b2dd474baa7ad5b051dcb`, árvore de
+  trabalho com alterações locais. O boot anunciou C6/ESP-Hosted 3.0.6, RPC v2
+  e SDIO SW_AGGR; C6 não foi gravado e seu hash não foi lido nesta sessão.
+- Build limpo ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `firmware/build/wifi-screen-autoscan-20261002`, seguido de recompilação das
+  proteções: passou. App `0x33cbd0` bytes, com `0x4c3430` bytes livres na menor
+  partição de 8 MiB (60%). SHA-256 P4
+  `9F0CE0BF7EFDA56D7C14823F37DDBDA98D13413C1E60CAB821E7EE5CE9FB691E`;
+  ELF `DA0A631316325C8150844AA99FAF6A5F6297F5B9F92799343B9BD0C5BBA20627`;
+  configuração efetiva gerada `CCDD25C1BF226D6921A7E83FCBC768573B193E1521F8665AA6F7ADAE59DBABB0`;
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  `CONFIG_IDF_TARGET=esp32p4`, RGB565, três framebuffers; auto-suspend da
+  flash e restart automático de transporte continuam desligados.
+- `idf.py -B build/wifi-screen-autoscan-20261002 -p COM8 -b 460800 app-flash`
+  gravou somente a aplicação em `0x20000`; esptool confirmou `Hash of data
+  verified` e hard reset. Captura de boot: P4 v1.3, display/touch e Hosted/C6
+  3.0.6/RPC v2/SW_AGGR iniciaram; a estação recebeu `192.168.1.16`. Depois
+  apareceram falhas DNS/HTTPS e uma falha de alocação DMA no SDIO. A tela Wi-Fi
+  não foi aberta por toque nesta captura final, portanto scan automático e
+  lista resultante ainda precisam de confirmação tátil. A inicialização da
+  microSD expirou e o ícone estático de clima foi usado. C6 e tabela de
+  partições não foram gravados.
+
+### 2026-10-02 — limitar scans repetidos e proteger o link Hosted
+
+- Após o usuário relatar que dois toques em atualizar derrubaram o Wi-Fi e
+  reiniciaram o P4, o callback passou a coalescer solicitações e esperar o
+  executor HTTPS ficar livre por 1 s antes de enfileirar o scan. A entrada
+  automática usa a mesma fila. `ESP_FAIL` em `scan_start`, `scan_get_ap_num`
+  ou `scan_get_ap_records` deixa de ser contado como falha RPC da estação e não
+  dispara recovery Hosted isoladamente. Todo recovery Hosted também aguarda o
+  executor HTTPS ficar ocioso por 1 s, com espera limitada a 60 s.
+- Build limpo ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `firmware/build/wifi-screen-scan-recovery-clean-20261002`: passou. Binário
+  `0x33ce10` bytes, `0x4c31f0` bytes livres na menor partição de 8 MiB (60%).
+  SHA-256 app P4 `F4FD26E99F9BABA6FAB0BF162B28C4B0D927B01DB80AD52FDD1D2D3F20A048F2`;
+  ELF `33FFF79BEBFD8481622C232DD08089F99FC9FA358DCADC3A305F09A764CDAC81`;
+  configuração gerada `CCDD25C1BF226D6921A7E83FCBC768573B193E1521F8665AA6F7ADAE59DBABB0`;
+  tabela de partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  RGB565, PSRAM 32 MiB, três framebuffers; `CONFIG_SPI_FLASH_AUTO_SUSPEND` e
+  restart automático do transporte Hosted permanecem desligados.
+- `idf.py -B build/wifi-screen-scan-recovery-clean-20261002 -p COM8 app-flash`
+  gravou apenas o app em `0x20000`; esptool confirmou `Hash of data verified`
+  e hard reset. Captura serial por cerca de 42 s: P4 v1.3 e display/touch
+  iniciaram; Hosted/C6 3.0.6, RPC v2 e SW_AGGR subiram; a estação recebeu
+  `192.168.1.16`. Depois houve `eh_sdio: dma_alloc(5120) failed`, seguido de
+  erros de conexão HTTP/DNS nos domínios de dados. Não foi observado panic ou
+  novo reset nesse intervalo. O usuário informou “agora resolveu” após testar;
+  essa confirmação não contém duração nem quantidade de scans. Assim, registro
+  a confirmação do usuário, mas não declaro fechado o gate de estabilidade de
+  rede/SDIO. C6 e tabela de partições não foram gravados.

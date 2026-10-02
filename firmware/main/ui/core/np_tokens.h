@@ -120,8 +120,8 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_FONT_SM       (&ui_font_np_monserrat_16_ptbr)
 #define NP_FONT_ICON     (&ui_font_np_material_24)
 #define NP_FONT_ICON_BADGE (&ui_font_np_material_48)
-/* UI icons are always Material glyphs. Add a semantic constant here and its
- * codepoint to ui_font_np_material_24.c; never draw a substitute shape. */
+/* UI icons are Material glyphs. Add their codepoints to the font sizes used by
+ * the widgets (24 px and, for large badges, 48 px); do not draw substitutes. */
 #define NP_ICON_MENU          "\xEE\xA6\xB9"
 #define NP_ICON_WIFI          "\xEE\x98\xBE"
 #define NP_ICON_WIFI_LOW      "\xEE\x93\x8A"
@@ -143,6 +143,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_HOME          "\xEE\xA2\x8A"
 #define NP_ICON_ACCOUNT       "\xEE\xA1\x93" /* account_circle U+E853 */
 #define NP_ICON_IMAGE         "\xEE\x8F\xB4" /* image U+E3F4 */
+#define NP_ICON_CAMERA        "\xEE\x90\x92" /* photo_camera U+E412 */
 #define NP_ICON_WEATHER       "\xEF\x85\xB2"
 #define NP_ICON_CALENDAR      "\xEE\xA4\xB5"
 #define NP_ICON_DISPLAY       "\xEE\x8C\x8C" /* desktop_windows U+E30C */
@@ -153,8 +154,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_WARNING       "\xEE\x80\x82"
 #define NP_ICON_INFO          "\xEE\xA2\x8E"
 #define NP_ICON_CHECK         "\xEE\x97\x8A"
+#define NP_ICON_ADD           "\xEE\x85\x85" /* add U+E145 */
 #define NP_ICON_CLOSE         "\xEE\x97\x8D"
 #define NP_ICON_SEARCH        "\xEE\xA2\xB6"
+#define NP_ICON_REFRESH       "\xEE\x97\x95" /* refresh U+E5D5 */
 #define NP_ICON_ARROW_DOWN    "\xEE\x8C\x93"
 #define NP_ICON_ARROW_LEFT    "\xEE\x8C\x94"
 #define NP_ICON_ARROW_RIGHT   "\xEE\x8C\x95"
@@ -171,6 +174,13 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_DELETE        "\xEE\xA1\xB2"
 #define NP_ICON_GLOBE         "\xEE\xA0\x8B" /* language U+E80B */
 #define NP_ICON_CHECK_CIRCLE  "\xEE\xA1\xAC" /* check_circle U+E86C */
+#define NP_ICON_TIMER         "\xEE\x90\xA5" /* timer U+E425 */
+#define NP_ICON_BAR_CHART     "\xEE\x89\xAB" /* bar_chart U+E26B */
+#define NP_ICON_SCHEDULE      "\xEE\x86\x92" /* schedule U+E192 */
+#define NP_ICON_TRACK_CHANGES "\xEE\xA3\xA1" /* track_changes U+E8E1 */
+#define NP_ICON_PAUSE         "\xEE\x80\xB4" /* pause U+E034 */
+#define NP_ICON_PLAY_ARROW    "\xEE\x80\xB7" /* play_arrow U+E037 */
+#define NP_ICON_REPLAY        "\xEE\x81\x82" /* replay U+E042 */
 #else
 #define NP_FONT_HERO     (&lv_font_montserrat_48)
 #define NP_FONT_BRAND    (&lv_font_montserrat_48)
@@ -202,6 +212,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_HOME          "H"
 #define NP_ICON_ACCOUNT       "@"
 #define NP_ICON_IMAGE         "I"
+#define NP_ICON_CAMERA        "C"
 #define NP_ICON_WEATHER       "W"
 #define NP_ICON_CALENDAR      "C"
 #define NP_ICON_DISPLAY       "D"
@@ -212,8 +223,10 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_WARNING       "!"
 #define NP_ICON_INFO          "i"
 #define NP_ICON_CHECK         "+"
+#define NP_ICON_ADD           "+"
 #define NP_ICON_CLOSE         "x"
 #define NP_ICON_SEARCH        "?"
+#define NP_ICON_REFRESH       "R"
 #define NP_ICON_ARROW_DOWN    "v"
 #define NP_ICON_ARROW_LEFT    "<"
 #define NP_ICON_ARROW_RIGHT   ">"
@@ -230,6 +243,13 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_DELETE        "x"
 #define NP_ICON_GLOBE         "O"
 #define NP_ICON_CHECK_CIRCLE  "+"
+#define NP_ICON_TIMER         "T"
+#define NP_ICON_BAR_CHART     "B"
+#define NP_ICON_SCHEDULE      "C"
+#define NP_ICON_TRACK_CHANGES "O"
+#define NP_ICON_PAUSE         "||"
+#define NP_ICON_PLAY_ARROW    ">"
+#define NP_ICON_REPLAY        "R"
 #endif
 
 /* ------------------------------------------------------------------ */

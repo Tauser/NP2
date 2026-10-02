@@ -31,6 +31,7 @@ file(GLOB fonts "@REPO@/firmware/main/ui/fonts/ui_font_*.c")
 add_executable(wifi_ui_test "@REPO@/tools/settings_wifi_ui_host_test.c"
     "@REPO@/firmware/main/ui/screens/settings/np_settings_wifi.c"
     "@REPO@/firmware/main/ui/screens/settings/np_wifi_password.c"
+    "@REPO@/firmware/main/ui/assets/np_btc_tilted_icon.c"
     "@REPO@/firmware/main/ui/core/np_components.c"
     "@REPO@/firmware/main/ui/core/np_styles.c"
     "@REPO@/firmware/main/ui/core/np_form.c"

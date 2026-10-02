@@ -11,6 +11,10 @@ static int64_t interval_for(data_refresh_domain_t domain, bool success)
         return success ? DATA_REFRESH_WEATHER_INTERVAL_US : DATA_REFRESH_WEATHER_RETRY_US;
     case DATA_REFRESH_DOMAIN_USD_BRL:
         return success ? DATA_REFRESH_USD_BRL_INTERVAL_US : DATA_REFRESH_USD_BRL_RETRY_US;
+    case DATA_REFRESH_DOMAIN_FEAR_GREED:
+        return success ? DATA_REFRESH_FEAR_GREED_INTERVAL_US : DATA_REFRESH_FEAR_GREED_RETRY_US;
+    case DATA_REFRESH_DOMAIN_MARKET_INDICES:
+        return success ? DATA_REFRESH_MARKET_INDICES_INTERVAL_US : DATA_REFRESH_MARKET_INDICES_RETRY_US;
     case DATA_REFRESH_DOMAIN_COUNT:
     default:
         return 0LL;

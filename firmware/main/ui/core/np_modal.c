@@ -39,6 +39,7 @@ void np_modal_create(np_modal_t *modal, lv_obj_t *parent,
                                          44, NP_ICON_CLOSE);
     lv_obj_add_event_cb(modal->close_button, close_button_event_cb,
                         LV_EVENT_CLICKED, modal);
+    modal->close_button_user_data = modal;
     np_hline(modal->panel, 24, 76, width - 48);
     modal->content = np_group(modal->panel, 0, 77, width, height - 77);
     np_set_visible(modal->scrim, false);
@@ -51,6 +52,18 @@ void np_modal_set_close_callback(np_modal_t *modal,
     if (modal == NULL) return;
     modal->before_hide = callback;
     modal->before_hide_user_data = user_data;
+}
+
+void np_modal_rebind(np_modal_t *modal)
+{
+    if (modal == NULL || modal->close_button == NULL ||
+        modal->close_button_user_data == modal) return;
+    (void)lv_obj_remove_event_cb_with_user_data(
+        modal->close_button, close_button_event_cb,
+        modal->close_button_user_data);
+    lv_obj_add_event_cb(modal->close_button, close_button_event_cb,
+                        LV_EVENT_CLICKED, modal);
+    modal->close_button_user_data = modal;
 }
 
 void np_modal_show(np_modal_t *modal)

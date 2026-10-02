@@ -12,6 +12,7 @@
 #include "user_profile.h"
 
 #define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES 64U
+#define FLASH_COORDINATOR_BRAPI_API_KEY_BYTES 128U
 
 /*
  * The coordinator is the sole owner of normal flash writes. Callers only
@@ -197,6 +198,7 @@ esp_err_t flash_coordinator_copy_credential_vault(char *out_ssid, size_t ssid_si
  * before production without changing this consumer-facing API.
  */
 esp_err_t flash_coordinator_copy_coingecko_api_key(char *out_key, size_t out_size);
+esp_err_t flash_coordinator_copy_brapi_api_key(char *out_key, size_t out_size);
 
 /* Persists one sealed OTA journal transition through the sole flash owner. */
 esp_err_t flash_coordinator_request_update_journal(const update_journal_record_t *record);

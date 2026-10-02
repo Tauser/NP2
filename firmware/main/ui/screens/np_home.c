@@ -39,7 +39,6 @@
 
 #define NP_HOME_BTC_SPARK_W  390
 #define NP_HOME_BTC_SPARK_H  202
-#define NP_HOME_WEATHER_FRAME_MS 250U
 
 /* ------------------------------------------------------------------ */
 /* Clima                                                               */
@@ -63,11 +62,8 @@ void np_home_set_weather_icon_source(np_home_view_t *view, const void *source)
     }
     (void)lv_animimg_delete(view->weather_icon);
     lv_animimg_set_src(view->weather_icon, asset->frames, asset->frame_count);
-    /* Os assets continuam declarando 125 ms por frame, mas a Home limita
-     * a animação a 4 FPS para reduzir carga do renderer SW e evitar starvation
-     * da IDLE0/watchdog. */
     lv_animimg_set_duration(view->weather_icon,
-                            (uint32_t)asset->frame_count * NP_HOME_WEATHER_FRAME_MS);
+                            (uint32_t)asset->frame_count * asset->frame_ms);
     lv_animimg_set_repeat_count(view->weather_icon, LV_ANIM_REPEAT_INFINITE);
     lv_image_set_src(view->weather_icon, asset->frames[0]);
     np_set_visible(view->weather_icon_fallback, false);

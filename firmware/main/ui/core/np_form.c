@@ -2,6 +2,8 @@
 
 static lv_font_t s_text_with_icons;
 static bool s_text_with_icons_ready;
+static lv_font_t s_button_text_with_icons;
+static bool s_button_text_with_icons_ready;
 
 static int32_t field_vertical_padding(int32_t height)
 {
@@ -20,6 +22,16 @@ const lv_font_t *np_form_text_font(void)
         s_text_with_icons_ready = true;
     }
     return &s_text_with_icons;
+}
+
+static const lv_font_t *button_text_font(void)
+{
+    if (!s_button_text_with_icons_ready) {
+        s_button_text_with_icons = *NP_FONT_MD;
+        s_button_text_with_icons.fallback = NP_FONT_ICON;
+        s_button_text_with_icons_ready = true;
+    }
+    return &s_button_text_with_icons;
 }
 
 void np_form_apply_field_style(lv_obj_t *field)
@@ -121,7 +133,7 @@ void np_form_apply_button_style(lv_obj_t *button, np_form_button_kind_t kind)
     lv_obj_set_style_border_color(button, border, LV_PART_MAIN);
     lv_obj_set_style_outline_width(button, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(button, 0, LV_PART_MAIN);
-    lv_obj_set_style_text_font(button, NP_FONT_MD, LV_PART_MAIN);
+    lv_obj_set_style_text_font(button, button_text_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(button, text, LV_PART_MAIN);
 
     lv_obj_set_style_bg_color(button, primary ? np_c_accent_active()
@@ -159,6 +171,7 @@ lv_obj_t *np_form_button(lv_obj_t *parent, int32_t x, int32_t y,
     lv_obj_t *const label = lv_label_create(button);
     if (label != NULL) {
         lv_label_set_text(label, text != NULL ? text : "");
+        lv_obj_set_style_text_font(label, button_text_font(), 0);
         lv_obj_center(label);
     }
     return button;

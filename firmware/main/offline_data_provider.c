@@ -192,9 +192,9 @@ static offline_provider_result_t parse_weather_object(json_reader_t *reader, off
 {
     if (!consume(reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
     bool have_temperature = false, have_humidity = false, have_code = false;
-    bool have_apparent = false, have_wind = false, have_uv = false;
+    bool have_apparent = false, have_wind = false, have_wind_direction = false, have_uv = false;
     int64_t temperature = 0, apparent = 0, wind = 0, uv = 0;
-    uint32_t humidity = 0U, code = 0U;
+    uint32_t humidity = 0U, code = 0U, wind_direction = 0U;
     for (;;) {
         skip_space(reader);
         if (reader->cursor < reader->end && *reader->cursor == '}') { ++reader->cursor; break; }
@@ -217,6 +217,9 @@ static offline_provider_result_t parse_weather_object(json_reader_t *reader, off
         } else if (string_equals(&key, "wind_speed_10m")) {
             if (have_wind || !read_number(reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
             have_wind = true; result = parse_scaled_number(&number, 1U, 0, 2000, &wind);
+        } else if (string_equals(&key, "wind_direction_10m")) {
+            if (have_wind_direction || !read_number(reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_wind_direction = true; result = parse_u32(&number, 0U, 360U, &wind_direction);
         } else if (string_equals(&key, "uv_index")) {
             if (have_uv || !read_number(reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
             have_uv = true; result = parse_scaled_number(&number, 1U, 0, 250, &uv);
@@ -234,6 +237,8 @@ static offline_provider_result_t parse_weather_object(json_reader_t *reader, off
     out->apparent_temperature_deci_c = (int16_t)apparent;
     out->wind_speed_available = have_wind;
     out->wind_speed_deci_kmh = (uint16_t)wind;
+    out->wind_direction_available = have_wind_direction;
+    out->wind_direction_degrees = (uint16_t)wind_direction;
     out->uv_index_available = have_uv;
     out->uv_index_deci = (uint16_t)uv;
     return OFFLINE_PROVIDER_OK;
@@ -397,6 +402,180 @@ offline_provider_result_t offline_coingecko_parse_bitcoin_market(const uint8_t *
     return OFFLINE_PROVIDER_OK;
 }
 
+static int market_asset_index(const json_string_t *id)
+{
+    static const char *const ids[] = {"ethereum", "solana", "binancecoin", "ripple"};
+    for (size_t index = 0U; index < OFFLINE_MARKET_ALTCOIN_COUNT; ++index)
+        if (string_equals(id, ids[index])) return (int)index;
+    return -1;
+}
+
+offline_provider_result_t offline_coingecko_parse_market_overview(
+    const uint8_t *body, size_t body_size, uint32_t observed_at_unix_s,
+    offline_market_data_t *out_bitcoin,
+    offline_altcoin_data_t out_altcoins[OFFLINE_MARKET_ALTCOIN_COUNT])
+{
+    if (body == NULL || out_bitcoin == NULL || out_altcoins == NULL || observed_at_unix_s == 0U)
+        return OFFLINE_PROVIDER_INVALID_ARGUMENT;
+    if (body_size == 0U || body_size > OFFLINE_MARKET_MAX_BODY_BYTES)
+        return OFFLINE_PROVIDER_BODY_TOO_LARGE;
+
+    json_reader_t reader = {body, body + body_size};
+    if (!consume(&reader, '[')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    offline_market_data_t bitcoin = {.available = true, .observed_at_unix_s = observed_at_unix_s};
+    offline_altcoin_data_t coins[OFFLINE_MARKET_ALTCOIN_COUNT] = {0};
+    bool got_bitcoin = false;
+    bool got_coin[OFFLINE_MARKET_ALTCOIN_COUNT] = {0};
+    for (;;) {
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == ']') { ++reader.cursor; break; }
+        if (!consume(&reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        json_string_t id = {0};
+        bool got_id = false, got_price = false, got_change = false;
+        bool got_high = false, got_low = false, got_volume = false;
+        int64_t price_micros = 0, change_bps = 0, high_cents = 0, low_cents = 0;
+        int64_t volume_cents = 0;
+        for (;;) {
+            skip_space(&reader);
+            if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+            json_string_t key = {0};
+            if (!read_string(&reader, &key) || !consume(&reader, ':'))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            json_number_t number = {0};
+            offline_provider_result_t result = OFFLINE_PROVIDER_OK;
+            if (string_equals(&key, "id")) {
+                if (got_id || !read_string(&reader, &id)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_id = true;
+            } else if (string_equals(&key, "current_price")) {
+                if (got_price || !read_number(&reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_price = true; result = parse_scaled_number(&number, 6U, 1, INT64_MAX, &price_micros);
+            } else if (string_equals(&key, "price_change_percentage_24h")) {
+                if (got_change || !read_number(&reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_change = true; result = parse_scaled_number(&number, 2U, INT16_MIN, INT16_MAX, &change_bps);
+            } else if (string_equals(&key, "high_24h")) {
+                if (got_high || !read_number(&reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_high = true; result = parse_scaled_number(&number, 2U, 1, UINT32_MAX, &high_cents);
+            } else if (string_equals(&key, "low_24h")) {
+                if (got_low || !read_number(&reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_low = true; result = parse_scaled_number(&number, 2U, 1, UINT32_MAX, &low_cents);
+            } else if (string_equals(&key, "total_volume")) {
+                if (got_volume || !read_number(&reader, &number)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_volume = true; result = parse_scaled_number(&number, 2U, 0, INT64_MAX, &volume_cents);
+            } else if (!skip_value(&reader, 1U)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            if (result != OFFLINE_PROVIDER_OK) return result;
+            skip_space(&reader);
+            if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+            if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        if (!got_id || !got_price || !got_change) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        if (string_equals(&id, "bitcoin")) {
+            if (got_bitcoin) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            got_bitcoin = true;
+            bitcoin.bitcoin_usd_cents = (uint32_t)((price_micros + 5000) / 10000);
+            bitcoin.change_24h_basis_points = (int16_t)change_bps;
+            bitcoin.high_24h_available = got_high; bitcoin.high_24h_usd_cents = (uint32_t)high_cents;
+            bitcoin.low_24h_available = got_low; bitcoin.low_24h_usd_cents = (uint32_t)low_cents;
+            bitcoin.volume_24h_available = got_volume; bitcoin.volume_24h_usd_cents = (uint64_t)volume_cents;
+            if (got_high && got_low && high_cents < low_cents) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        } else {
+            const int index = market_asset_index(&id);
+            if (index >= 0) {
+                if (got_coin[index]) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                got_coin[index] = true;
+                coins[index] = (offline_altcoin_data_t){
+                    .available = true, .usd_micros = (uint64_t)price_micros,
+                    .change_24h_basis_points = (int16_t)change_bps,
+                    .observed_at_unix_s = observed_at_unix_s,
+                };
+            }
+        }
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == ']') { ++reader.cursor; break; }
+        if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    skip_space(&reader);
+    if (reader.cursor != reader.end || !got_bitcoin) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (size_t index = 0U; index < OFFLINE_MARKET_ALTCOIN_COUNT; ++index)
+        if (!got_coin[index]) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    *out_bitcoin = bitcoin;
+    memcpy(out_altcoins, coins, sizeof(coins));
+    return OFFLINE_PROVIDER_OK;
+}
+
+offline_provider_result_t offline_alternative_me_parse_fear_greed(
+    const uint8_t *body, size_t body_size, uint32_t observed_at_unix_s,
+    offline_fear_greed_data_t *out_data)
+{
+    if (body == NULL || out_data == NULL || observed_at_unix_s == 0U)
+        return OFFLINE_PROVIDER_INVALID_ARGUMENT;
+    if (body_size == 0U || body_size > OFFLINE_EXCHANGE_MAX_BODY_BYTES)
+        return OFFLINE_PROVIDER_BODY_TOO_LARGE;
+    json_reader_t reader = {body, body + body_size};
+    if (!consume(&reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    offline_fear_greed_data_t candidate = {.available = true, .observed_at_unix_s = observed_at_unix_s};
+    bool found_data = false, found_value = false, found_class = false;
+    for (;;) {
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+        json_string_t key = {0};
+        if (!read_string(&reader, &key) || !consume(&reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        if (string_equals(&key, "data")) {
+            if (found_data || !consume(&reader, '[') || !consume(&reader, '{'))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            found_data = true;
+            for (;;) {
+                skip_space(&reader);
+                if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+                json_string_t item_key = {0};
+                if (!read_string(&reader, &item_key) || !consume(&reader, ':'))
+                    return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                if (string_equals(&item_key, "value")) {
+                    json_string_t value = {0};
+                    if (found_value || !read_string(&reader, &value) || !value.plain || value.length == 0U || value.length > 3U)
+                        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                    uint32_t parsed = 0U;
+                    for (size_t i = 0U; i < value.length; ++i) {
+                        if (!is_digit(value.bytes[i])) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                        parsed = parsed * 10U + (uint32_t)(value.bytes[i] - '0');
+                    }
+                    if (parsed > 100U) return OFFLINE_PROVIDER_OUT_OF_RANGE;
+                    candidate.value = (uint8_t)parsed; found_value = true;
+                } else if (string_equals(&item_key, "value_classification")) {
+                    json_string_t classification = {0};
+                    if (found_class || !read_string(&reader, &classification))
+                        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                    static const char *const labels[] = {"Extreme Fear", "Fear", "Neutral", "Greed", "Extreme Greed"};
+                    bool matched = false;
+                    for (uint8_t i = 0U; i < 5U; ++i) {
+                        if (string_equals(&classification, labels[i])) {
+                            candidate.classification = i; matched = true; break;
+                        }
+                    }
+                    if (!matched) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                    found_class = true;
+                } else if (!skip_value(&reader, 1U)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                skip_space(&reader);
+                if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+                if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+                    return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            }
+            if (!consume(&reader, ']')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        } else if (!skip_value(&reader, 1U)) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+        if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    skip_space(&reader);
+    if (reader.cursor != reader.end || !found_data || !found_value || !found_class)
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    *out_data = candidate;
+    return OFFLINE_PROVIDER_OK;
+}
+
 static bool bcb_date_is_valid(const json_string_t *date)
 {
     if (date == NULL || !date->plain || date->length != 10U ||
@@ -523,5 +702,384 @@ offline_provider_result_t offline_bcb_parse_usd_brl(const uint8_t *body, size_t 
     skip_space(&reader);
     if (reader.cursor != reader.end) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
     *out_exchange = candidate;
+    return OFFLINE_PROVIDER_OK;
+}
+
+static offline_provider_result_t parse_brapi_quote(json_reader_t *reader,
+                                                    uint32_t observed_at_unix_s,
+                                                    offline_ibovespa_data_t *ibovespa,
+                                                    offline_index_data_t *sp500,
+                                                    offline_index_data_t *nasdaq,
+                                                    bool *matched)
+{
+    if (!consume(reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    json_string_t symbol = {0};
+    bool have_symbol = false, have_price = false, have_change = false;
+    int64_t price = 0, change = 0;
+    for (;;) {
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') {
+            ++reader->cursor;
+            break;
+        }
+        json_string_t key = {0};
+        if (!read_string(reader, &key) || !consume(reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        if (string_equals(&key, "symbol")) {
+            if (have_symbol || !read_string(reader, &symbol))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_symbol = true;
+        } else if (string_equals(&key, "regularMarketPrice")) {
+            json_number_t number = {0};
+            if (have_price || !read_number(reader, &number))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_price = true;
+            const offline_provider_result_t result =
+                parse_scaled_number(&number, 2U, 1, UINT32_C(100000000), &price);
+            if (result != OFFLINE_PROVIDER_OK) return result;
+        } else if (string_equals(&key, "regularMarketChangePercent")) {
+            json_number_t number = {0};
+            if (have_change || !read_number(reader, &number))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_change = true;
+            const offline_provider_result_t result =
+                parse_scaled_number(&number, 2U, INT16_MIN, INT16_MAX, &change);
+            if (result != OFFLINE_PROVIDER_OK) return result;
+        } else if (!skip_value(reader, 1U)) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') {
+            ++reader->cursor;
+            break;
+        }
+        if (reader->cursor >= reader->end || *reader->cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    if (!have_symbol) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+
+    offline_index_data_t *index_quote = NULL;
+    offline_ibovespa_data_t *ibov_quote = NULL;
+    if (string_equals(&symbol, "^BVSP")) ibov_quote = ibovespa;
+    else if (string_equals(&symbol, "^GSPC")) index_quote = sp500;
+    else if (string_equals(&symbol, "^IXIC")) index_quote = nasdaq;
+    else return OFFLINE_PROVIDER_OK;
+
+    if (!have_price || (ibov_quote != NULL && ibov_quote->available) ||
+        (index_quote != NULL && index_quote->available))
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    *matched = true;
+    if (ibov_quote != NULL) {
+        *ibov_quote = (offline_ibovespa_data_t){
+            .available = true,
+            .value_centi_points = (uint32_t)price,
+            .change_available = have_change,
+            .change_basis_points = (int16_t)change,
+            .observed_at_unix_s = observed_at_unix_s,
+        };
+    } else {
+        *index_quote = (offline_index_data_t){
+            .available = true,
+            .value_centi_points = (uint32_t)price,
+            .change_available = have_change,
+            .change_basis_points = (int16_t)change,
+            .observed_at_unix_s = observed_at_unix_s,
+        };
+    }
+    return OFFLINE_PROVIDER_OK;
+}
+
+offline_provider_result_t offline_brapi_parse_market_indices(
+    const uint8_t *body, size_t body_size, uint32_t observed_at_unix_s,
+    offline_ibovespa_data_t *out_ibovespa, offline_index_data_t *out_sp500,
+    offline_index_data_t *out_nasdaq)
+{
+    if (body == NULL || out_ibovespa == NULL || out_sp500 == NULL ||
+        out_nasdaq == NULL || observed_at_unix_s == 0U)
+        return OFFLINE_PROVIDER_INVALID_ARGUMENT;
+    if (body_size == 0U || body_size > OFFLINE_MARKET_MAX_BODY_BYTES)
+        return OFFLINE_PROVIDER_BODY_TOO_LARGE;
+
+    json_reader_t reader = {body, body + body_size};
+    offline_ibovespa_data_t ibovespa = {0};
+    offline_index_data_t sp500 = {0}, nasdaq = {0};
+    bool found_results = false, matched = false;
+    if (!consume(&reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (;;) {
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') {
+            ++reader.cursor;
+            break;
+        }
+        json_string_t key = {0};
+        if (!read_string(&reader, &key) || !consume(&reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        if (string_equals(&key, "results")) {
+            if (found_results || !consume(&reader, '['))
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            found_results = true;
+            skip_space(&reader);
+            if (reader.cursor < reader.end && *reader.cursor == ']') {
+                ++reader.cursor;
+            } else {
+                for (;;) {
+                    const offline_provider_result_t result = parse_brapi_quote(
+                        &reader, observed_at_unix_s, &ibovespa, &sp500, &nasdaq, &matched);
+                    if (result != OFFLINE_PROVIDER_OK) return result;
+                    skip_space(&reader);
+                    if (reader.cursor < reader.end && *reader.cursor == ']') {
+                        ++reader.cursor;
+                        break;
+                    }
+                    if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+                        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+                }
+            }
+        } else if (!skip_value(&reader, 1U)) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') {
+            ++reader.cursor;
+            break;
+        }
+        if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    skip_space(&reader);
+    if (!found_results || !matched || reader.cursor != reader.end)
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    *out_ibovespa = ibovespa;
+    *out_sp500 = sp500;
+    *out_nasdaq = nasdaq;
+    return OFFLINE_PROVIDER_OK;
+}
+
+/* The forecast response is intentionally fixed-size. The request asks for
+ * five hourly values and five daily values (today plus the four rows shown by
+ * the screen), so a changed or incomplete provider response is rejected as a
+ * whole instead of mixing data from different forecast runs. */
+static offline_provider_result_t parse_u32_array(json_reader_t *reader, uint32_t *out,
+                                                  size_t expected, uint32_t minimum,
+                                                  uint32_t maximum)
+{
+    if (!consume(reader, '[')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (size_t index = 0U; index < expected; ++index) {
+        json_number_t number = {0};
+        if (!read_number(reader, &number) ||
+            parse_u32(&number, minimum, maximum, &out[index]) != OFFLINE_PROVIDER_OK) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        skip_space(reader);
+        if (index + 1U < expected) {
+            if (reader->cursor >= reader->end || *reader->cursor++ != ',')
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+    }
+    skip_space(reader);
+    if (reader->cursor >= reader->end || *reader->cursor++ != ']')
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    return OFFLINE_PROVIDER_OK;
+}
+
+static offline_provider_result_t parse_deci_array(json_reader_t *reader, int16_t *out,
+                                                   size_t expected)
+{
+    if (!consume(reader, '[')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (size_t index = 0U; index < expected; ++index) {
+        json_number_t number = {0};
+        int64_t value = 0;
+        if (!read_number(reader, &number) ||
+            parse_scaled_number(&number, 1U, -1000, 1000, &value) != OFFLINE_PROVIDER_OK) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        out[index] = (int16_t)value;
+        skip_space(reader);
+        if (index + 1U < expected) {
+            if (reader->cursor >= reader->end || *reader->cursor++ != ',')
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+    }
+    skip_space(reader);
+    if (reader->cursor >= reader->end || *reader->cursor++ != ']')
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    return OFFLINE_PROVIDER_OK;
+}
+
+static offline_provider_result_t parse_hourly_forecast(json_reader_t *reader,
+                                                        offline_weather_data_t *out)
+{
+    uint32_t time[OFFLINE_WEATHER_HOURLY_MAX] = {0};
+    uint32_t code[OFFLINE_WEATHER_HOURLY_MAX] = {0};
+    uint32_t precipitation[OFFLINE_WEATHER_HOURLY_MAX] = {0};
+    int16_t temperature[OFFLINE_WEATHER_HOURLY_MAX] = {0};
+    bool have_time = false, have_temperature = false, have_code = false, have_precipitation = false;
+    if (!consume(reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (;;) {
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') { ++reader->cursor; break; }
+        json_string_t key = {0};
+        if (!read_string(reader, &key) || !consume(reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        offline_provider_result_t result = OFFLINE_PROVIDER_OK;
+        if (string_equals(&key, "time")) {
+            if (have_time) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_time = true;
+            result = parse_u32_array(reader, time, OFFLINE_WEATHER_HOURLY_MAX, 1U, UINT32_MAX);
+        } else if (string_equals(&key, "temperature_2m")) {
+            if (have_temperature) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_temperature = true;
+            result = parse_deci_array(reader, temperature, OFFLINE_WEATHER_HOURLY_MAX);
+        } else if (string_equals(&key, "weather_code")) {
+            if (have_code) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_code = true;
+            result = parse_u32_array(reader, code, OFFLINE_WEATHER_HOURLY_MAX, 0U, UINT16_MAX);
+        } else if (string_equals(&key, "precipitation_probability")) {
+            if (have_precipitation) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_precipitation = true;
+            result = parse_u32_array(reader, precipitation, OFFLINE_WEATHER_HOURLY_MAX, 0U, 100U);
+        } else if (!skip_value(reader, 1U)) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        if (result != OFFLINE_PROVIDER_OK) return result;
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') { ++reader->cursor; break; }
+        if (reader->cursor >= reader->end || *reader->cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    if (!have_time || !have_temperature || !have_code || !have_precipitation)
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (size_t index = 0U; index < OFFLINE_WEATHER_HOURLY_MAX; ++index) {
+        if (index > 0U && time[index] <= time[index - 1U]) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        out->hourly[index].time_unix_s = time[index];
+        out->hourly[index].temperature_deci_c = temperature[index];
+        out->hourly[index].weather_code = (uint16_t)code[index];
+        out->hourly[index].precipitation_probability_percent = (uint8_t)precipitation[index];
+    }
+    return OFFLINE_PROVIDER_OK;
+}
+
+static offline_provider_result_t parse_daily_forecast(json_reader_t *reader,
+                                                       offline_weather_data_t *out)
+{
+    enum { DAILY_SOURCE_COUNT = OFFLINE_WEATHER_DAILY_MAX + 1U };
+    uint32_t time[DAILY_SOURCE_COUNT] = {0};
+    uint32_t code[DAILY_SOURCE_COUNT] = {0};
+    uint32_t sunrise[DAILY_SOURCE_COUNT] = {0};
+    uint32_t sunset[DAILY_SOURCE_COUNT] = {0};
+    int16_t minimum[DAILY_SOURCE_COUNT] = {0};
+    int16_t maximum[DAILY_SOURCE_COUNT] = {0};
+    int16_t precipitation[DAILY_SOURCE_COUNT] = {0};
+    bool have_time = false, have_code = false, have_minimum = false, have_maximum = false;
+    bool have_sunrise = false, have_sunset = false, have_precipitation = false;
+    if (!consume(reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (;;) {
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') { ++reader->cursor; break; }
+        json_string_t key = {0};
+        if (!read_string(reader, &key) || !consume(reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        offline_provider_result_t result = OFFLINE_PROVIDER_OK;
+        if (string_equals(&key, "time")) {
+            if (have_time) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_time = true; result = parse_u32_array(reader, time, DAILY_SOURCE_COUNT, 1U, UINT32_MAX);
+        } else if (string_equals(&key, "weather_code")) {
+            if (have_code) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_code = true; result = parse_u32_array(reader, code, DAILY_SOURCE_COUNT, 0U, UINT16_MAX);
+        } else if (string_equals(&key, "temperature_2m_min")) {
+            if (have_minimum) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_minimum = true; result = parse_deci_array(reader, minimum, DAILY_SOURCE_COUNT);
+        } else if (string_equals(&key, "temperature_2m_max")) {
+            if (have_maximum) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_maximum = true; result = parse_deci_array(reader, maximum, DAILY_SOURCE_COUNT);
+        } else if (string_equals(&key, "sunrise")) {
+            if (have_sunrise) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_sunrise = true; result = parse_u32_array(reader, sunrise, DAILY_SOURCE_COUNT, 1U, UINT32_MAX);
+        } else if (string_equals(&key, "sunset")) {
+            if (have_sunset) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_sunset = true; result = parse_u32_array(reader, sunset, DAILY_SOURCE_COUNT, 1U, UINT32_MAX);
+        } else if (string_equals(&key, "precipitation_sum")) {
+            if (have_precipitation) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_precipitation = true; result = parse_deci_array(reader, precipitation, DAILY_SOURCE_COUNT);
+        } else if (!skip_value(reader, 1U)) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        if (result != OFFLINE_PROVIDER_OK) return result;
+        skip_space(reader);
+        if (reader->cursor < reader->end && *reader->cursor == '}') { ++reader->cursor; break; }
+        if (reader->cursor >= reader->end || *reader->cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    if (!have_time || !have_code || !have_minimum || !have_maximum || !have_sunrise || !have_sunset ||
+        !have_precipitation || minimum[0] > maximum[0] || precipitation[0] < 0 ||
+        sunrise[0] >= sunset[0]) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    out->today_temperature_min_deci_c = minimum[0];
+    out->today_temperature_max_deci_c = maximum[0];
+    out->today_precipitation_sum_deci_mm = (uint16_t)precipitation[0];
+    out->sunrise_unix_s = sunrise[0];
+    out->sunset_unix_s = sunset[0];
+    for (size_t index = 0U; index < OFFLINE_WEATHER_DAILY_MAX; ++index) {
+        const size_t source = index + 1U;
+        if (time[source] <= time[source - 1U] || minimum[source] > maximum[source])
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        out->daily[index].time_unix_s = time[source];
+        out->daily[index].temperature_min_deci_c = minimum[source];
+        out->daily[index].temperature_max_deci_c = maximum[source];
+        out->daily[index].weather_code = (uint16_t)code[source];
+    }
+    return OFFLINE_PROVIDER_OK;
+}
+
+offline_provider_result_t offline_open_meteo_parse_forecast(const uint8_t *body, size_t body_size,
+                                                             uint32_t observed_at_unix_s,
+                                                             offline_weather_data_t *out_weather)
+{
+    if (body == NULL || out_weather == NULL || observed_at_unix_s == 0U)
+        return OFFLINE_PROVIDER_INVALID_ARGUMENT;
+    if (body_size == 0U || body_size > OFFLINE_WEATHER_MAX_BODY_BYTES)
+        return OFFLINE_PROVIDER_BODY_TOO_LARGE;
+    json_reader_t reader = {body, body + body_size};
+    offline_weather_data_t candidate = {.available = true, .observed_at_unix_s = observed_at_unix_s};
+    bool have_current = false, have_hourly = false, have_daily = false, have_offset = false;
+    if (!consume(&reader, '{')) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    for (;;) {
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+        json_string_t key = {0};
+        if (!read_string(&reader, &key) || !consume(&reader, ':'))
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        offline_provider_result_t result = OFFLINE_PROVIDER_OK;
+        if (string_equals(&key, "current")) {
+            if (have_current) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_current = true; result = parse_weather_object(&reader, &candidate);
+        } else if (string_equals(&key, "hourly")) {
+            if (have_hourly) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_hourly = true; result = parse_hourly_forecast(&reader, &candidate);
+        } else if (string_equals(&key, "daily")) {
+            if (have_daily) return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            have_daily = true; result = parse_daily_forecast(&reader, &candidate);
+        } else if (string_equals(&key, "utc_offset_seconds")) {
+            json_number_t number = {0};
+            int64_t offset = 0;
+            if (have_offset || !read_number(&reader, &number) ||
+                parse_scaled_number(&number, 0U, -50400, 50400, &offset) != OFFLINE_PROVIDER_OK) {
+                return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+            }
+            have_offset = true;
+            candidate.utc_offset_seconds = (int32_t)offset;
+        } else if (!skip_value(&reader, 1U)) {
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+        }
+        if (result != OFFLINE_PROVIDER_OK) return result;
+        skip_space(&reader);
+        if (reader.cursor < reader.end && *reader.cursor == '}') { ++reader.cursor; break; }
+        if (reader.cursor >= reader.end || *reader.cursor++ != ',')
+            return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    }
+    skip_space(&reader);
+    if (reader.cursor != reader.end || !have_current || !have_hourly || !have_daily || !have_offset)
+        return OFFLINE_PROVIDER_MALFORMED_RESPONSE;
+    candidate.forecast_available = true;
+    *out_weather = candidate;
     return OFFLINE_PROVIDER_OK;
 }

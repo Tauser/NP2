@@ -38,6 +38,7 @@ logs/
 artifacts/
 design/clima/generated/
 design/clima/generated-160/
+design/clima/static/
 keys/
 credentials/
 secrets/

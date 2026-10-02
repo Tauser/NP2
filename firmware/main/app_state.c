@@ -13,6 +13,7 @@
 #include "offline_data_codec.h"
 #include "onboarding_service.h"
 #include "notification_service.h"
+#include "onvif_discovery_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "time_service.h"
@@ -26,6 +27,7 @@
 #define APP_EXCHANGE_STALE_AFTER_S UINT32_C(129600)
 #if OFFLINE_DATA_SCHEMA_VERSION >= 4
 #define APP_IBOV_STALE_AFTER_S UINT32_C(1800)
+#define APP_INDEX_STALE_AFTER_S UINT32_C(1800)
 #endif
 #define APP_VALID_EPOCH_SECONDS UINT32_C(1735689600)
 
@@ -40,6 +42,8 @@ static offline_data_snapshot_t s_live_offline_data;
 static bool s_live_offline_data_valid;
 /* The app_loop alone mutates identity. FlashCoordinator owns its NVS records. */
 static user_profile_t s_user_profile;
+static pomodoro_service_t s_pomodoro;
+static bool s_pomodoro_completion_sound_latched;
 static user_profile_t s_profile_submitted;
 static bool s_user_profile_configured;
 static bool s_profile_restored;
@@ -201,6 +205,18 @@ static offline_data_snapshot_t project_offline_data(const offline_data_snapshot_
         projection.ibovespa.stale = projection.ibovespa.stale || age_s == UINT32_MAX ||
                                     age_s > APP_IBOV_STALE_AFTER_S;
     }
+    if (projection.sp500.available) {
+        const uint32_t age_s = snapshot_age_s(projection.sp500.observed_at_unix_s,
+                                               time_trusted);
+        projection.sp500.stale = projection.sp500.stale || age_s == UINT32_MAX ||
+                                 age_s > APP_INDEX_STALE_AFTER_S;
+    }
+    if (projection.nasdaq.available) {
+        const uint32_t age_s = snapshot_age_s(projection.nasdaq.observed_at_unix_s,
+                                               time_trusted);
+        projection.nasdaq.stale = projection.nasdaq.stale || age_s == UINT32_MAX ||
+                                  age_s > APP_INDEX_STALE_AFTER_S;
+    }
 #endif
     return projection;
 }
@@ -213,6 +229,7 @@ static void refresh_projection(void)
     onboarding_service_status_t onboarding = {0};
     weather_asset_service_status_t weather_assets = {0};
     notification_service_status_t notifications = {0};
+    onvif_discovery_status_t onvif = {0};
     device_control_status_t controls = {0};
     app_ui_projection_t candidate = {0};
 
@@ -223,6 +240,7 @@ static void refresh_projection(void)
     refresh_user_profile(&storage);
     onboarding_service_get_status(&onboarding);
     notification_service_get_status(&notifications);
+    onvif_discovery_service_get_status(&onvif);
     device_control_get_status(&controls);
 
     if (time_status.ready && time_status.timezone_index != onboarding.timezone_index) {
@@ -312,6 +330,21 @@ static void refresh_projection(void)
         .save_completion_mask = controls.save_completion_mask,
         .save_result = controls.save_result,
     };
+    candidate.iot = (app_iot_projection_t){
+        .ready = onvif.ready,
+        .scan_busy = onvif.scan_busy,
+        .scan_generation = onvif.scan_generation,
+        .camera_count = onvif.camera_count,
+        .last_result = onvif.last_result,
+    };
+    for (uint8_t i = 0U; i < onvif.camera_count &&
+         i < APP_IOT_MAX_CAMERAS; ++i) {
+        memcpy(candidate.iot.cameras[i].address, onvif.cameras[i].address,
+               sizeof(candidate.iot.cameras[i].address));
+        memcpy(candidate.iot.cameras[i].model, onvif.cameras[i].model,
+               sizeof(candidate.iot.cameras[i].model));
+        candidate.iot.cameras[i].online = onvif.cameras[i].online;
+    }
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
     memcpy(candidate.system.firmware_version, controls.firmware_version,
            sizeof(candidate.system.firmware_version));
@@ -331,6 +364,17 @@ static void refresh_projection(void)
                                    ? (uint32_t)now
                                    : 0U;
     candidate.last_time_sync_unix_s = time_status.last_sync_unix_s;
+    pomodoro_service_tick(&s_pomodoro,
+                          (uint64_t)esp_timer_get_time() / UINT64_C(1000),
+                          candidate.time_trusted, candidate.current_unix_s);
+    if (s_pomodoro.projection.completed &&
+        !s_pomodoro_completion_sound_latched) {
+        (void)device_control_play_pomodoro_alarm();
+        s_pomodoro_completion_sound_latched = true;
+    } else if (!s_pomodoro.projection.completed) {
+        s_pomodoro_completion_sound_latched = false;
+    }
+    pomodoro_service_copy(&s_pomodoro, &candidate.pomodoro);
     const offline_data_snapshot_t *const source = s_live_offline_data_valid
                                                        ? &s_live_offline_data
                                                        : (storage.offline_data_valid
@@ -413,6 +457,24 @@ static void app_loop_task(void *arg)
                 s_profile_dirty = true;
                 s_profile_result = ESP_OK;
             }
+        } else if (result == ESP_OK && event.type == APP_EVENT_POMODORO_COMMAND) {
+            pomodoro_service_apply(&s_pomodoro, event.pomodoro_command,
+                event.pomodoro_value,
+                (uint64_t)esp_timer_get_time() / UINT64_C(1000));
+        } else if (result == ESP_OK && event.type == APP_EVENT_ONVIF_SCAN_REQUEST) {
+            const esp_err_t scan_result = onvif_discovery_service_request_scan();
+            if (scan_result != ESP_OK) {
+                ESP_LOGW(TAG, "ONVIF scan request unavailable: %s",
+                         esp_err_to_name(scan_result));
+            }
+        } else if (result == ESP_OK &&
+                   event.type == APP_EVENT_ONVIF_ADDRESS_REQUEST) {
+            const esp_err_t scan_result = onvif_discovery_service_request_address(
+                event.onvif_address);
+            if (scan_result != ESP_OK) {
+                ESP_LOGW(TAG, "ONVIF address check unavailable: %s",
+                         esp_err_to_name(scan_result));
+            }
         } else if (result == ESP_OK && event.type != APP_EVENT_REFRESH_PLATFORM) {
             ESP_LOGW(TAG, "discarded unknown app event %u", (unsigned int)event.type);
         }
@@ -437,6 +499,7 @@ esp_err_t app_state_start(void)
         portEXIT_CRITICAL(&s_state_lock);
         return result;
     }
+    pomodoro_service_init(&s_pomodoro);
     if (xTaskCreate(app_loop_task, "app_loop", APP_LOOP_STACK_BYTES, NULL,
                     APP_LOOP_PRIORITY, NULL) != pdPASS) {
         portENTER_CRITICAL(&s_state_lock);

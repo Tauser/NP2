@@ -116,7 +116,7 @@ void np_styles_init(void)
     lv_style_set_pad_all(&s_icon_button, 0);
 
     lv_style_init(&s_drawer);
-    lv_style_set_bg_color(&s_drawer, np_c_surface());
+    lv_style_set_bg_color(&s_drawer, np_c_surface_raised());
     lv_style_set_bg_opa(&s_drawer, LV_OPA_COVER);
     lv_style_set_border_width(&s_drawer, 0);
     lv_style_set_radius(&s_drawer, NP_RADIUS_SURFACE);

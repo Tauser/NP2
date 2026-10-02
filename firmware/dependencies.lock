@@ -47,6 +47,20 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.5.11
+  espressif/esp_h264:
+    component_hash: 3d60078419ceac61cd87579664ae6a5a9b9a42d6f2edf4e23d753af8d2a67da9
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32s3
+    - esp32s31
+    - esp32p4
+    version: 1.4.1
   espressif/esp_hosted:
     component_hash: 1b1c2aa8f82e0826950ec92ff16fd8f327abd2de6c8a3899301ad8cfb4747879
     dependencies:
@@ -272,6 +286,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.6.58~2
+  espressif/mdns:
+    component_hash: dec353e2d721fd52037694455e2c2a50ac1d1f8e5e24a256c6bebf0c537f9dac
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.5.3
   espressif/wifi_remote_over_eppp:
     component_hash: 1fd6968af20f0b19e421f6b519b0a8caf81d689afc3783b564c28559e45f66ef
     dependencies:
@@ -357,6 +381,7 @@ dependencies:
     version: 3.0.1
 direct_dependencies:
 - espressif/button
+- espressif/esp_h264
 - espressif/esp_hosted
 - espressif/esp_lcd_touch
 - espressif/esp_lv_decoder
@@ -365,10 +390,11 @@ direct_dependencies:
 - espressif/esp_wifi_remote
 - espressif/freetype
 - espressif/knob
+- espressif/mdns
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
 - waveshare/esp32_p4_wifi6_touch_lcd_7b
-manifest_hash: abd70979d5aaca3179233911b86c677309fdb1a4db4d0a00bff761294eeae534
+manifest_hash: 1df5045ce70cb46791715cc2503463087c0460bf955e1f314ae0418faeb1aaf0
 target: esp32p4
 version: 2.0.0

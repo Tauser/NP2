@@ -73,12 +73,23 @@ static const char *const NP2_HTTPS_OVERSIZE_URL = "https://httpbin.org/bytes/204
 static const char *const NP2_OPEN_METEO_BRASILIA_URL =
     "https://api.open-meteo.com/v1/forecast?latitude=-15.793889&longitude=-47.882778"
     "&current=temperature_2m,relative_humidity_2m,weather_code,apparent_temperature,"
-    "wind_speed_10m,uv_index&timezone=UTC";
+    "wind_speed_10m,wind_direction_10m,uv_index"
+    "&hourly=temperature_2m,weather_code,precipitation_probability&forecast_hours=5"
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum"
+    "&forecast_days=5&timezone=America%2FSao_Paulo&timeformat=unixtime";
 static const char *const NP2_COINGECKO_BITCOIN_URL =
-    "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=bitcoin"
-    "&order=market_cap_desc&per_page=1&page=1&sparkline=false";
+    "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd"
+    "&ids=bitcoin,ethereum,solana,binancecoin,ripple&order=market_cap_desc"
+    "&per_page=5&page=1&sparkline=false";
 static const char *const NP2_BCB_USD_BRL_URL =
     "https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/2?formato=json";
+static const char *const NP2_ALTERNATIVE_ME_FEAR_GREED_URL =
+    "https://api.alternative.me/fng/?limit=1&format=json";
+static const char *const NP2_BRAPI_MARKET_INDEX_URLS[] = {
+    "https://brapi.dev/api/quote/%5EBVSP",
+    "https://brapi.dev/api/quote/%5EGSPC",
+    "https://brapi.dev/api/quote/%5EIXIC",
+};
 
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static network_validation_status_t s_status = {
@@ -412,6 +423,31 @@ static esp_err_t perform_coingecko_request(const char *url, uint32_t timeout_ms,
     return result;
 }
 
+static esp_err_t perform_brapi_request(const char *url, uint32_t timeout_ms,
+                                       size_t maximum_body_bytes, uint8_t *out_body,
+                                       size_t out_body_size, size_t *out_body_length)
+{
+    char api_key[FLASH_COORDINATOR_BRAPI_API_KEY_BYTES] = {0};
+    esp_err_t result = flash_coordinator_copy_brapi_api_key(api_key, sizeof(api_key));
+    if (result != ESP_OK) {
+        secure_zero(api_key, sizeof(api_key));
+        ESP_LOGW(TAG, "Brapi API key unavailable: %s", esp_err_to_name(result));
+        return result;
+    }
+    char authorization[FLASH_COORDINATOR_BRAPI_API_KEY_BYTES + 8U] = {0};
+    const int written = snprintf(authorization, sizeof(authorization), "Bearer %s", api_key);
+    secure_zero(api_key, sizeof(api_key));
+    if (written < 0 || (size_t)written >= sizeof(authorization)) {
+        secure_zero(authorization, sizeof(authorization));
+        return ESP_ERR_INVALID_SIZE;
+    }
+    result = perform_https_request_with_header(
+        url, timeout_ms, HTTP_METHOD_GET, "Authorization", authorization,
+        maximum_body_bytes, out_body, out_body_size, out_body_length);
+    secure_zero(authorization, sizeof(authorization));
+    return result;
+}
+
 static esp_err_t validate_https(const char *url, uint32_t timeout_ms,
                                 esp_http_client_method_t method, size_t maximum_body_bytes)
 {
@@ -612,6 +648,19 @@ static void retain_exchange_as_stale(offline_data_snapshot_t *snapshot)
     }
 }
 
+static void retain_market_overview_as_stale(offline_data_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    for (size_t index = 0U; index < OFFLINE_MARKET_ALTCOIN_COUNT; ++index)
+        if (snapshot->altcoins[index].available) snapshot->altcoins[index].stale = true;
+}
+
+static void retain_fear_greed_as_stale(offline_data_snapshot_t *snapshot)
+{
+    if (snapshot != NULL && snapshot->fear_greed.available)
+        snapshot->fear_greed.stale = true;
+}
+
 /* The snapshot persists the last confirmed period, not a clock. A later boot
  * can therefore restore the exact visual choice without treating a stale
  * timestamp as current time. */
@@ -685,7 +734,7 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
                                        HTTP_METHOD_GET, OFFLINE_WEATHER_MAX_BODY_BYTES, body,
                                        NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
         if (result == ESP_OK) {
-            result = provider_result_to_esp_err(offline_open_meteo_parse_current(
+            result = provider_result_to_esp_err(offline_open_meteo_parse_forecast(
                 body, body_size, (uint32_t)now, &s_product_snapshot.weather));
         }
         if (result == ESP_OK) {
@@ -703,17 +752,18 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
             remaining_request_budget_ms(request_start_us),
             OFFLINE_MARKET_MAX_BODY_BYTES, body,
             NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
-        if (result == ESP_OK) {
-            result = provider_result_to_esp_err(
-                offline_coingecko_parse_bitcoin_market(
-                    body, body_size, (uint32_t)now, &fresh_market));
-        }
+        offline_altcoin_data_t fresh_altcoins[OFFLINE_MARKET_ALTCOIN_COUNT] = {0};
+        if (result == ESP_OK) result = provider_result_to_esp_err(
+            offline_coingecko_parse_market_overview(body, body_size, (uint32_t)now,
+                                                     &fresh_market, fresh_altcoins));
         if (result == ESP_OK) {
             append_market_history(&fresh_market, &previous_market);
             fresh_market.stale = false;
             s_product_snapshot.market = fresh_market;
+            memcpy(s_product_snapshot.altcoins, fresh_altcoins, sizeof(fresh_altcoins));
         } else {
             retain_market_as_stale(&s_product_snapshot);
+            retain_market_overview_as_stale(&s_product_snapshot);
         }
         break;
     }
@@ -729,6 +779,55 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
         if (result == ESP_OK) s_product_snapshot.exchange.stale = false;
         else retain_exchange_as_stale(&s_product_snapshot);
         break;
+    case DATA_REFRESH_DOMAIN_FEAR_GREED:
+        result = perform_https_request(NP2_ALTERNATIVE_ME_FEAR_GREED_URL,
+                                       remaining_request_budget_ms(request_start_us),
+                                       HTTP_METHOD_GET, OFFLINE_EXCHANGE_MAX_BODY_BYTES, body,
+                                       NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+        if (result == ESP_OK) result = provider_result_to_esp_err(
+            offline_alternative_me_parse_fear_greed(body, body_size, (uint32_t)now,
+                                                     &s_product_snapshot.fear_greed));
+        if (result == ESP_OK) s_product_snapshot.fear_greed.stale = false;
+        else retain_fear_greed_as_stale(&s_product_snapshot);
+        break;
+    case DATA_REFRESH_DOMAIN_MARKET_INDICES: {
+        if (s_product_snapshot.ibovespa.available) s_product_snapshot.ibovespa.stale = true;
+        if (s_product_snapshot.sp500.available) s_product_snapshot.sp500.stale = true;
+        if (s_product_snapshot.nasdaq.available) s_product_snapshot.nasdaq.stale = true;
+        esp_err_t first_failure = ESP_OK;
+        for (size_t index = 0U;
+             index < sizeof(NP2_BRAPI_MARKET_INDEX_URLS) /
+                         sizeof(NP2_BRAPI_MARKET_INDEX_URLS[0]);
+             ++index) {
+            const uint32_t timeout_ms = remaining_request_budget_ms(request_start_us);
+            if (timeout_ms == 0U) {
+                if (first_failure == ESP_OK) first_failure = ESP_ERR_TIMEOUT;
+                break;
+            }
+            offline_ibovespa_data_t ibovespa = {0};
+            offline_index_data_t sp500 = {0}, nasdaq = {0};
+            result = perform_brapi_request(NP2_BRAPI_MARKET_INDEX_URLS[index], timeout_ms,
+                                           OFFLINE_MARKET_MAX_BODY_BYTES, body,
+                                           NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+            if (result == ESP_OK) result = provider_result_to_esp_err(
+                offline_brapi_parse_market_indices(body, body_size, (uint32_t)now,
+                                                   &ibovespa, &sp500, &nasdaq));
+            if (result == ESP_OK && index == 0U && ibovespa.available) {
+                s_product_snapshot.ibovespa = ibovespa;
+            } else if (result == ESP_OK && index == 1U && sp500.available) {
+                s_product_snapshot.sp500 = sp500;
+            } else if (result == ESP_OK && index == 2U && nasdaq.available) {
+                s_product_snapshot.nasdaq = nasdaq;
+            } else if (result == ESP_OK) {
+                result = ESP_ERR_NOT_FOUND;
+            }
+            if (result != ESP_OK) {
+                if (first_failure == ESP_OK) first_failure = result;
+            }
+        }
+        result = first_failure;
+        break;
+    }
     case DATA_REFRESH_DOMAIN_COUNT:
     default:
         return ESP_ERR_INVALID_ARG;
@@ -744,6 +843,8 @@ static esp_err_t refresh_all_product_domains(int64_t request_start_us)
         DATA_REFRESH_DOMAIN_BITCOIN,
         DATA_REFRESH_DOMAIN_WEATHER,
         DATA_REFRESH_DOMAIN_USD_BRL,
+        DATA_REFRESH_DOMAIN_FEAR_GREED,
+        DATA_REFRESH_DOMAIN_MARKET_INDICES,
     };
     for (size_t index = 0U; index < sizeof(domains) / sizeof(domains[0]); ++index) {
         const esp_err_t result = refresh_product_domain(domains[index], request_start_us);

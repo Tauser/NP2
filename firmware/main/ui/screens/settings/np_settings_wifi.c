@@ -358,10 +358,10 @@ np_settings_wifi_view_t np_settings_wifi_scene_build(lv_obj_t *parent)
     view.wifi.selected_index = NP_SETTINGS_WIFI_VISIBLE_RESULTS;
     lv_obj_t *main = np_panel(view.root, 24, 80, 600, 496);
     np_label(main, NP_ICON_WIFI, NP_FONT_ICON_BADGE, np_c_accent(), 24, 26, 56, LV_TEXT_ALIGN_CENTER);
-    np_label(main, "Wi-Fi", NP_FONT_TITLE, np_c_text(), 96, 16, 480, LV_TEXT_ALIGN_LEFT);
-    view.add_button = np_button(main, 420, 16, 164, 44, "Adicionar rede", false);
+    np_label(main, "Wi-Fi", NP_FONT_TITLE, np_c_text(), 96, 16, 360, LV_TEXT_ALIGN_LEFT);
+    view.add_button = np_icon_button(main, 480, 16, NP_TOUCH_TARGET, NP_ICON_ADD);
     np_label(main, "Conexão e gerenciamento de redes", NP_FONT_SM, np_c_text_2(),
-        96, 60, 480, LV_TEXT_ALIGN_LEFT);
+        96, 60, 380, LV_TEXT_ALIGN_LEFT);
     np_hline(main, 16, 96, 568);
     np_label(main, "Rede atual", NP_FONT_SM, np_c_text_2(), 20, 110, 400, LV_TEXT_ALIGN_LEFT);
     view.current_row = np_fill(main, 16, 138, 568, 68, np_c_surface_raised(), LV_OPA_COVER, NP_RADIUS_CONTROL);
@@ -375,7 +375,7 @@ np_settings_wifi_view_t np_settings_wifi_scene_build(lv_obj_t *parent)
         np_c_text_2(), 88, 38, 416, LV_TEXT_ALIGN_LEFT);
     np_label(view.current_row, NP_ICON_ARROW_RIGHT, NP_FONT_ICON, np_c_text_2(), 522, 22, 28, LV_TEXT_ALIGN_CENTER);
     np_label(main, "Redes disponíveis", NP_FONT_SM, np_c_text_2(), 20, 222, 400, LV_TEXT_ALIGN_LEFT);
-    view.wifi.scan_button = np_icon_button(main, 538, 211, NP_TOUCH_TARGET, NP_ICON_SEARCH);
+    view.wifi.scan_button = np_icon_button(main, 536, 16, NP_TOUCH_TARGET, NP_ICON_REFRESH);
     for (uint8_t i = 0; i < SCENE_WIFI_ROWS; ++i) {
         lv_obj_t *row = np_fill(main, 16, 250 + i * 48, 568, 48,
             np_c_surface_raised(), LV_OPA_COVER, NP_RADIUS_CONTROL);
@@ -387,7 +387,7 @@ np_settings_wifi_view_t np_settings_wifi_scene_build(lv_obj_t *parent)
         view.wifi.network_locks[i] = np_label(row, NP_ICON_LOCK, NP_FONT_ICON, np_c_text_2(), 524, 11, 28, LV_TEXT_ALIGN_CENTER);
         np_set_visible(row, false);
     }
-    view.empty_label = np_label(main, "Toque na lupa para buscar redes", NP_FONT_SM,
+    view.empty_label = np_label(main, "Toque em atualizar para buscar redes", NP_FONT_SM,
         np_c_text_3(), 20, 280, 540, LV_TEXT_ALIGN_CENTER);
     view.previous_page = np_icon_button(main, 16, 448, NP_TOUCH_TARGET, NP_ICON_ARROW_LEFT);
     view.next_page = np_icon_button(main, 538, 448, NP_TOUCH_TARGET, NP_ICON_ARROW_RIGHT);
@@ -442,7 +442,7 @@ void np_settings_wifi_scene_sync(np_settings_wifi_view_t *view, np_wifi_status_t
     snprintf(view->ip_address, sizeof(view->ip_address), "%s", ip != NULL ? ip : "");
     snprintf(view->gateway_address, sizeof(view->gateway_address), "%s", gateway != NULL ? gateway : "");
     scene_page(view);
-    np_set_text(view->empty_label, scanning ? "Buscando redes..." : "Nenhuma rede na última busca. Toque na lupa.");
+    np_set_text(view->empty_label, scanning ? "Buscando redes..." : "Nenhuma rede na última busca. Toque em atualizar.");
     if (scanning || status == NP_WIFI_STATUS_CONNECTING) lv_obj_add_state(view->wifi.scan_button, LV_STATE_DISABLED);
     else lv_obj_remove_state(view->wifi.scan_button, LV_STATE_DISABLED);
 }

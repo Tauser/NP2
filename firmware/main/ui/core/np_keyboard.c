@@ -118,9 +118,6 @@ static void keyboard_event_cb(lv_event_t *event)
     }
     if (code == LV_EVENT_PRESSED) {
         keyboard->interaction_inside_keyboard = true;
-        const uint32_t index = lv_keyboard_get_selected_button(keyboard->keyboard);
-        keyboard->pressed_key = index == LV_BUTTONMATRIX_BUTTON_NONE ? NULL
-                              : lv_keyboard_get_button_text(keyboard->keyboard, index);
         return;
     }
     if (code == LV_EVENT_CANCEL) {
@@ -140,10 +137,13 @@ static void keyboard_event_cb(lv_event_t *event)
         keyboard->private_input == NULL) return;
 
     const uint32_t index = lv_keyboard_get_selected_button(keyboard->keyboard);
-    if (index == LV_BUTTONMATRIX_BUTTON_NONE) return;
     const char *const key = keyboard->pressed_key != NULL ? keyboard->pressed_key
+                        : index == LV_BUTTONMATRIX_BUTTON_NONE ? NULL
                         : lv_keyboard_get_button_text(keyboard->keyboard, index);
-    if (key == NULL) return;
+    if (key == NULL) {
+        keyboard->pressed_key = NULL;
+        return;
+    }
 
     if (strcmp(key, LV_SYMBOL_BACKSPACE) == 0) {
         keyboard->private_input(keyboard->private_input_user_data, LV_SYMBOL_BACKSPACE);
@@ -156,6 +156,21 @@ static void keyboard_event_cb(lv_event_t *event)
         keyboard->private_input(keyboard->private_input_user_data, key);
     }
     keyboard->pressed_key = NULL;
+}
+
+static void keyboard_value_changed_preprocess_cb(lv_event_t *event)
+{
+    np_keyboard_t *const keyboard = lv_event_get_user_data(event);
+    if (keyboard == NULL || !keyboard->private_input_active) return;
+
+    /* The default LVGL callback may replace the key map before our regular
+     * VALUE_CHANGED callback runs (for example when switching to 1#). Capture
+     * the label using the original button index before that map change. */
+    const uint32_t *const event_button = lv_event_get_param(event);
+    const uint32_t index = event_button != NULL ? *event_button
+                          : lv_keyboard_get_selected_button(keyboard->keyboard);
+    keyboard->pressed_key = index == LV_BUTTONMATRIX_BUTTON_NONE ? NULL
+                          : lv_keyboard_get_button_text(keyboard->keyboard, index);
 }
 
 static void stop_private_input(np_keyboard_t *keyboard)
@@ -172,6 +187,8 @@ static void ensure_keyboard_events(np_keyboard_t *keyboard)
         keyboard->keyboard_events_registered) return;
     lv_obj_add_event_cb(keyboard->keyboard, keyboard_event_cb, LV_EVENT_ALL,
                         keyboard);
+    lv_obj_add_event_cb(keyboard->keyboard, keyboard_value_changed_preprocess_cb,
+                        LV_EVENT_VALUE_CHANGED | LV_EVENT_PREPROCESS, keyboard);
     keyboard->keyboard_events_registered = true;
 }
 

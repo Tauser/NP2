@@ -8,6 +8,8 @@
 #define NP_SCREENS_H
 
 #include "np_components.h"
+#include "np_modal.h"
+#include "app_state.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +57,41 @@ typedef struct {
     np_market_strip_t ibov;
 } np_home_view_t;
 
+typedef struct {
+    lv_obj_t *root;
+    np_header_t header;
+    lv_obj_t *add_device_button;
+    lv_obj_t *add_sensor_button;
+    lv_obj_t *devices_empty_state;
+    lv_obj_t *camera_cards[APP_IOT_MAX_CAMERAS];
+    lv_obj_t *camera_names[APP_IOT_MAX_CAMERAS];
+    lv_obj_t *camera_addresses[APP_IOT_MAX_CAMERAS];
+    lv_obj_t *camera_status_dots[APP_IOT_MAX_CAMERAS];
+    char camera_ipv4[APP_IOT_MAX_CAMERAS][16];
+    np_modal_t camera_viewer_modal;
+    lv_obj_t *camera_stream_image;
+    lv_obj_t *camera_username_input;
+    lv_obj_t *camera_password_input;
+    lv_obj_t *camera_stream_start_button;
+    lv_obj_t *camera_stream_stop_button;
+    lv_obj_t *camera_stream_status;
+    uint8_t *camera_frame_buffer;
+    uint32_t camera_frame_sequence;
+    uint8_t selected_camera;
+    np_modal_t add_modal;
+    lv_obj_t *modal_description;
+    lv_obj_t *scan_button;
+    lv_obj_t *camera_scan_button;
+    lv_obj_t *camera_address_label;
+    lv_obj_t *camera_address_input;
+    lv_obj_t *camera_address_check_button;
+    lv_obj_t *scan_status;
+    lv_obj_t *scan_results;
+    lv_obj_t *modal_close_button;
+    bool onvif_scan_selected;
+    uint32_t onvif_seen_generation;
+} np_devices_view_t;
+
 np_boot_view_t np_boot_build(lv_obj_t *parent);
 np_home_view_t np_home_build(lv_obj_t *parent);
 np_home_view_t np_home_build_with_header(lv_obj_t *parent, const np_header_t *header);
@@ -76,6 +113,16 @@ lv_obj_t *np_agenda_create(lv_obj_t *parent);
 lv_obj_t *np_alarms_create(lv_obj_t *parent);
 lv_obj_t *np_notifications_create(lv_obj_t *parent);
 lv_obj_t *np_devices_create(lv_obj_t *parent);
+np_devices_view_t np_devices_build_with_header(lv_obj_t *parent,
+                                                const np_header_t *header);
+void np_devices_open_add(np_devices_view_t *view, bool sensor);
+void np_devices_refresh_discovery(np_devices_view_t *view);
+void np_devices_sync(np_devices_view_t *view,
+                     const app_iot_projection_t *projection);
+void np_devices_rebind(np_devices_view_t *view);
+void np_devices_open_camera(np_devices_view_t *view, uint8_t index);
+void np_devices_close_camera(np_devices_view_t *view);
+void np_devices_refresh_camera(np_devices_view_t *view);
 lv_obj_t *np_sheets_create(lv_obj_t *parent);
 
 typedef struct {
