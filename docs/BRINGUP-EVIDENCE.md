@@ -4329,3 +4329,1198 @@ inspecionado visualmente após o flash.
   essa confirmação não contém duração nem quantidade de scans. Assim, registro
   a confirmação do usuário, mas não declaro fechado o gate de estabilidade de
   rede/SDIO. C6 e tabela de partições não foram gravados.
+
+### 2026-10-02 — buffers SDIO DMA preferidos em PSRAM
+
+- Motivação: a captura anterior manteve o ícone/associação de Wi-Fi, mas
+  registrou `eh_sdio: dma_alloc(5120) failed` e `rx_get_buffer(4776) failed`,
+  seguida de DNS/HTTPS sem resposta para todos os domínios de produto. O
+  alocador alinhado do ESP-Hosted 3.0.6 já tem opção de preferência por PSRAM
+  DMA-capable com fallback para SRAM DMA interna; habilitada no default do P4
+  conforme ADR-068. Nenhuma fonte em `managed_components/` foi alterada.
+- Bancada: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR 32 MiB,
+  PSRAM 32 MiB; commit-base `cf335d9f9c20773f0e3b599d22c85290de83f247`, com
+  alterações locais. O C6 negociou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR;
+  C6 não foi regravado e seu hash não foi lido nesta sessão (hash histórico de
+  referência: `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`).
+- Build limpo ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `firmware/build/wifi-dma-psram-clean-20261002`: passou. App `0x33ce10`
+  bytes, `0x4c31f0` bytes livres na menor partição de 8 MiB (60%). SHA-256 app
+  `68A1DB063D5C7076CE4EF69891EF875AB1F689E4E5FDD552E7661438B2596C7B`;
+  ELF `BA5C34F24F64CCE99C7A9380AC3433A58DD12686A3BE2CCCD79465686DC4A7C1`;
+  configuração efetiva `sdkconfig.cmake`
+  `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`;
+  arquivo local `firmware/sdkconfig` SHA-256
+  `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  A configuração efetiva confirma `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y`,
+  PSRAM, RGB565 e três framebuffers; auto-suspend de flash e restart automático
+  do transporte Hosted continuam desligados.
+- `idf.py -B build/wifi-dma-psram-clean-20261002 -p COM8 -b 460800 app-flash
+  monitor` gravou somente o app P4 em `0x20000`. Esptool confirmou `Hash of data
+  verified`, hard reset e boot. A captura mostrou duas desconexões de estação
+  (razões 2 e 205) antes de obter IP `192.168.1.16`; então os domínios 0–4
+  concluíram sequencialmente DNS, NTP e HTTPS com `ESP_OK`. Hosted/C6 subiram
+  com versões 3.0.6/RPC v2/SW_AGGR. Não apareceu `dma_alloc`/`rx_get_buffer`
+  failure nem reset durante cerca de 60 s após a janela de associação e
+  atualização. Monitor encerrado, dispositivo deixado em execução. É um passe
+  inicial de bancada; não fecha estabilidade/soak nem recuperação após falha
+  forçada de AP ou C6.
+
+### 2026-10-02 — preferência de tela inicial: build P4 e gravação bloqueada
+
+- Adicionada em Perfil > Preferências pessoais a escolha de Home, Clima,
+  Mercado, Dispositivos ou Pomodoro. A preferência é salva junto ao perfil no
+  FlashCoordinator; registros antigos selecionam Home. O boot aguarda a
+  restauração do perfil até 6 s e então usa Home como fallback.
+- Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247`, com alterações locais.
+  Build limpa ESP-IDF 5.5.4, target explícito `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-startup-screen-build`: passou.
+  Binário P4 `0x33d600` bytes; `0x4c2a00` bytes livres na menor partição de
+  8 MiB (60%). SHA-256 app `AB20DBD7583E3465785545639EE3D50F3778F548EDEE08B0BFC3FA47F7466013`;
+  ELF `021735731004639629A35AC4AB91AC6F5748D44EF55A4CC5BB936835DCEF5D58`;
+  sdkconfig efetivo `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Target, três framebuffers, preferência de DMA SDIO em PSRAM e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND=n` foram conferidos.
+- `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2-startup-screen-build
+  -p COM8 app-flash monitor` não conseguiu abrir COM8 (`PermissionError(13)`,
+  porta ocupada ou inexistente). Nenhum byte foi gravado nesta tentativa e não
+  há captura de boot desta imagem. O usuário relatou que o flash anterior
+  continuou normal, mas não foi identificado o hash daquela imagem; isso não é
+   atribuído a este build. C6, tabela de partições e eFuses não foram alterados.
+
+### 2026-10-03 — gesto de páginas principais e indicador expanding-dot
+
+- Implementada navegação por swipe horizontal na ordem Home, Clima, Mercado,
+  Dispositivos e Pomodoro. O gesto usa o Navigation Manager existente, não
+  atravessa os limites, ignora a área do header e não inicia em objetos
+  clicáveis. O indicador do rodapé expande o ponto da tela ativa para uma
+  cápsula curta. O padrão foi registrado no ADR-070.
+- Placa observada: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR
+  32 MiB e PSRAM 32 MiB. C6 anunciou ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR;
+  não foi regravado. Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247`, com
+  alterações locais.
+- Build limpa ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-build`: passou; o
+  delta final do expanding-dot recompilou `product_ui.c` e linkou o app. Binário
+  `0x33d990` bytes; `0x4c2670` bytes livres na menor partição de 8 MiB (59%).
+  SHA-256 app `89973E351C68BA5202832B3B2865300C3F3757CD814ACDEF3CD7CC6A21C13C6A`;
+  ELF `7F903F27B4DBED403CBFC849D67942BF1638FCCBE1F6E8CFA85FD400FFA67631`;
+  `sdkconfig` efetivo `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  tabela de partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração confirmou ESP32-P4, PSRAM 32 MiB a 200 MHz, RGB565,
+  `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y` e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND=n`; a política de três framebuffers foi
+  preservada.
+- Primeira tentativa de `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-build
+  -p COM8 app-flash monitor` falhou ao abrir COM8 (`PermissionError(13)`, porta
+  ocupada ou inexistente), sem gravar dados. Após o operador liberar a porta,
+  a mesma operação gravou somente o app no offset `0x20000`; esptool confirmou
+  `Hash of data verified` e hard reset. Tabela de partições e C6 não foram
+  gravados.
+- Captura serial por cerca de 85 s após o boot: P4 v1.3, PSRAM, display, touch
+  GT911 e Hosted/C6 iniciaram; a estação obteve `192.168.1.16`. Não apareceu
+  panic nem reset nessa janela. HTTPS dos domínios 0, 1, 3 e 4 concluiu com
+  `ESP_OK`; o domínio do BCB falhou em DNS nessa rodada. O swipe e o indicador
+  expanding-dot ainda precisam de confirmação tátil na placa; build e boot não
+  fecham esse teste funcional nem um soak de estabilidade.
+
+### 2026-10-03 — correção do gesto de páginas após teste tátil
+
+- O operador informou que o indicador apareceu, mas o swipe não navegava. A
+  causa estava no filtro do início do gesto: `lv_obj_create()` marca objetos
+  genéricos com `LV_OBJ_FLAG_CLICKABLE`, então a verificação descartava toques
+  em praticamente toda a área de conteúdo. Removido esse filtro. Após um swipe
+  reconhecido, a soltura normal do widget é preservada e LVGL consome os
+  eventos de clique da interação para evitar acionar o controle tocado. O log `product_ui` agora
+  registra página de origem/destino e deltas quando uma troca é aceita.
+- Build limpa ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-fix-build`: passou.
+  App `0x33dac0` bytes; `0x4c2540` bytes livres na menor partição de 8 MiB
+  (59%). SHA-256 app
+  `D809EC2467901196151BB0040ACC88B196306DE00AA2197A6FF0887B92139F4D`;
+  ELF `FEC166CC5724A65EE8E0939BF6BFD61DEC67B4F59D2B5C038A3F551E13047A24`;
+  `sdkconfig` efetivo
+  `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  tabela de partições
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-fix-build
+  -p COM8 app-flash monitor` gravou apenas o app P4 em `0x20000`; esptool
+  confirmou `Hash of data verified` e hard reset. C6 e tabela não foram
+  gravados. A captura passou por cerca de 149 s de uptime sem panic ou reset;
+  P4 v1.3, display, touch GT911 e Hosted/C6 3.0.6/RPC v2/SW_AGGR iniciaram,
+  e a estação obteve `192.168.1.16`. Os domínios 0, 1, 3 e 4 concluíram HTTPS;
+  o domínio do BCB falhou em DNS nessa janela.
+- A captura confirma boot, não a navegação pelo toque. Aguardando nova
+  confirmação tátil do operador; o swipe deve gerar `page swipe origem ->
+  destino` no serial quando aceito.
+- Ajuste final após revisar o ciclo de evento: recompilado e regravado o mesmo
+  app, preservando `LV_EVENT_RELEASED` para que o widget limpe o estado visual
+  de pressionado e consumindo somente os eventos de clique. SHA-256 do app
+  final `AA03F59FD35EB84126DE273154FE563DFCA603FC6C5AAB1DB612BB9F226CA534`;
+  ELF `6FE710FD0869CEDC959862E67CF5E57BA730BA068A45EC400A348BB58DCC4B4B`.
+  O flash app-only confirmou `Hash of data verified`; boot final sem panic/reset
+  durante a captura inicial. O operador ainda precisa confirmar o swipe físico
+  nesta última imagem.
+
+### 2026-10-03 — navegação por swipe confirmada na placa
+
+- O operador informou que o swipe continuava sem funcionar após as correções
+  anteriores. A segunda causa era o uso de `lv_event_get_indev()` dentro de
+  callback registrado diretamente na lista do indev: nesse contexto a API lê o
+  parâmetro do evento (o objeto tocado). O handle do dispositivo é o alvo do
+  evento, conforme já usado pelo diagnóstico de touch. Corrigido para
+  `lv_event_get_target()`; adicionados logs do ponto inicial/final, delta e
+  estado do Navigation Manager para arrastos acima de 32 px.
+- Build limpa ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-indev-fix-build`:
+  passou. App `0x33dba0` bytes; `0x4c2460` bytes livres na menor partição de
+  8 MiB (59%). SHA-256 app
+  `F197F6A8991853DA1DB3874AD1547B627A23C9169C215DA22F5A36C8FD6ADCC3`;
+  ELF `900DD2AA8613C7D43A5948FB2DD7B368027CE567FA63F23180030AED71D51683`;
+  `sdkconfig` efetivo
+  `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  partições
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2-page-slider-indev-fix-build
+  -p COM8 app-flash monitor` gravou apenas o app P4 no offset `0x20000`;
+  esptool confirmou `Hash of data verified` e hard reset. Captura de boot de
+  cerca de 69 s: P4 v1.3, display/touch, Hosted/C6 3.0.6/RPC v2/SW_AGGR
+  iniciaram e o Wi-Fi recebeu `192.168.1.16`. Não houve panic ou reset durante
+  esse período. C6 e tabela de partições não foram gravados.
+- O operador realizou vários arrastos. O serial registrou `page swipe 1 -> 2`
+  (Home → Clima), navegação sucessiva até Pomodoro e retorno `5 -> 4 -> 3`,
+  com o Navigation Manager completando `ENTER`; também registrou retorno
+  `2 -> 1`. A interação por swipe fica confirmada nos dois sentidos. Ao entrar
+  em Mercado houve um aviso `LVGL reserve low` (40.816 B livres no intervalo
+  de limpeza, limite configurado em 49.152 B); a tela foi montada e as trocas
+  seguintes concluíram sem reset. Esse aviso permanece observação de memória,
+  não falha de navegação.
+
+### 2026-10-03 — ações do header e centro de notificações
+
+- O header agora encaminha o ícone Wi-Fi para a cena de configuração. O sino
+  abre sobre a tela atual um histórico limitado a oito eventos: transições de
+  rede com credenciais ativas, novas cotações recebidas e eventos de erro ou
+  recuperação do sistema/armazenamento. O badge mostra as não lidas; abrir um
+  item ou marcar todas como lidas retira-as da contagem e conserva os itens no
+  histórico. O modal é construído ao abrir e destruído ao fechar para preservar
+  heap LVGL nas páginas de produto. A decisão está no ADR-071.
+- Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR 32 MiB e
+  PSRAM 32 MiB. Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247`, com
+  alterações locais. C6 iniciou sem regravação, anunciando ESP-Hosted 3.0.6,
+  RPC v2 e SDIO SW_AGGR. Hash da imagem C6 instalada não foi lido nesta sessão;
+  a referência histórica da imagem reproduzida é
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Build limpa ESP-IDF 5.5.4/Python 3.14.4, target explícito `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-header-notification-20261003-build`:
+  passou, sem warnings de compilação nos arquivos alterados. App `0x33efb0`
+  bytes; `0x4c1040` bytes livres na menor partição de 8 MiB (59%). SHA-256 app
+  `F299186253B5BDCE0F0EF805DD9B04E9A2A3FF1C1B9A8CFCF2F6B5D2AC053A05`;
+  ELF `93C9E0E78508220E8AF1A83D2027AA1AF48AC2EF67C7DF2D10F7843C23091B05`;
+  configuração efetiva `sdkconfig.cmake`
+  `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`;
+  `firmware/sdkconfig` `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`;
+  tabela de partições
+  `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração observada: P4, XiP em PSRAM, três framebuffers,
+  `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y` e
+  `CONFIG_SPI_FLASH_AUTO_SUSPEND=n`.
+- `idf.py -B C:\Users\Tauser\AppData\Local\Temp\np2-header-notification-20261003-build
+  -p COM8 app-flash monitor` gravou somente o app em `0x20000`; esptool
+  confirmou `Hash of data verified` e hard reset. A captura final mostrou a UI
+  iniciando, C6 pareado e Wi-Fi recebendo `192.168.1.16`, sem panic/reset em
+  cerca de 35 s. Os domínios HTTPS 0, 1, 3 e 4 concluíram; o domínio 2 (`api.bcb.gov.br`)
+  falhou ao resolver DNS. O teste físico dos toques nos ícones e nos itens do
+  modal ainda depende de interação visual na placa. C6 e partições não foram
+  gravados; monitor encerrado e COM8 liberada.
+- A gravação e o boot foram confirmados; a interação física do ícone Wi-Fi,
+  abertura do sino, leitura individual e leitura em lote ainda precisa de
+  conferência tátil. O histórico implementado é volátil, começa vazio após
+  reboot e mantém no máximo oito eventos.
+- Ajuste de retorno da cena Wi-Fi: o botão Voltar passa a retornar à tela que
+  originou a abertura pelo header; ao entrar pela linha de redes em Preferências,
+  retorna a Preferências. Build limpo adicional ESP-IDF 5.5.4/Python 3.14.4,
+  target `esp32p4`, em
+  `C:\Users\Tauser\AppData\Local\Temp\np2-wifi-return-20261003-build`:
+  passou. App `0x33f030` bytes, 59% livres na partição OTA de 8 MiB; SHA-256 app
+  `A883744635D1096BBE3DB80CF45EAE33111E988219A5F7D90B32CC533F16D702`, ELF
+  `9A2E8F9864FCDA200BF752C005E90280F1DE3E4D6D0482641B5157FEA7E3B77C`.
+  `sdkconfig.cmake` e partições mantiveram os hashes acima; o `firmware/sdkconfig`
+  original foi restaurado com SHA-256
+  `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`.
+  `app-flash monitor` gravou apenas o app em `0x20000` e verificou o hash.
+  Boot chegou à tela inicial, negociou C6/ESP-Hosted 3.0.6/RPC v2/SW_AGGR e
+  conectou à rede (`192.168.1.16`), sem panic/reset em cerca de 37 s. HTTPS
+  domínios 0, 1, 3 e 4 concluíram; a consulta do domínio 2 continuou falhando
+  na resolução DNS. Monitor encerrado e COM8 liberada.
+
+### 2026-10-03 — serviço de sincronização eWeLink e inventário persistente
+
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, NOR 32 MiB e PSRAM
+  32 MiB. Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247`, com alterações
+  locais preservadas. C6 instalado iniciou com ESP-Hosted 3.0.6, RPC v2 e
+  SDIO SW_AGGR; a imagem C6 não foi lida nesta sessão, referência histórica
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Build incremental ESP-IDF 5.5.4/Python 3.14.4, target `esp32p4`, em
+  `firmware/build/ewelink-sync-20261003`: passou. App `0x345000` bytes, com
+  `0x4bb000` bytes livres na partição OTA de 8 MiB (59%). SHA-256 do app
+  `CA4FFD8859A9A18B56D1D0236DFC6225644868CA1CB4351C77640E7B97F08DD8`;
+  ELF `C662764279C835CD65ECBF27EC4CACF3847C9E005AA0B29695FBBA332548D517`;
+  configuração efetiva `sdkconfig.cmake`
+  `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`;
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  Configuração observada: flash 32 MiB, `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y`
+  e `CONFIG_SPI_FLASH_AUTO_SUSPEND=n`.
+- A primeira imagem intermediária abortou no init de áudio (`i2s_alloc_dma_desc`,
+  `ESP_ERR_NO_MEM`) após aumentar o BSS interno. Os workspaces de inventário
+  foram movidos para PSRAM e os buffers grandes de autenticação/corpo HTTP
+  passaram a ser temporários. A build e gravação finais abaixo são dessa
+  correção; áudio inicializou e o executor HTTPS iniciou sem `ESP_ERR_NO_MEM`.
+- `idf.py -B build\\ewelink-sync-20261003 -p COM8 -b 460800 app-flash monitor`
+  gravou somente o app P4 em `0x20000`; esptool confirmou `Hash of data verified`
+  e hard reset. Boot serial por cerca de 33 s: P4 v1.3, display/touch, áudio,
+  C6/Hosted e Wi-Fi iniciaram; recebeu `192.168.1.16`. Os domínios HTTPS 0, 1,
+  3 e 4 concluíram; domínio 2 (`api.bcb.gov.br`) falhou em DNS. Não houve
+  panic/reset no intervalo. Monitor encerrado e COM8 liberada; C6, partições e
+  dados locais não foram gravados.
+- A sessão real de login eWeLink não foi executada nesta validação: nenhuma
+  credencial foi fornecida ao firmware. A assinatura ainda precisa ser
+  comparada com vetor conhecido do POC e a sincronização real precisa de uma
+  conta de bancada. A persistência atual usa NVS sem proteção contra extração
+  física; NVS Encryption/Flash Encryption permanece pendência de segurança.
+- Revalidação solicitada em 2026-10-03: build ESP-IDF 5.5.4 passou novamente;
+  app `0x345000` bytes, SHA-256
+  `BAC21BC8CA152817CB4FB1DC8FDEDB34B94B506F845D9D797CB678877C3ABD5E`, ELF
+  `B7481227C36E44AC0F47C4A2FD29D19CEA1A0A43C1627236933C617E6A90B3B6`. O app
+  atual foi regravado apenas em `0x20000`, com `Hash of data verified`. Boot por
+  cerca de 32 s chegou à UI, inicializou áudio/C6/Hosted/HTTPS e recebeu IP;
+  não houve panic/reset. O domínio `api.bcb.gov.br` continuou sem resolver DNS.
+  Não houve tentativa de login, fetch ou escrita de inventário nesta rodada.
+- Integração visual eWeLink em 2026-10-03: a tela Dispositivos passou a expor
+  “Importar inventário da conta eWeLink”, campos transitórios de email/telefone
+  e senha, estado da sincronização e resumo local sem `devicekey`. O submit
+  copia as credenciais para o serviço sob demanda e zera os buffers locais e
+  campos; fechar o modal também limpa os campos. Build limpo ESP-IDF 5.5.4,
+  Python 3.14.4, target `esp32p4`, em
+  `firmware/build/ewelink-ui-20261003`: passou. App `0x345f90` bytes,
+  `0x4ba070` livres (59%) na menor partição OTA; SHA-256
+  `561BC2B3355E084008AFE396B35B893FA195468473328CA1AE4BCB8687C68975`, ELF
+  `8A98A2CD841D3791010A599AC1413DA7DA3F2E113F5B0547233990F6ABF7906A`;
+  configuração efetiva `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`,
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `app-flash monitor` gravou somente o app em `0x20000`; esptool confirmou
+  `Hash of data verified`. Boot serial por cerca de 55 s: P4 v1.3, display/touch,
+  áudio, C6/Hosted 3.0.6/RPC v2/SW_AGGR e Wi-Fi iniciaram; recebeu
+  `192.168.1.16`, abriu a cena Dispositivos e não houve panic/reset. Domínios
+  HTTPS 0, 1, 3 e 4 concluíram; `api.bcb.gov.br` falhou em DNS. Monitor
+  encerrado e COM8 liberada; C6, partições e dados locais não foram gravados.
+  O toque real dos campos/botão e uma autenticação eWeLink ainda aguardam teste
+  na placa com uma conta de bancada; nenhuma credencial foi inserida nesta
+  validação.
+- Correção da tentativa de login eWeLink em 2026-10-03: o encoder Base64 da
+  tabela de regiões recebia `sizeof(pointer)` (8 bytes) como capacidade, em vez
+  dos 11.000 bytes alocados; a derivação da assinatura falhava antes de enviar
+  o POST. Corrigido para usar a capacidade real e adicionados logs seguros de
+  etapa, status HTTP, código da API e região, sem conta, senha, assinatura ou
+  token. Build incremental ESP-IDF 5.5.4/Python 3.14.4, target `esp32p4`, em
+  `firmware/build/ewelink-ui-20261003`: passou; app `0x346160` bytes, com
+  `0x4b9ea0` bytes livres (59%) na menor partição OTA. SHA-256 app
+  `581967B60E06C65A8B2BDEA9F54972DE1A1F2751ECB78918C5CDD38C7F37C347`, ELF
+  `BC963CFF5CDC4EC7E0EEDF5CD05FAA83589EA40175537D6688B488F262797D71`;
+  `sdkconfig.cmake` `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`,
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  `app-flash` gravou somente a app em `0x20000` e confirmou `Hash of data
+  verified`. Boot serial por mais de 30 s chegou à UI, inicializou C6/Hosted
+  3.0.6/RPC v2/SW_AGGR, obteve `192.168.1.16` e não apresentou panic/reset;
+  HTTPS dos domínios 0, 1, 3 e 4 concluiu, com falha DNS conhecida no domínio 2.
+  Esta rodada não refez login. Monitor serial permanece ativo para capturar a
+  próxima tentativa; C6, partições e NVS não foram gravados.
+
+### 2026-10-03 — imagem local de teste com formulário eWeLink pré-preenchido
+
+- A pedido do usuário, foi criada uma configuração exclusivamente local para
+  abrir o modal de importação com os campos de conta e senha já preenchidos.
+  O cabeçalho local fica fora do repositório, mas os textos estão embutidos na
+  imagem P4 atualmente gravada e são recuperáveis do flash sem Flash Encryption.
+  Remover a configuração temporária e regravar uma imagem limpa após o teste.
+  O fluxo normal continua limpando os campos ao enviar ou fechar o modal; os
+  valores não são enviados a logs, estado ou NVS pelo código de UI.
+- Board Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, NOR 32 MiB/PSRAM
+  32 MiB. C6 não foi gravado; boot reportou ESP-Hosted 3.0.6, RPC v2 e SDIO
+  SW_AGGR. Referência histórica de hash C6:
+  `3EEC7C1E256BEFCE925ECCC661D4A4C730EC10F724433AB1001FC7D2965F43EE`.
+- Build limpa ESP-IDF 5.5.4/Python 3.14.4, target `esp32p4`, em diretório
+  externo ao repositório; `NP2_EWELINK_TEST_PREFILL_HEADER` aponta para
+  configuração local externa. App `0x346180` bytes, `0x4b9e80` bytes livres
+  (59%) na menor partição OTA. SHA-256 app
+  `C85002B939D2331A37A3A1077F46952D13AD7D59818C11029E30C2CF5D9F4234`, ELF
+  `669581114A778B46179B76C824063AB0F78BA84C71624F720AA3DAD62A9056F9`,
+  `sdkconfig.cmake` `2021D399840C19A414F28BF5493B5FFDF960AB2CACEC8E5C16205FE95D083930`,
+  `sdkconfig` `1DD9B3CA659AA29AF9F7C2414FB05D0A8802752CB928293AAE921258EC0DE065`,
+  partições `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+- `idf.py -B <build externo> -p COM8 app-flash` gravou somente o app no offset
+  `0x20000`; esptool confirmou `Hash of data verified` e hard reset. Boot serial
+  chegou à UI, touch/display ativos e C6/Hosted negociado, sem panic/reset nos
+  primeiros 36 s. Wi-Fi recebeu `192.168.1.16`; domínios HTTPS 0, 1, 3 e 4
+  passaram e o domínio 2 continuou falhando em DNS. Monitor COM8 permanece ativo
+  para observar a autenticação solicitada; toque na tela e tentativa de login
+  ainda aguardam ação física do usuário.
+
+- Reteste em 2026-10-03: a solicitação eWeLink chegou ao executor (`mode=9`),
+  mas terminou como `ESP_ERR_NO_MEM` antes de surgir qualquer log de login HTTP.
+  Isso localiza a falha antes de autenticar; ainda não permite concluir se a
+  falta de memória ocorreu na criação do workspace ou em uma etapa posterior.
+  Adicionado log de falha com etapa, resultado e heap livre/maior bloco (PSRAM e
+  SRAM interna), sem credenciais. Build incremental ESP-IDF 5.5.4, target
+  `esp32p4`, no mesmo diretório externo: passou; app `0x346360` bytes, 59% livres,
+  SHA-256 `92D15952C2F181BAE468AF3264AB43BF4BC088D58F64345D3D9F7D556BE56738`,
+  ELF `484C7915F4ADF6147F3D861F2FDE72DBF69CB9A0EF28FA48A5AD20BDD50C09BF`.
+  App-only flash em `0x20000` foi verificado pelo esptool. Boot chegou à UI,
+  Hosted 3.0.6/RPC v2/SW_AGGR e Wi-Fi com IP; monitor COM8 reaberto para uma nova
+  tentativa e captura do estágio exato. Nenhum login bem-sucedido ou inventário
+  foi confirmado até esta evidência.
+
+- Comparação com `C:\\ewelink-poc\\ewelink_dump.py`: tabela tem 205 entradas e
+  a representação Python `str(REGIONS)` coincide byte a byte com a tabela do
+  firmware (5.905 bytes; SHA-256
+  `97ECFBD8882A9A10766F08C095F74EE3E55DF042D472D00CA220FFE24C266B8A`). O
+  arquivo de resposta raw do POC mede 9.401 bytes. Diagnóstico do teste anterior:
+  o firmware reservava 49.153 bytes contíguos em SRAM interna para o corpo HTTP
+  antes do POST; após abrir Dispositivos, o maior bloco interno observado era
+  27.648 bytes. O login não chegava à rede. Correção ADR-073 move somente esse
+  corpo limitado (máx. 48 KiB) para PSRAM; TLS mantém SRAM interna. Build
+  incremental ESP-IDF 5.5.4/target `esp32p4` passou; app `0x346360` bytes, 59%
+  livres, SHA-256 `5E0E39B58D259470E74A111357DEFCCF512B001263AF98277263B10731FD17B1`,
+  ELF `F036ED84F052C9B3E1A35666043AFA215FEA0302F3BC34D19FF49E4D00A6B831`.
+  App-only flash em `0x20000` verificado (`Hash of data verified`). Boot iniciou
+  UI, Hosted C6 3.0.6/RPC v2/SW_AGGR, Wi-Fi e HTTPS nos domínios 0/1/3/4; DNS do
+  domínio 2 continua falhando. Ainda sem nova tentativa eWeLink após esta
+  correção. COM8 permanece monitorada.
+
+- Login eWeLink após realocação do corpo HTTP: servidor respondeu HTTP 200,
+  `api_error=10001`, região `us`; a tabela/região foi aceita e o erro já não é
+  de alocação. Inspeção da configuração local de prefill encontrou diferença
+  introduzida no teste: o email estava com o primeiro caractere em maiúscula,
+  apesar de o usuário ter fornecido minúsculo. Corrigido para usar exatamente a
+  caixa informada; nenhuma credencial foi registrada aqui. Build incremental
+  ESP-IDF 5.5.4, `esp32p4`, passou; app `0x346360`, 59% livres, SHA-256
+  `4A082437D6E8385E9FD7AE73FD334A5734BF610564863DAB9E3B09095EFC3C03`, ELF
+  `0D5202D3F977B49D58B5BD76D5F4A72064FBF74CF9D1A365C01F1D86DBF46792`. App-only
+  flash em `0x20000`, hash verificado. Boot desta última imagem negociou Hosted
+  3.0.6/RPC v2/SW_AGGR, mas o AP rejeitou a autenticação Wi-Fi (`reason=202`);
+  ainda sem login cloud após a correção de caixa. COM8 permanece monitorada.
+
+- Reteste de diagnóstico em 2026-10-03: executei somente o login de
+  `C:\\ewelink-poc\\ewelink_dump.py`, carregando os mesmos dados da imagem de
+  teste, sem consultar a lista de devices. O POC também recebeu HTTP 200 e
+  `api_error=10001` na região `us`; não houve token nem resposta de inventário.
+  A imagem P4 registrou o mesmo HTTP/API error após o ajuste da caixa do email.
+  Isso descarta diferença exclusiva no fluxo embarcado como causa demonstrada;
+  os dados de autenticação/estado da conta foram rejeitados pelo endpoint nos
+  dois clientes. O erro não aponta falha de região, TLS ou alocação de memória.
+- Removido o prefill temporário da UI/CMake e apagados o header e o diretório
+  externo de build que continham os dados de teste. A busca em `firmware/main`
+  não encontra mais referências ao prefill; o binário limpo também não contém
+  as strings de usuário/senha. Build limpo IDF 5.5.4, target `esp32p4`, no
+  diretório `firmware/build/ewelink-clean-20261003`: app `0x3462c0`, 59% livres,
+  SHA-256 `1DE3CD19ABFBBCABBEAA23BCD30BF54421F5DDEE004B7BCE298791DCD5384276`,
+  ELF SHA-256 `E9BA0A78DECF5D2A5DF794C9F56CA0A4988280CAE374D1DDDCB3237B32EC6E82`.
+  App-only flash em COM8/offset `0x20000` confirmou `Hash of data verified`,
+  preservando NVS. Boot final confirmou P4 v1.3, display, PSRAM 32 MiB,
+  ESP-Hosted C6 3.0.6/RPC v2/SW_AGGR e Wi-Fi com IP; HTTPS passou nos domínios
+  0, 1, 3 e 4. Domínio 2 ainda falhou em DNS. Nenhum login eWeLink bem-sucedido
+  ou inventário foi confirmado nesta imagem limpa.
+
+- Evidência posterior recebida em 2026-10-03: os arquivos recém-gerados pelo
+  POC (`C:\\ewelink-poc\\ewelink_devices.json` e
+  `C:\\ewelink-poc\\ewelink_devices_raw.json`) contêm três devices e três
+  `devicekey` distintos, todos não vazios; `apikey` e `devicekey` são campos
+  separados. Os modelos TX1C, TX2C e TX3C estão dentro dos modelos conhecidos
+  pelo parser do firmware; TX2C/TX3C trazem 2/3 nomes de canal e TX1C não traz
+  nomes customizados. Esta execução confirma login e fetch bem-sucedidos no POC
+  depois da tentativa host anterior com `10001`; portanto, a conclusão anterior
+  de que a conta continuava rejeitada pelo POC está supersedida. O login no
+  firmware ainda não foi repetido com essa execução/estado mais recente.
+  Revisão dos tamanhos de `params`: os três devices têm JSON entre 462 e 835 B,
+  acima do buffer atual de 256 B. `parse_device_item()` deixa `params_json`
+  vazio quando o JSON não cabe; precisa ampliar/refatorar a representação e
+  validar o orçamento da persistência NVS antes de declarar a importação
+  completa. Nenhum valor de chave foi exibido ou copiado para o repositório.
+
+- Correção da integração eWeLink aplicada em 2026-10-03 (ADR-074): o username
+  agora remove whitespace ASCII nas bordas, como `input(...).strip()` do POC;
+  senha permanece byte a byte sem normalização. `params` foi ampliado a 1 KiB
+  no inventário transitório e qualquer valor maior falha com
+  `ESP_ERR_INVALID_SIZE`, em vez de ser descartado. O snapshot UI foi movido
+  para PSRAM. O formato A/B persistente ficou compacto e mantém os campos LAN,
+  devicekey e settings locais; não grava `params` nem credenciais/tokens.
+- Build limpo ESP-IDF 5.5.4 / target `esp32p4`, diretório
+  `firmware/build/ewelink-fix-20261003`: passou, sem erro; app `0x346670` bytes,
+  `0x4b9990` bytes livres (59%) no menor slot OTA. SHA-256 do binário:
+  `D62C64A157E8F68E0088F0355A052EF9712646E17230E34637B5D87229D07FC2`.
+- App-only flash em COM8 escreveu somente `0x346670` bytes a partir de
+  `0x20000`; esptool confirmou `Hash of data verified`. Boot serial confirmou
+  P4 v1.3, PSRAM, display/UI, ESP-Hosted C6 3.0.6, RPC v2, SW_AGGR e Wi-Fi com
+  IP. NVS, tabela, C6 e eFuses não foram gravados. Captura no monitor COM8 até
+  cerca de 13,5 s; refresh HTTPS iniciou normalmente.
+- A execução POC recém-anexada prova login/fetch cloud e fornece três devices,
+  mas não contém credenciais. Ainda não houve sincronização cloud end-to-end
+  desta imagem do firmware; a autenticação no dispositivo precisa ser acionada
+  pela tela com as credenciais informadas pelo usuário, sem persistir os dados.
+
+### Diagnóstico de memória no fetch eWeLink — 2026-10-03
+
+- Log recebido da placa confirma que o firmware autenticou (`login succeeded
+  region=us`) e validou o certificado TLS. O fetch subsequente falhou dentro do
+  AES/TLS (`esp-aes: Failed to allocate memory`, `ESP_ERR_HTTP_FETCH_HEADER`).
+  Na falha havia 68.987 bytes de SRAM interna livres, mas o maior bloco era
+  27.648 bytes; PSRAM livre era 15.245.420 bytes. Portanto, PSRAM disponível
+  não satisfaz a alocação interna contígua requerida por AES/TLS.
+- ADR-075 ajusta somente o cliente HTTP eWeLink: buffers RX/TX menores
+  (2 KiB/1 KiB) e estratégia RX estática do TLS dinâmico, reduzindo
+  realocações durante o fetch. O build P4 limpo ESP-IDF 5.5.4 passou no
+  diretório `firmware/build/ewelink-aes-fix-20261003`; app `0x346670` bytes,
+  `0x4b9990` bytes livres (59%) no menor slot OTA. SHA-256 do app:
+  `0F8D0972D3A3F68134B926CBD76CD4E10ED99EA8B4615689835FA415999A2564`.
+- App-only flash em COM8 gravou `0x346670` bytes no offset `0x20000` e o
+  esptool confirmou `Hash of data verified`. O boot serial confirmou P4 v1.3,
+  PSRAM de 32 MiB, display/UI, C6 ESP-Hosted 3.0.6, RPC v2 e SDIO SW_AGGR.
+  NVS, tabela de partições, firmware C6 e eFuses não foram alterados.
+- Nesta captura o Wi-Fi não associou (`StaDisconnected`, motivos 2 e 205), por
+  isso não foi possível repetir o fetch cloud e comprovar ainda o efeito do
+  ajuste. A compilação e gravação estão confirmadas; a correção de alocação
+  permanece aguardando nova sincronização acionada pela tela com rede ativa.
+
+### Reteste AES-DMA e mbedTLS software — 2026-10-03
+
+- Novo log da placa repetiu login e validação do certificado, seguido pela
+  mesma falha `esp-aes: Failed to allocate memory` no fetch. O teste demonstrou
+  que reduzir buffers HTTP e fixar RX TLS não resolvia. Inspeção do ESP-IDF
+  5.5.4 localizou a falha na alocação do caminho AES-DMA, que requer
+  `MALLOC_CAP_DMA`; as métricas anteriores de heap interno não indicavam o
+  maior bloco disponível com essas capabilities.
+- Corrigido o ADR-075: removida a hipótese de que a estratégia RX TLS resolveria
+  o problema; os buffers HTTP menores são apenas limites do cliente. ADR-076
+  desabilita `CONFIG_MBEDTLS_HARDWARE_AES` e mantém os alocadores TLS em SRAM
+  interna, eliminando para mbedTLS a dependência de buffers AES-DMA. O impacto
+  se aplica a todo AES/GCM usado via mbedTLS no P4 e exige observar CPU/latência
+  e heap sob a carga do produto.
+- Build limpo ESP-IDF 5.5.4 / `esp32p4`, com `sdkconfig` isolado no diretório
+  `firmware/build/ewelink-software-aes-final-20261003`: passou; app `0x346ad0`
+  bytes, `0x4b9530` bytes livres (59%) no menor slot OTA. Configuração efetiva
+  confirma `# CONFIG_MBEDTLS_HARDWARE_AES is not set` e
+  `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y`. SHA-256 do app:
+  `6552042396C7CD5569FDF6302DCF009584B076562CBDD9FBC50419827E085301`; ELF:
+  `8587A204F2CAD535B9129ACDB72D0588083FBC7825FD823459892C6D9F309442`.
+- App-only flash em COM8 escreveu `0x346ad0` bytes em `0x20000`; esptool
+  confirmou `Hash of data verified`. Boot serial confirmou P4 v1.3, PSRAM,
+  display/UI, Wi-Fi com IP, C6 ESP-Hosted 3.0.6/RPC v2/SW_AGGR. HTTPS de
+  produto passou nos domínios 0, 1, 3 e 4; domínio 2 teve falha DNS. NVS,
+  tabela de partições, C6 e eFuses não foram alterados.
+- Ainda falta acionar uma sincronização eWeLink na tela com esta imagem para
+  confirmar fetch, parse e reconciliação. A checagem host indicada pela skill
+  (`tools/scripts/host_check.sh --app`) não pôde ser executada: esse arquivo
+  não existe neste checkout; build IDF e boot serial passaram.
+
+### Correção de pilha ao persistir inventário eWeLink — 2026-10-03
+
+- Novo log recebido confirmou `cloud inventory fetched count=3`, seguido de
+  stack protection fault na task `np2_netcheck`. O mesmo log avisou que o ELF
+  local não correspondia ao app em execução; a sessão COM8 também tinha quatro
+  monitores ligados ao ELF antigo, então os endereços e linhas simbolizados
+  naquele panic não eram evidência confiável do call stack.
+- A revisão da submissão localizou um envelope `flash_request_t` com chunk OTA
+  de 4 KiB criado na pilha durante a escrita do inventário. A correção usa o
+  buffer compartilhado serializado do `FlashCoordinator` e consulta o resultado
+  da gravação com um getter pequeno, sem copiar o status completo a cada poll.
+  A sincronização agora também registra o high-water mark da pilha da task.
+  ADR-077 registra a decisão.
+- Build limpo ESP-IDF 5.5.4 / `esp32p4`, configuração isolada em
+  `firmware/build/ewelink-stack-fix-20261003`: passou; app `0x346b90` bytes,
+  `0x4b9470` bytes livres (59%) no menor slot OTA. O sdkconfig efetivo mantém
+  AES mbedTLS por software. SHA-256 do app:
+  `FCB78326B4737EE1F2B227F2C89D682C304383CD90D54B27AFFF0D7A70845C54`; ELF:
+  `7678AF52EC0449AF51976E10DD1F28322CB60170732F7F5AA906CA282A98E050`.
+- App-only flash em COM8 gravou `0x346b90` bytes no offset `0x20000`; esptool
+  confirmou `Hash of data verified`. A captura usou o ELF desta build e não
+  acusou divergência de checksum. Boot confirmou P4 v1.3, PSRAM de 32 MiB,
+  display/UI, C6 3.0.6 com RPC v2/SW_AGGR, Wi-Fi com IP e HTTPS bem-sucedido
+  para os domínios de clima e mercado. Um endpoint do domínio 2 falhou ao abrir
+  conexão. NVS, tabela de partições, C6 e eFuses não foram alterados.
+- A sincronização eWeLink ainda precisa ser acionada na tela para confirmar o
+  fetch, a gravação sem panic e o valor medido da pilha; não foi alegado um
+  teste cloud end-to-end desta imagem.
+
+### Conteúdo de modais rolável e fechamento do X — 2026-10-03
+
+- O usuário confirmou que a lista eWeLink exibiu os devices, mas o conteúdo
+  ultrapassou a área útil; o botão não pôde ser alcançado e o fechamento pelo X
+  terminou em crash. O componente comum `np_modal` agora limita geometria à
+  tela e deixa a área de conteúdo rolável verticalmente, com barra automática.
+  O resumo eWeLink pode crescer conforme as linhas; removi o texto auxiliar que
+  ficava depois da lista e o fazia sobrepor quando ela aumentava. O callback do
+  X roda em preprocess para ocultar/desassociar o teclado antes de apagar os
+  campos eWeLink. ADR-078 registra a decisão.
+- Build incremental P4/ESP-IDF 5.5.4 no diretório isolado
+  `firmware/build/ewelink-stack-fix-20261003`: passou; app `0x346b30` bytes,
+  `0x4b94d0` bytes livres (59%) no menor slot OTA. SHA-256 do app:
+  `E76A300719FEF4266C0ABC0F3CCC8081F050B16A3502064C55119CB38C0920A3`; ELF:
+  `3D26F984AF9EF7B4CF2FD36C862E9041E85AB0EF4FD2D24A984BF098EF645926`.
+- App-only flash em COM8 no offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Boot capturado com o ELF correspondente confirmou
+  P4 v1.3, PSRAM 32 MiB, display/UI, C6 3.0.6 com RPC v2/SW_AGGR, Wi-Fi com IP
+  e HTTPS de clima/mercado. NVS, tabela, C6 e eFuses não foram alterados.
+- Falta confirmação de interação HIL na tela: rolar a lista comprida até o fim
+  e fechar o modal pelo X com/sem teclado ativo. O build e o boot não validam
+  gestos, posicionamento final nem ausência de crash ao toque.
+
+### Projeção do inventário eWeLink na tela de dispositivos — 2026-10-03
+
+- A tela principal projetava somente câmeras ONVIF, embora os três devices
+  estivessem no inventário local mostrado pela modal. O AppState agora publica
+  uma projeção sem devicekey/apikey/params; a tela apresenta nome, modelo,
+  canais e presença na última sincronização. Cards de eWeLink e câmeras ficam
+  numa lista vertical com barra automática quando o conteúdo ultrapassa o
+  viewport. ADR-079 documenta a fronteira e a decisão de memória.
+- A primeira imagem com a nova projeção compilou, mas o boot revelou stack
+  protection fault em `app_loop`. O candidato grande da projeção passou a usar
+  armazenamento estático do único escritor AppState. A imagem corrigida iniciou
+  sem novo panic durante a captura de aproximadamente 35 s; a tela de startup,
+  C6 3.0.6/RPC v2/SW_AGGR, Wi-Fi/IP e HTTPS clima/mercado funcionaram. BCB teve
+  falha DNS isolada (`ESP_ERR_HTTP_CONNECT`).
+- Build incremental ESP-IDF 5.5.4 no perfil isolado
+  `firmware/build/ewelink-stack-fix-20261003`: passou; app `0x3471f0` bytes,
+  `0x4b8e10` bytes livres (59%) no menor slot OTA. SHA-256 do app:
+  `06C8435BF9528ADFD14A742EBF7A95EADFEB61D77F60C2EEB5C2FEF685CA5157`; ELF:
+  `A0B32BA2B7344B670A4668E785001D80A59F2CFF85682237BC25E6464AABEC0F`.
+- Gravação somente da aplicação em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. NVS, tabela de partições, C6 e eFuses ficaram
+  intactos. A lista e a rolagem precisam de confirmação tátil na tela; a
+  captura serial não comprova que os cards ficaram visíveis nem a interação.
+
+### Fluxo guiado de importação e sincronização — 2026-10-03
+
+- A tela de dispositivos agora apresenta o estado vazio com ação de importação,
+  seletor Sonoff/eWeLink ou câmera ONVIF, página de login eWeLink e página de
+  progresso com autenticação, busca, reconciliação e gravação. A ação de
+  continuar em segundo plano retorna à lista sem alegar que cancelou a
+  requisição HTTPS. Texto de inventário foi ajustado para não prometer controle
+  LAN ainda não conectado.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4`, perfil isolado
+  `firmware/build/ewelink-stack-fix-20261003`: passou; app `0x347f10` bytes,
+  `0x4b80f0` bytes livres (59%) no menor slot OTA. SHA-256 do app:
+  `BBA7B6A0156E7EE6FFD4AF3513027E9CDA1CEE238BF5F3EA13D464EAE7073EBE`; ELF:
+  `0C9927A271D1B4C86BC41A43DB429FE6CD7EB70EE62B956BC0F8FD8F2C6EF251`.
+- App-only flash em COM8 no offset `0x20000`; esptool escreveu 3.440.400 bytes
+  e confirmou `Hash of data verified`. Boot serial com o ELF correspondente
+  mostrou display/touch inicializados, C6 3.0.6/RPC v2/SW_AGGR, Wi-Fi com IP,
+  tela de startup e HTTPS de clima/mercado; não houve stack fault durante a
+  captura de aproximadamente 35 s. Um domínio externo retornou falha de DNS,
+  sem afetar o boot. NVS, tabela de partições, firmware C6 e eFuses não foram
+  alterados.
+- A validação tátil ainda precisa confirmar as quatro telas, rolagem em painel,
+  seleção de Sonoff/câmera, fluxo de login, estados de progresso e retorno à
+  lista. Não foi executado novo login/sync eWeLink nesta revisão.
+
+### Correção do congelamento ao abrir Dispositivos — 2026-10-03
+
+- O watchdog reproduzido ao abrir Dispositivos manteve a task `lvgl` dentro de
+  `lv_obj_add_style()` → `theme_apply()` → criação do botão em
+  `np_devices_build_with_header()`. O assert padrão do LVGL para falha de
+  alocação entra em loop; a tela reservava cartões para 8 devices eWeLink
+  mesmo com somente 3 no inventário atual. A construção agora cria somente os
+  cartões presentes e acrescenta outros quando uma sincronização aumentar o
+  inventário.
+- Build limpo ESP-IDF 5.5.4, target `esp32p4`, perfil isolado
+  `firmware/build/lvgl-device-clean2-20261003`; imagem `0x348010` bytes,
+  `0x4b7ff0` bytes livres (59%) no menor slot OTA. `ESP_IDF_VERSION=5.5`
+  foi informado ao ambiente para selecionar a Kconfig Wi-Fi remota usada pelo
+  ESP-Hosted. SHA-256 P4:
+  `C4771591A92E5E9FEB91DAF1F2763E82ADCF62ABBADDC0E3F9A15FAE7F9308A9`;
+  SHA-256 ELF:
+  `9674BC4ECF1C970409E5D4224F404454A292E6C8D3CFE0C9CFE9D6506FCF1EBA`.
+- Gravada somente a aplicação em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Boot serial chegou à tela inicial; Wi-Fi recebeu
+  IP, C6 3.0.6/RPC v2/SW_AGGR e HTTPS de clima/mercado iniciaram. Uma chamada
+  externa BCB teve falha DNS isolada. Ainda aguarda confirmação tátil de que a
+  página Dispositivos abre sem WDT e continua responsiva. Nenhuma outra partição,
+  firmware C6 ou eFuse foi escrita.
+
+### Construção das subpáginas de Dispositivos sem sobreposição — 2026-10-03
+
+- Novo log reproduziu o watchdog ao abrir Dispositivos, durante `lv_textarea_create()` no trabalho da task `lvgl`, após a fase de limpeza da página anterior. As telas de adição/login/sincronização eram montadas ainda visíveis e só ocultadas depois de criar todos os controles. Agora cada subpágina inicia oculta antes de receber seus filhos; modais comuns também ocultam o scrim imediatamente ao criar a raiz, antes de construir o painel/conteúdo. Isto reduz trabalho de layout/invalidação enquanto a árvore está sendo montada. A tela Dispositivos ainda precisa de confirmação tátil após esta gravação.
+- Build limpo ESP-IDF 5.5.4, `esp32p4`, pasta `firmware/build/lvgl-device-fix-20261003`: passou; app `0x347c30` bytes, `0x4b83d0` bytes livres (59%) no menor slot OTA. SHA-256 app: `089B38B8F238DCCCDDDED41CCF79B0AE57F9067E2B3766408C64E3D6220705E6`; ELF: `795914496BFD1CEBB954C7EAFAE736190310D42227CB5E1E4A6508F39660A97B`. Revisão fonte: `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais.
+- Gravados bootloader, app, tabela de partições e `otadata` inicial em COM8; esptool confirmou hashes. Boot observado em P4 v1.3, PSRAM 32 MiB, display/touch inicializados, C6 3.0.6 com RPC v2/SW_AGGR, app_main retornou e Wi-Fi iniciou tentativa de associação. O monitor foi encerrado depois da captura para liberar COM8. Não houve interação tátil com a tela Dispositivos nesta rodada; ausência de novo WDT nesse fluxo permanece pendente de confirmação do operador. NVS, partição storage, firmware C6 e eFuses não foram gravados.
+
+### Expansão do pool LVGL para a tela Dispositivos — 2026-10-03
+
+- O operador reproduziu o WDT após `CLEAN_WAIT_NEXT_PASS`, sem o evento `BUILD` da navegação. A task `lvgl` permaneceu no mesmo PC de `rgb888_image_blend` por dois períodos de watchdog. O pool LVGL tinha cerca de 40 KiB livres após limpar a página anterior; a falha ocorre durante a construção da árvore da tela.
+- O primeiro build limpo em `firmware/build/lvgl-device-pool-20261003` passou, mas a primeira gravação em COM8 expôs um erro de configuração no boot: `LVGL could not register PSRAM pool` e `P4 local bring-up stopped: ESP_ERR_NO_MEM`. O TLSF de LVGL tinha `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=0`, limitando cada pool a 64 KiB. Essa imagem foi substituída imediatamente.
+- ADR-082 fixa um pool adicional de 128 KiB em PSRAM e `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=128`. O build limpo ESP-IDF 5.5.4 / `esp32p4` em `firmware/build/lvgl-device-pool-v2-20261003` passou com a configuração efetiva 128, app `0x347df0` bytes e `0x4b8210` bytes livres no menor slot OTA. SHA-256 do app: `59FE9F59A5F5B3B02AEDE72A7EF52E5E391D0912626CD5340C8CCBD634FB82BC`; ELF: `B918C0AFC96FD99A04A4ECE96C8183F6DBADBF450695F6A3B7188EBD83B8EFE1`. Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais preservadas.
+- Gravados bootloader, app, tabela de partições e `otadata` inicial pela COM8; esptool verificou os hashes. Boot no P4 v1.3 / PSRAM 32 MiB confirmou `LVGL object pools total=194596 free=188168 largest=131064 PSRAM_added=131072`, display RGB565 / rotação 180° / triple partial / 3 framebuffers, touch GT911 e `P4 local bring-up ready`. C6 iniciou com firmware 3.0.6, RPC v2 e SW_AGGR. O hash da imagem C6 instalada não foi obtido nesta rodada. NVS, partição de storage, firmware C6 e eFuses não foram gravados. Monitor encerrado para liberar COM8.
+- Após esta gravação, o operador confirmou que a tela Dispositivos está funcionando. Isto valida a entrada tátil e a resposta visual no uso observado, sem recorrência do congelamento reportado. Não foi fornecido log serial durante a navegação; portanto, a ausência de WDT é confirmada pelo operador, não por captura de monitor. A validação de outras telas e de uma sessão prolongada permanece fora desta observação.
+
+### Controles de canal Sonoff pela LAN — 2026-10-03
+
+- Os cards eWeLink agora recebem estado LAN e exibem switches por canal. A
+  interação é postada pelo event bus e atendida pela task `sonoff_lan`; ela usa
+  mDNS para achar o IP e a `devicekey` local para cifrar comandos
+  `/zeroconf/switch` ou `/zeroconf/switches`. A UI não recebe nem registra a
+  chave. Switches permanecem desabilitados enquanto não há estado conhecido.
+  Detalhes da decisão em ADR-083.
+- Build limpo ESP-IDF 5.5.4 / target `esp32p4`, perfil isolado
+  `firmware/build/sonoff-lan-control-20261003`: passou sem warnings após
+  recompilação incremental final. Configuração efetiva inclui
+  `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=128`. App: `0x34a0e0` bytes, com
+  `0x4b5f20` bytes livres (59%) na menor partição OTA. SHA-256 app:
+  `B9B23BC28F73F3C0A519CB660D4873EFDCA7645F900C71EF6613E85DDCEEA84A`;
+  SHA-256 ELF:
+  `BCF857B7ED2A400D5FAA98E283C138A34C82554B21823830D76967585A853AC0`.
+- Gravada somente a aplicação em COM8, offset `0x20000`; esptool reportou
+  `Hash of data verified`. Captura serial curta avançou até ~70 s de uptime e
+  mostrou `sonoff_lan: LAN discovery result=ESP_OK devices=3 imported=3`, sem
+  panic/WDT nesse intervalo. A mesma captura também registrou falhas de
+  alocação TLS de 4.437 bytes e falhas HTTPS de provedores externos; esse
+  problema de pressão/fragmentação da SRAM interna requer acompanhamento, não
+  foi atribuído ao comando LAN. Monitor/captura fechou COM8 após 25 s. NVS,
+  tabela de partições, C6 e eFuses não foram escritos nesta operação.
+- Confirmação tátil pendente: verificar que os três estados aparecem na tela,
+  alternar um relé de teste e confirmar retorno visual do estado. O boot e a
+  descoberta mDNS não comprovam que o endpoint/cifragem são compatíveis com
+  cada modelo.
+
+### Contraste visual dos cartões de dispositivos — 2026-10-03
+
+- O operador informou que os dados apareciam como textos sem cartões visíveis.
+  A causa era o fundo dos cartões eWeLink igual ao da lista, sem borda; os
+  cartões de câmeras também não tinham contorno. Ambos agora usam fundo
+  elevado e borda `np_c_hairline` de 1 px.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4` no perfil
+  `firmware/build/sonoff-lan-control-20261003`: passou sem warnings; app
+  `0x34a160` bytes, `0x4b5ea0` bytes livres (59%) no menor slot OTA. SHA-256
+  app `6D2C37EA7DAC9C21D665585137CFB58DF96819E9129CBF2A00F508BCA3B379BD`;
+  ELF `EDD39BFFEC16849CAA0CE0A1A1F588773627B9690840ED0C3A3891B1571695EA`.
+- Gravada somente a aplicação em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Captura serial chegou a `Boot transition complete;
+  startup page visible` sem panic/WDT durante os 25 s de captura. As falhas de
+  alocação TLS/HTTPS descritas na seção anterior voltaram a ocorrer. COM8 foi
+  fechada ao terminar; partições, NVS, C6 e eFuses não foram escritos.
+- Falta confirmação visual tátil de que a borda/fundo dos cartões agora
+  aparecem com contraste correto.
+
+### Subcards de canal clicáveis — 2026-10-03
+
+- Cada canal agora é um card interno ao dispositivo e o próprio card alterna
+  ligado/desligado ao toque; não há switch separado. O estado ligado usa fundo
+  e contorno de destaque. O card mostra “Enviando...” e fica desabilitado
+  durante a solicitação. Estados desconhecidos/offline também não aceitam
+  comandos.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4`, perfil
+  `firmware/build/sonoff-lan-control-20261003`: passou sem warnings; app
+  `0x34a460` bytes, `0x4b5ba0` bytes livres (59%) no menor slot OTA. SHA-256
+  app `F0AB1E59E31429FDC7EBBE0B74504C67DFDEEC27992DE45714953CEA6B2727EC`;
+  ELF `EF64406EF7F872A9C347559274DA0557FD92D9E30EAC9FB7E9B30D9DE1EC1E5A`.
+- Gravada somente a aplicação em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Boot alcançou a tela inicial, associou ao Wi-Fi e
+  recebeu IP `192.168.1.16`; sem panic/WDT durante a captura serial curta de
+  25 s. COM8 fechada automaticamente; NVS, tabela, C6 e eFuses não foram
+  escritos.
+- Ainda é necessária a confirmação tátil do desenho final e de que tocar um
+  subcard alterna o relé físico e atualiza seu estado.
+
+### Buffer RX TLS de 8 KiB — build, flash e captura inicial — 2026-10-03
+
+- Build limpo ESP-IDF 5.5.4, target explícito `esp32p4`, no perfil
+  `firmware/build/tls-rx-buffer-20261003`: passou. Configuração efetiva:
+  `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192` e
+  `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=128`. App `0x34a460` bytes;
+  `0x4b5ba0` bytes livres na menor partição de 8 MiB (59%). SHA-256 app
+  `F60CB5FB6E600F13D9539E3B251EDFB45CF8D07747F1046DAA622D771971F5EC`;
+  ELF `8B1F1C68A3784F9958CDF583526078175D415131FFF842AC6EAA2C7FB1C659EA`.
+- A primeira tentativa de `app-flash` foi bloqueada por COM8; foram
+  identificados e encerrados somente quatro processos `idf_monitor.py` que
+  apontavam para COM8, conforme pedido anterior do operador. A segunda tentativa
+  gravou somente o app em `0x20000`; esptool confirmou `Hash of data verified`
+  e hard reset. Nenhuma partição, NVS, C6 ou eFuse foi escrita.
+- Captura serial por 75 s, com COM8 fechada automaticamente ao final: o domínio
+  inicial de produto concluiu DNS, NTP e HTTPS com `ESP_OK`; não apareceu a
+  alocação RX de 17.058 bytes nem watchdog/panic. A descoberta LAN continuou
+  retornando `devices=3 imported=3`. Esta janela validou apenas o domínio 0; a
+  sincronização sob demanda eWeLink e os demais domínios HTTPS ainda precisam
+  de validação específica. O log bruto ficou no diretório temporário do sistema,
+  fora do repositório.
+
+### Simplificação visual dos cartões de dispositivos — 2026-10-03
+
+- Os cards eWeLink ficaram menores; o modelo aparece ao lado do nome, sem a
+  contagem de canais. A disponibilidade LAN aparece somente como ponto verde
+  ou vermelho alinhado ao nome no canto direito. Em aparelhos de um canal, o
+  card do aparelho é o controle; em aparelhos multicanal, os subcards menores
+  indicam o estado pela cor, sem texto de estado; os títulos podem ocupar duas
+  linhas dentro da altura do subcard.
+- Build limpa ESP-IDF 5.5.4 / alvo `esp32p4` em
+  `firmware/build/device-layout-20261003`: passou; após corrigir a visibilidade
+  do controle único, a build incremental final também passou. Configuração
+  efetiva: PSRAM habilitada, pool LVGL extra de 128 KiB, Hosted ativo e três
+  buffers RGB565. App final `0x34ae30` bytes; `0x4b51d0` bytes livres na menor
+  partição OTA. SHA-256 app
+  `A021439FE939053F05ECA54F1215B664CDAD714C09C1A989934D2A9C3B651D59`;
+  ELF `9DE5F4245E94F5CE87C4294A312A70F781EE1AB20B621D46067E1FC292A47E8C`.
+  Fonte baseada em `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações
+  locais.
+- Gravada somente a aplicação P4 em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. NVS, tabela de partições, firmware C6 e eFuses não
+  foram escritos. Após a gravação inicial, a COM8 ficou temporariamente ocupada
+  por duas capturas externas; a versão final foi gravada depois que elas
+  terminaram, novamente com hash confirmado. Captura serial de aproximadamente
+  25 s da imagem final confirmou P4 v1.3,
+  32 MiB de PSRAM, display RGB565/rotação 180°/triple-partial/3 FB, tela inicial,
+  Hosted 3.0.6 com RPC v2 e SW_AGGR, Wi-Fi com IP e retorno de `app_main`, sem
+  panic/WDT observado na janela. Um refresh HTTPS do Banco Central falhou por
+  resolução do hostname; os domínios adjacentes concluíram HTTPS com sucesso.
+- A aparência e a alternância tátil dos novos cards ainda precisam de
+  confirmação visual na tela Dispositivos; a captura serial não prova esses
+  detalhes de UX.
+
+### Aumento da altura dos subcards de canal — 2026-10-03
+
+- A altura dos subcards internos passou de 48 para 60 px; o card externo e a
+  quebra dos títulos em até duas linhas foram mantidos.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4` no perfil
+  `firmware/build/device-layout-20261003`: passou; app `0x34ae50` bytes, com
+  `0x4b51b0` bytes livres na menor partição OTA. SHA-256 app
+  `74C11E015CB7AD97739E8B5F40D3A7367543DBF18FEE57CA8C1E8855F6CBC582`.
+- Gravada somente a aplicação P4 em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Captura serial confirmou P4 v1.3, display/touch,
+  PSRAM 32 MiB, C6/ESP-Hosted 3.0.6 com RPC v2 e SW_AGGR, Wi-Fi com IP e
+  transição para a tela inicial; sem panic/WDT observado na janela. NVS,
+  tabela de partições, C6 e eFuses não foram escritos.
+
+### Padding inferior nos cards de dispositivo — 2026-10-03
+
+- Aumentei a altura do card externo de 120 para 128 px. Com o subcard de 60 px
+  começando em y=56, agora há 12 px até a borda inferior, igual à margem
+  superior do conteúdo. O passo vertical continua em 132 px.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4` em
+  `firmware/build/device-layout-20261003`: passou; app `0x34ae50` bytes,
+  `0x4b51b0` bytes livres na menor partição OTA. SHA-256 app
+  `B16054EA95549663854518DD830958F8131D410ECAE40EC652047C6313B4EBF8`.
+- Gravada somente a aplicação em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Captura serial confirmou P4 v1.3, display/touch,
+  PSRAM 32 MiB, C6/ESP-Hosted 3.0.6 com RPC v2 e SW_AGGR, Wi-Fi com IP e
+  transição para a tela inicial. NVS, tabela de partições, C6 e eFuses não
+  foram escritos.
+
+### Estado Sonoff LAN e comando criptografado — 2026-10-03
+
+- Placa ESP32-P4 v1.3 com flash/PSRAM de 32 MiB; base Git
+  `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais.
+  Build P4 ESP-IDF 5.5.4 no perfil limpo
+  `firmware/build/sonoff-lan-iv-20261003`, seguido de builds incrementais;
+  target efetivo `esp32p4`, `CONFIG_SPIRAM=1` e RX TLS de 8 KiB.
+- A primeira imagem aumentou os buffers mDNS e corrigiu o IV AES, mas sofreu
+  `Stack protection fault` na task `sonoff_lan` de 8 KiB. O binário anterior
+  foi restaurado diretamente por esptool e teve hash verificado. O inventário
+  público e o próximo snapshot da varredura foram movidos para uma área
+  reutilizável em PSRAM; chaves e buffers criptográficos permaneceram internos.
+- Imagem final: app `0x34ae50` bytes; `0x4b51b0` bytes livres (59%) no menor
+  slot OTA. SHA-256 app
+  `718696829AB1DD44F393841F186D04AF85F767160077E4B6477092DE908FF877`;
+  ELF `41DD772713319B404801784BDA2CC76B2C7919A54FFFDFBB800CB85D26AA9D09`.
+  Gravado somente o app P4 em COM8, offset `0x20000`, com `Hash of data
+  verified` e hard reset. NVS, tabela de partições, C6 e eFuses não foram
+  escritos; hash da imagem C6 em execução não foi obtido nesta sessão.
+- Três varreduras da imagem final, até 103 s de uptime, retornaram
+  `devices=3 imported=3 online=3 stateful=3 state_queries=0`,
+  `max_mdns_b64=664` e margem mínima de pilha de 1.956 bytes. O contador
+  bruto `channels_known=7 channels_expected=6` inclui uma posição extra
+  anunciada: o POC mostra quatro entradas `switches` no TX2C, apesar de seus
+  dois canais físicos. A contagem ainda não comprova cada canal individual.
+- Houve um aviso de task watchdog em `np2_netcheck` / IDLE1 após a primeira
+  varredura; o serviço LAN continuou a publicar varreduras. A causa desse
+  aviso não foi atribuída ao Sonoff LAN. O acionamento físico e o retorno
+  visual dos cards aguardam confirmação com toques na placa.
+
+### Inclusão ONVIF da Tapo C200 e perfil de vídeo — 2026-10-03
+
+- Na imagem anterior, o PC alcançou `192.168.1.8:2020` e `:554`. O operador
+  informou o IP no painel e confirmou que a câmera apareceu na lista. O P4
+  registrou `cameras=1 datagrams=0 direct_endpoints_up=1` e margem de pilha
+  ONVIF de 3.644 bytes. A inclusão manual usa TCP porque não houve resposta
+  multicast nesta rede.
+- Ao iniciar vídeo com a conta local da câmera, `GetCapabilities` validou o
+  endpoint Media. A consulta de opções retornou HTTP 200, mas foi classificada
+  incorretamente como `unclassified` porque o parser exigia a string do tipo
+  XML `H264Options`. RTSP autenticou por Digest: `/stream2` respondeu
+  `OPTIONS 200`, `DESCRIBE 401/200`, `SETUP 200` e `PLAY 200`. O SPS recebido
+  tinha `profile_idc=77`, restrições `0x00` e nível 31 (H.264 Main), rejeitado
+  pelo decodificador atual. O operador confirmou a mensagem “Perfil
+  incompatível”. Isto separa descoberta/autenticação bem-sucedidas da falha
+  de decodificação.
+- Corrigida a leitura read-only das opções para procurar o elemento
+  `H264ProfilesSupported` definido pelo schema ONVIF e registrar apenas o
+  tamanho do corpo quando a interpretação falhar. Build limpo ESP-IDF 5.5.4
+  para P4 em `firmware/build/onvif-options-20261003`: passou. App `0x34aa80`
+  bytes, `0x4b5580` bytes livres (59%) na menor partição OTA. SHA-256 app
+  `8E02E09A2422B53156FBA40634A177B7CD2BA5A5576883F6CAD16FCAF3B08ADF`,
+  ELF `6592DA74FC5FCCC44D0EF3CE63CDCCC74216689905C89D83303BADC6A0E199B6`,
+  `sdkconfig` `0BE2019E74EA3B296BF7C2929C4BEDBF2EED573D5FF7BB2ABB1BB26DA3C52535`.
+  Target efetivo `esp32p4`, PSRAM ativa, RX TLS 8 KiB e flash auto suspend
+  desabilitado. Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247` mais
+  alterações locais.
+- `idf.py -DIDF_TARGET=esp32p4 -B build/onvif-options-20261003 -p COM8
+  app-flash` gravou somente a aplicação em `0x20000` e verificou o hash.
+  Em nova captura após o operador iniciar o vídeo no painel, a consulta ONVIF
+  retornou `H264Options ProfilesSupported=Main`. O `/stream8` respondeu
+  `DESCRIBE 200`, mas não chegou a `SETUP`; o `/stream2` respondeu `SETUP 200`
+  e `PLAY 200`, seguido de SPS `profile_idc=77`, restrições `0x00` e nível 31.
+  O decodificador de software atual aceita somente Constrained Baseline e
+  rejeitou o stream. Portanto, o problema não é a autenticação, o IP nem a
+  sessão RTSP: esta C200 oferece somente Main nas opções ONVIF consultadas.
+  A COM8 foi liberada após a captura; não houve nova gravação nesta medição.
+  O IP manual da câmera está apenas em RAM nesta implementação e precisa ser
+  informado novamente; isso permanece uma lacuna de persistência do inventário
+  ONVIF. NVS, tabela, C6 e eFuses não foram escritos nesta gravação.
+
+### Ícone de interruptor nos dispositivos eWeLink — 2026-10-03
+
+- O ícone de roteador no card eWeLink foi substituído por um interruptor
+  desenhado com formas LVGL; os demais usos do ícone de rede foram mantidos.
+- Build incremental ESP-IDF 5.5.4 / `esp32p4` em
+  `firmware/build/device-layout-20261003`: passou; app `0x34aed0` bytes,
+  `0x4b5130` bytes livres na menor partição OTA. SHA-256 app
+  `BB361101A20A98B3D4BE370075522D5BBC8A0FBB0C7E7D6B86C3DDD446379340`.
+- Gravada somente a aplicação P4 em COM8, offset `0x20000`; esptool confirmou
+  `Hash of data verified`. Captura serial confirmou P4 v1.3, display/touch,
+  PSRAM 32 MiB, C6/ESP-Hosted 3.0.6 com RPC v2 e SW_AGGR, Wi-Fi com IP e
+  transição para a tela inicial. A descoberta LAN publicou três dispositivos
+  online. NVS, tabela de partições, C6 e eFuses não foram escritos.
+
+### Ícone de lâmpada por canal — 2026-10-03
+
+- Removido o ícone do cabeçalho junto ao nome do dispositivo. Cada subcard de
+  canal agora identifica luz com uma lâmpada; para dispositivo de canal único,
+  sem subcard conforme o layout, o símbolo aparece no próprio card sem ocupar
+  a área do nome. O modelo deixa espaço horizontal para o ícone do canal.
+- Build ESP-IDF 5.5.4 / `esp32p4` no perfil
+  `firmware/build/ewelink-ui-20261003`: passou; app `0x34ac00` bytes,
+  `0x4b5400` bytes livres na menor partição OTA. SHA-256 app
+  `EA788A86C3340F4AD42E296B9A909CC34B7EA508BE621C5FF704D175CEE45402`.
+- `app-flash` gravou somente a aplicação em COM8, offset `0x20000`; esptool
+  confirmou `Hash of data verified` e hard reset. Boot serial confirmou P4 v1.3,
+  display/touch, PSRAM 32 MiB, Hosted C6 3.0.6 com RPC v2 e SW_AGGR, Wi-Fi com
+  IP e tela inicial visível; sem panic/WDT observado em aproximadamente 18 s.
+  Um check HTTPS falhou por resolução de `api.bcb.gov.br`; outros checks
+  HTTPS concluíram. NVS, tabela de partições, C6 e eFuses não foram escritos.
+
+### Refinamento visual dos cards de dispositivo — 2026-10-04
+
+- O título do dispositivo não concatena mais o modelo (ex.: TX1C). O indicador
+  de rede segue como ponto à direita. Canais continuam sem texto de estado;
+  o ícone de lâmpada agora tem estados visuais: amarelo ligado e cinza
+  desligado.
+- O canal único usa diretamente o card do dispositivo, sem subcard, e retorna
+  à superfície natural do card quando desligado. O estado LVGL `DISABLED` foi
+  removido dos cards de canal; a autorização do toque continua protegida pelo
+  callback de controle do canal. Os subcards aumentaram de 60 para 76 px, o
+  card externo de 128 para 144 px e o passo de linha para 150 px, mantendo
+  12 px livres abaixo do subcard. Nomes de canal podem quebrar em mais linhas
+  para caber nessa altura.
+- Build ESP-IDF 5.5.4, target `esp32p4`, passou. `np2_p4.bin`: 0x34abf0 bytes,
+  com 0x4b5410 bytes livres na menor partição OTA; SHA-256
+  `3754A8450321499774410D58F88CF770256ED836DDB13AC70D1A6516775E4555`.
+  ELF SHA-256 `2A0912CB19004922916AF98B4A5F566A747E17A91BB9AC3C9BE670C7F73AEE4E`.
+  Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais.
+- `idf.py -p COM8 -b 460800 app-flash monitor` gravou somente a aplicação no
+  offset `0x20000`; esptool confirmou `Hash of data verified`. Boot serial
+  confirmou P4 v1.3, PSRAM de 32 MiB, display/touch inicializados, LVGL em
+  RGB565/rotação 180°/triple-partial/3 FBs e Hosted C6 3.0.6 com RPC v2 e
+  SW_AGGR. A aplicação chegou a `P4 local bring-up ready`, sem panic/WDT na
+  captura. Wi-Fi registrou desconexão com reason=2 e retry agendado; esse evento
+  não foi atribuído a esta mudança de UI. Não houve confirmação tátil/visual
+  dos estados dos cards nesta captura. NVS, tabela, C6 e eFuses não foram
+  escritos; COM8 foi liberada após a captura.
+
+### Comando de canal sem toques repetidos — 2026-10-04
+
+- Removido `LV_STATE_DISABLED` permanente após publicar um comando. O callback
+  considera o alvo corrente do evento, bloqueia outros canais enquanto há uma
+  solicitação em voo e mantém o card pendente até a projeção refletir o novo
+  estado ou o serviço completar/falhar. Durante a transição, o card mostra
+  `Ligando...` ou `Desligando...`; em falha, a projeção restaura o estado
+  observado e libera nova tentativa.
+- Build incremental ESP-IDF 5.5.4, target `esp32p4`, passou; app `0x34b090`
+  bytes, com `0x4b4f70` bytes livres na menor partição OTA. SHA-256 do app
+  `EB029EDED8F9126589F8371A7D655FDCD174CFDACB456E76F9501153D9FFD521`, ELF
+  `AC4002369FBF6DBBE2924134A98DF32C94B1FF4A52D465BF8023F162991150F5` e
+  `sdkconfig` `0BE2019E74EA3B296BF7C2929C4BEDBF2EED573D5FF7BB2ABB1BB26DA3C52535`.
+  Base Git `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais.
+- `idf.py -p COM8 -b 460800 app-flash monitor` gravou somente o app no offset
+  `0x20000`; esptool confirmou `Hash of data verified`. Boot confirmou P4 v1.3,
+  PSRAM 32 MiB, display/touch inicializados, Hosted C6 3.0.6 com RPC v2/SW_AGGR,
+  Wi-Fi com IP e `P4 local bring-up ready`, sem panic/WDT na captura. Houve uma
+  primeira tentativa de montagem do microSD com timeout, seguida de montagem
+  bem-sucedida; um domínio HTTPS reportou falha de DNS. Não houve confirmação
+  tátil do comando de ligar/desligar nesta captura. NVS, tabela, C6 e eFuses não
+  foram escritos; COM8 foi liberada.
+
+### Faixa de status interna e espaçamento entre cards — 2026-10-04
+
+- A mensagem de ação agora ocupa uma faixa própria na parte inferior do card
+  de canal; o nome do canal e o nome do dispositivo permanecem visíveis. O
+  card principal ficou com 156 px e o canal com 88 px de altura, conservando
+  12 px inferiores. O passo vertical principal passou a 168 px (card + 12 px),
+  igual ao intervalo horizontal. Cards de câmera usam passo vertical de 80 px
+  para também manter 12 px de separação.
+- Build incremental ESP-IDF 5.5.4, target `esp32p4`, passou; app `0x34b090`
+  bytes, com `0x4b4f70` bytes livres na menor partição OTA. SHA-256 do app
+  `53511AE24DC04EF9B977FE07A8EE5C121490A26F7EB3A680A6FA0A918ED26FA6`, ELF
+  `3976C754E34DA2EAA1510CCFFAC504431DDD30F83558FAB15FB07EFA99E99AA9`.
+- `idf.py -p COM8 -b 460800 app-flash monitor` gravou somente o app no offset
+  `0x20000`; esptool confirmou `Hash of data verified`. Boot confirmou P4 v1.3,
+  PSRAM 32 MiB, display/touch, Hosted C6 3.0.6 com RPC v2/SW_AGGR, Wi-Fi com IP
+  e `P4 local bring-up ready`, sem panic/WDT. Nesta inicialização, as duas
+  tentativas de montar o microSD falharam por timeout e o sistema usou o ícone
+  estático de clima. O toque nos cards ainda não foi verificado nesta captura.
+  NVS, tabela, C6 e eFuses não foram escritos; COM8 foi liberada.
+
+### Cards e canais no layout de referência — 2026-10-04
+
+- Os cards eWeLink agora ocupam uma, duas ou três colunas conforme a quantidade
+  de canais; cards com um canal também mostram o subcard interno. Cada canal
+  tem ícone circular de lâmpada, com lâmpada clara ligada e azul-cinza
+  desligada. O card externo preserva o nome e indicador de rede. O resumo
+  superior mostra dispositivos totais e online com ponto colorido; os estilos
+  seguem as superfícies e cores dos componentes NP.
+- Build incremental ESP-IDF 5.5.4, target `esp32p4`, passou. App `0x34ae90`
+  bytes, com `0x4b5170` bytes livres na menor partição OTA. SHA-256 do app
+  `ED2AADF20B21E32FACD7BAFFAD63FDAD3F4BD7CB1EAAE24B987E159991721598`, ELF
+  `EDE4536925072E7DC00127BCB953AF675D38FCA2396B0B8B76396C4D4A4FD199`,
+  `sdkconfig` `0BE2019E74EA3B296BF7C2929C4BEDBF2EED573D5FF7BB2ABB1BB26DA3C52535`.
+- `idf.py -p COM8 -b 460800 app-flash monitor` gravou somente a aplicação em
+  `0x20000`; esptool confirmou `Hash of data verified`. Boot em P4 v1.3 chegou
+  a `P4 local bring-up ready`, com display/touch e Hosted C6 3.0.6, RPC v2 e
+  SW_AGGR; sem panic/WDT. As duas tentativas de montagem do microSD expiraram;
+  o Wi-Fi iniciou associação e depois registrou desconexões (reason 2/205).
+  A disposição visual e o toque dos canais não foram verificados fisicamente.
+  NVS, tabela, C6 e eFuses não foram gravados; COM8 foi liberada.
+
+### Ícone Material dos canais — 2026-10-04
+
+- Ícone de lâmpada trocado do desenho com formas LVGL para o glifo Material
+  `lightbulb` U+E0F0 incluído na fonte Material 24 do produto. Desligado usa
+  `np_c_text_3()` (cinza terciário mais apagado); ligado usa branco `np_c_text()`.
+- Build incremental ESP-IDF 5.5.4, target `esp32p4`, passou. App `0x34ae10`
+  bytes, `0x4b51f0` bytes livres na menor partição OTA. SHA-256 do app
+  `74A41874C9351FFAF88A7FBAD3C6CDE81DBB2AD09F9960F616BC1A8C56B10FD9`, ELF
+  `61EA749FC57AE7CC40FB1CAB690A3E95A3748546749758D411F1312DC9060525`,
+  `sdkconfig` `0BE2019E74EA3B296BF7C2929C4BEDBF2EED573D5FF7BB2ABB1BB26DA3C52535`.
+- `idf.py -p COM8 -b 460800 app-flash monitor` gravou somente a aplicação em
+  `0x20000`; esptool confirmou `Hash of data verified`. Boot em P4 v1.3
+  reconheceu PSRAM 32 MiB, display/touch e C6 3.0.6 com RPC v2/SW_AGGR; chegou
+  a `P4 local bring-up ready`, depois obteve IP e concluiu DNS, NTP e HTTPS, sem
+  panic/WDT. microSD ausente/timeout durante as duas tentativas de montagem.
+  Render específico do novo glifo não foi conferido visualmente. NVS, tabela,
+  C6 e eFuses não foram gravados; COM8 foi liberada.
+
+### Diagnóstico dos cards amarelos e configuração TLS efetiva — 2026-10-04
+
+- Unidade em uso: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash NOR
+  32 MiB e PSRAM 32 MiB; base Git `cf335d9f9c20773f0e3b599d22c85290de83f247`
+  mais alterações locais preservadas. Hash do firmware C6 instalado não foi
+  obtido; C6 não foi atualizado. Captura passiva antes de gravar confirmou
+  consultas BTC ainda sendo tentadas após mais de cinco horas, mas com timeout
+  de conexão. O executor não estava parado. Descoberta LAN manteve três
+  dispositivos com estado. A captura não gravou credenciais/headers/bodies.
+- O sdkconfig do último build acima, hash `0BE2019E...C52535`, ainda tinha
+  `CONFIG_MBEDTLS_HARDWARE_AES=y`. Header gerado e map do ELF confirmam AES/GCM
+  de hardware, embora o default/ADR-076 tenham escolhido software. O CMake
+  agora recusa essa configuração. Configure negativo real em
+  `build/data-refresh-aes-negative-20261004`, usando cópia da configuração
+  antiga, falhou no gate esperado; nenhuma imagem negativa foi gravada.
+- Build P4 limpo, ESP-IDF 5.5.4, comando
+  `idf.py -DIDF_TARGET=esp32p4 -DSDKCONFIG=build/data-refresh-diag-20261004/sdkconfig -B build/data-refresh-diag-20261004 build`.
+  A primeira imagem instrumentada registrou sucesso de todos os provedores no
+  boot, mas depois reproduziu falha BTC no TLS (`0x8006`) e no recebimento de
+  headers. Portanto, corrigir a divergência AES não resolve sozinho o sintoma.
+  O operador confirmou somente Bitcoin amarelo. O snapshot foi aceito e a
+  projeção marcou BTC stale; não há evidência de UI congelada nesse caso.
+- A imagem final acrescenta uma sonda HEAD de controle, limitada ao orçamento
+  remanescente e cooldown de dez minutos, conforme ADR-087. Build passou sem
+  warnings de compilação. App `0x34ba80`, 59% livres no slot de 8 MiB; SHA-256
+  app `B730DE7E19B0F1F1FC9C39A437FEC0BB74FC6A3C1F432F52E2920D6C04EFF806`,
+  ELF `9AF7D23FE67E6EC513109F5D4CC912EA4246C9DDBCA82A72345600597CC09A82`,
+  sdkconfig `2524F49D41654D1CBA9137177B4E979726865B622A43965DBBF71C2C4DEF67B8`,
+  tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`.
+  AES por software, TLS interno/RX 8 KiB, PSRAM ativa, pool LVGL extra 128 KiB,
+  três framebuffers e flash auto-suspend desligado. Não houve alteração de
+  defaults, dependências, pins ou tabela de partições nesta investigação.
+- `idf.py -DIDF_TARGET=esp32p4 -DSDKCONFIG=build/data-refresh-diag-20261004/sdkconfig -B build/data-refresh-diag-20261004 -p COM8 -b 460800 app-flash`
+  gravou somente a aplicação em `0x20000`, com hash verificado. Boot confirmou
+  ELF `9af7d23fe...`, P4 v1.3, PSRAM 32 MiB, RPC v2/SW_AGGR e bring-up pronto.
+  NVS, storage, tabela, firmware C6 e eFuses não foram escritos pelo flash.
+- A captura final está registrada no [diagnóstico de refresh](DATA-REFRESH-DIAGNOSIS.md).
+  Os logs mostram heap interno de apenas 44–55 KiB antes de alguns HTTPS e
+  23–32 KiB com cliente ativo: abaixo do piso do plano. Este reteste não fecha
+  margem de memória, recovery ou estabilidade por várias horas. Logs brutos
+  filtrados ficaram no diretório temporário, fora do Git.
+
+### EventBus compacto e reenvio de dados — 2026-10-04, 18h23–18h29 BRT
+
+- Mesma Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4 v1.3, flash/PSRAM 32 MiB;
+  base `cf335d9f9c20773f0e3b599d22c85290de83f247` mais alterações locais
+  preservadas. C6 não atualizado; hash instalado não obtido. ADR-088 conserva
+  32 entradas e usa quatro snapshots internos com índice/geração/cópia; o
+  worker reenvia o mais recente se fila/pool rejeitarem a entrega.
+- Teste host real passou: comandos, cópias, saturação/liberação, 1.000 ciclos
+  de reciclagem, handles antigos/wrap, 8.000 snapshots concorrentes e reenvio
+  sem persistência extra. Scheduler, codec e parsers também passaram.
+- Build P4 limpo ESP-IDF 5.5.4, sem warnings, em
+  `build/event-bus-pool-20261004`, app `0x34bf90`, 59% livres no slot OTA.
+  SHA-256 app `06AAE6A5DE9FD9BC1D9995D237D359C574BC65FCBF345A14DB82B47F8B8EF9A1`,
+  ELF `05A301A557374EBD71E19D01551267DF9C7DC4008EDD32F65AF9F10081E8F780`.
+  Sdkconfig `2524F49D41654D1CBA9137177B4E979726865B622A43965DBBF71C2C4DEF67B8`
+  e tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`
+  idênticos à imagem anterior; AES software, TLS interno/RX 8 KiB, três FB,
+  LVGL extra 128 KiB, auto-suspend desligado e baseline Hosted preservados.
+- `idf.py -DIDF_TARGET=esp32p4 -DSDKCONFIG=build/event-bus-pool-20261004/sdkconfig -B build/event-bus-pool-20261004 -p COM8 -b 460800 app-flash`
+  verificou hash, somente app `0x20000`. Boot confirmou ELF novo, P4 v1.3,
+  PSRAM 32 MiB, RPC v2/SW_AGGR, bring-up pronto e queue/pool 1.792/1.984 B.
+  DWARF confirmou a economia de 15.936 B. Sem gravação de tabela/NVS/C6/eFuses
+  pelo comando de flash.
+- Captura passiva de 330 s: 11 HTTPS com HTTP 200, sendo cinco BTC (inicial
+  e quatro renovações), nove entregas aceitas, BTC stale=0, LAN três aparelhos
+  stateful, sem falha HTTPS/entrega ou panic/WDT no log filtrado. Antes de BTC:
+  64.143–65.447 B internos livres; fim do corpo com cliente ativo:
+  40.963–42.227 B, maior bloco 27.648 B. São amostras pontuais, não o mínimo
+  durante todo o TLS. A margem continua abaixo dos pisos do plano.
+- COM8 fechada ao final; imagem permanece na placa. Logs fora do Git em
+  `%TEMP%/np2-event-bus-pool-20261004.log`. Saturação foi validada no host;
+  timeout não reapareceu nesta bancada. Causa, recovery e ensaio por horas
+  continuam abertos. [Detalhes e comparação](DATA-REFRESH-DIAGNOSIS.md).
+- Conferência solicitada depois: captura passiva de mais 180 s, sem reset,
+  avançando dos uptimes 5.466.308 a 5.632.308 ms. Três novos HTTPS BTC
+  (uptime ~91–93 min) responderam HTTP 200 em 1,86–2,10 s, stale=0 e entrega
+  aceita. Heap pré-HTTPS 65,4 KiB, fim do corpo 42,2 KiB, maior bloco 27 KiB;
+  nenhum evento adiado ou WDT/panic. Essa captura foi adicionada ao mesmo log
+  filtrado. A causa original continua aberta até ensaio prolongado.
+
+### Idade do evento no centro de notificações — 2026-10-04
+
+- A modal mostra título e explicação do tipo, marcador de não lida, idade
+  relativa e resumo com plural correto. Usa `timestamp_unix_s` mais o horário
+  atual de `app_state`; com horário ausente informa `Horário indisponível`.
+  Preserva oito itens, ordem mais recente primeiro, marcação individual,
+  “Marcar todas como lidas” e histórico volátil. Nenhum campo novo foi
+  adicionado ao `AppState` ou ao armazenamento. Registrado no ADR-089.
+- Build limpo ESP-IDF 5.5.4/P4 concluiu sem warnings em
+  `firmware/build/notification-modal-20261004`. App `0x34c160` (3.457.376 B),
+  59% livres no menor slot OTA. SHA-256 app
+  `F6E7855D69350600FDFB223F1A01E6E5268F4713AED0E04B0A651DB488BB30CA`,
+  ELF `E1F92B4ACC461A68722DF90270EADE7E5B77ACF6C298F1F93E6552AC862EE38A`.
+  Sdkconfig `2524F49D41654D1CBA9137177B4E979726865B622A43965DBBF71C2C4DEF67B8`
+  e tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`
+  iguais à imagem EventBus anterior.
+- `idf.py -DIDF_TARGET=esp32p4 -DSDKCONFIG=build/notification-modal-20261004/sdkconfig -B build/notification-modal-20261004 -p COM8 -b 460800 app-flash`
+  verificou o hash e gravou somente app em `0x20000`. Boot P4 v1.3, PSRAM
+  32 MiB, Hosted RPC v2/SW_AGGR e bring-up concluído. O teste serial não
+  abriu nem tocou a modal; confirmação visual das posições/tempo relativo na
+  tela continua pendente. Log filtrado em
+  `%TEMP%/np2-notification-modal-20261004.log`, COM8 fechada ao final.
+- O boot também registrou Bitcoin HTTP 200/stale=0 e timeout de headers no
+  BCB após ~10,3 s. Esse problema de rede reapareceu e permanece separado da
+  mudança visual de notificação.
+
+### Política do histórico de notificações — 2026-10-04
+
+- O `app_loop` deixou de produzir eventos para atualizações normais de mercado;
+  o tipo legado foi removido do contrato e a modal não oferece mais rótulo para
+  esse evento. Permanecem transições de rede, falhas de armazenamento/reinício
+  e recuperações. ADR-090 registra a política.
+- Build P4 limpo ESP-IDF 5.5.4, sem warnings, em
+  `firmware/build/notification-policy-20261004`, app `0x34bfa0` (3.456.928 B),
+  59% livres na partição de aplicação. SHA-256 app
+  `880735C9DD19909A0C03E4CC24221EC280ABA8253E14365A27478F92EFB0E582`, ELF
+  `1D8C007E470C5E793FEAEA7B8ED48024193BC4FFFE6086896DE51911E719CB18`.
+  Sdkconfig `2524F49D41654D1CBA9137177B4E979726865B622A43965DBBF71C2C4DEF67B8`
+  e tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`
+  mantiveram-se idênticos.
+- `idf.py -DIDF_TARGET=esp32p4 -DSDKCONFIG=build/notification-policy-20261004/sdkconfig -B build/notification-policy-20261004 -p COM8 -b 460800 app-flash`
+  verificou o hash e gravou somente o app em `0x20000`, seguido de reset por
+  RTS. Captura serial passiva de 60 s confirmou execução, BTC HTTP 200,
+  stale=0 e entregas aceitas para os cinco domínios consultados; o BCB também
+  respondeu HTTP 200 nesta amostra. A captura começou em uptime de ~26 s, então
+  não contém as primeiras linhas do banner de boot. A modal não foi aberta na
+  tela; validação visual dos eventos permanece pendente. COM8 fechada ao final.
+  Log filtrado fora do Git em `%TEMP%/np2-notification-policy-20261004.log`.
+
+### Espaçamento da modal de notificações — 2026-10-04
+
+- O painel passou a ocupar 880×570 px, com lista vertical rolável, cards de
+  68 px em duas linhas (título/idade e descrição) e botão “Marcar todas como
+  lidas” ampliado para 320×48 px. Mantém o limite de oito notificações.
+- Build P4 limpo ESP-IDF 5.5.4 sem warnings em
+  `firmware/build/notification-layout-20261004`, app `0x34c020` (3.457.056 B),
+  59% livres na partição. SHA-256 app
+  `44B685EDD6D3D9E30D563F346F44DA45AF166F936A8655BE538745872368B210`, ELF
+  `B3E5F45FA07565C1E6380700D274156369BA385F1E153DC9E756CE807E66C329`.
+  Sdkconfig `2524F49D41654D1CBA9137177B4E979726865B622A43965DBBF71C2C4DEF67B8`
+  e tabela `66388633FBA5299ADD799FB294C2167B9C6FB690E0CC2437571176525633BB23`
+  idênticos às builds anteriores.
+- Flash apenas do app em `0x20000` pela COM8, com hash verificado e reset por
+  RTS. Captura serial passiva de 60 s a partir de uptime ~25 s: cinco domínios
+  HTTPS responderam HTTP 200, entregas aceitas e LAN encontrou três devices;
+  sem panic ou WDT no trecho filtrado. A modal não foi aberta na tela, portanto
+  o enquadramento, a rolagem e o texto do botão ainda precisam de confirmação
+  visual na placa. COM8 fechada ao final; log em
+  `%TEMP%/np2-notification-layout-20261004.log`.
+
+### Alinhamento do canal eWeLink com o ícone — 2026-10-04
+
+- O rótulo do canal agora usa uma linha com reticências para nomes longos e é
+  centralizado verticalmente na altura do ícone; o estado continua abaixo do
+  nome. Build P4 limpa ESP-IDF 5.5.4 sem warnings em
+  `firmware/build/notification-channel-align-20261004`, app `0x34c020`
+  (3.457.056 B), 59% livres. SHA-256 app
+  `4C43FBF365BAC4EF7E6A469CBEF8456A8307FB06B34EA38D418E07CFDBC3F813`, ELF
+  `6D2C165772D462E64EA3C72FBEB532ED160454DD19756346E84736141843CD3A`.
+  Sdkconfig e tabela de partições iguais às imagens anteriores.
+- Flash apenas do app em `0x20000` pela COM8, hash verificado e reset por RTS.
+  Captura serial passiva de 45 s: os cinco domínios HTTPS responderam HTTP 200,
+  entregas aceitas e três devices LAN detectados; sem panic/WDT no trecho.
+  A lista de canais não foi aberta na tela, então o alinhamento visual ainda
+  depende de confirmação direta na placa. COM8 fechada; log em
+  `%TEMP%/np2-notification-channel-align-20261004.log`.
+
+### Panic ao abrir Preferências > Tela e som — 2026-10-04
+
+- Evidência reportada pelo usuário: stack protection fault na task `lvgl`, SP
+  680 bytes abaixo do limite inferior informado, durante
+  `install_display_sound_callbacks()`. O fluxo mantinha uma projeção agregada
+  durante `navigation_build` e copiava outra projeção completa no instalador
+  para ler só brilho/volume.
+- Correção preparada: getter lock-protected para a pequena projeção de
+  controles, sem segunda cópia de `app_ui_projection_t`, e pilha LVGL elevada
+  de 12 para 16 KiB conforme o plano. Registrado no ADR-091.
+- Build P4 limpo ESP-IDF 5.5.4 sem warnings em
+  `firmware/build/display-sound-stack-fix-20261004`, app `0x34c020`
+  (3.457.056 B), 59% livres. SHA-256 app
+  `51137B13CA8E4F221E268D947CDEDC2ABC2A06F53485BFE4A869387301C3F373`, ELF
+  `0B81263E74B5EB0D973D66E31C6CEB7E75BA3A2C5CFEEFE177FC56E6C0B49D2C`.
+  Sdkconfig e partições iguais às imagens anteriores.
+- Flash não executado: COM8 enumerada, mas bloqueada por quatro processos
+  `idf_monitor`/`esp_idf_monitor`; esptool recebeu `PermissionError: Acesso
+  negado` antes de abrir a porta. Nenhum dado foi gravado e não foi possível
+  capturar o boot dessa imagem. Fechar os monitores e repetir app-flash é o
+  próximo passo; depois confirmar a navegação tátil e medir a pilha livre.
+- **Reteste em 2026-10-05:** os quatro processos já não estavam ativos e a COM8
+  abriu. `app-flash` gravou apenas os 3.457.056 B do app em `0x20000`; hash
+  verificado `51137B13CA8E4F221E268D947CDEDC2ABC2A06F53485BFE4A869387301C3F373`,
+  seguido de reset por RTS. Captura serial passiva por 60 s, iniciada em uptime
+  ~23 s, mostrou HTTP 200 e entrega aceita nos cinco domínios, LAN com três
+  devices, sem panic/WDT no trecho. Log em
+  `%TEMP%/np2-display-sound-stack-fix-20261005.log`. A captura não reproduziu
+  o toque em Tela e som; essa confirmação e o high-water mark sob navegação
+  continuam pendentes.

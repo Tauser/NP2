@@ -1512,6 +1512,25 @@ ser validado em bancada. Nenhum método `Set*` é usado. Referências:
 [ONVIF Core Security](https://www.onvif.org/specs/core/ONVIF-Core-Specification-v241.pdf)
 e [ONVIF Application Programmer's Guide](https://www.onvif.org/wp-content/uploads/2016/12/ONVIF_WG-APG-Application_Programmers_Guide-1.pdf).
 
+**Correção de leitura (2026-10-03):** a resposta HTTP 200 da consulta de opções
+era classificada como falha porque o parser procurava o nome do tipo XML
+`H264Options`. O elemento transmitido é `H264` e suas opções incluem
+`H264ProfilesSupported`; o parser agora verifica o elemento de perfis e registra
+somente o tamanho do corpo em caso de falha. A consulta continua somente de
+leitura. A [especificação Media ONVIF](https://www.onvif.org/specs/srv/media/ONVIF-Media-Service-Spec-v260.pdf)
+define esses elementos. O [suporte TP-Link](https://community.tp-link.com/en/smart-home/forum/topic/742598)
+informa que a C200 não permite modificar suas configurações de vídeo pela API
+ONVIF; nenhuma chamada `Set*` foi adicionada.
+
+**Resultado de bancada (2026-10-03):** com o parser corrigido, a C200 anunciou
+somente `Main` em `H264ProfilesSupported`, e o `/stream2` entregou SPS H.264
+`profile_idc=77` (Main). A autenticação e o RTSP chegaram a `PLAY 200`; o
+decodificador de software integrado aceita somente Constrained Baseline.
+Assim, o vídeo desta câmera exige um decodificador Main viável no P4 ou
+transcodificação local. Não assumir que alterar a qualidade do stream ou a
+consulta ONVIF converta o codec. A escolha e a validação de desempenho da
+solução permanecem abertas.
+
 ## ADR-064 — Varredura Wi-Fi assíncrona via ESP-Hosted
 
 **Decisão:** iniciar scans com `esp_wifi_scan_start(..., false)` e aguardar o
@@ -1582,3 +1601,550 @@ menos recentes e uma falha mantém os dados antigos por mais tempo, mitigada
 pelo retry horário. Essa frequência é uma política de consumo do painel, não
 uma alegação de que as fontes publiquem valores somente uma vez ao dia.
 Complementa a redução de Fear & Greed registrada no ADR-066.
+
+## ADR-068 — Buffers DMA alinhados do ESP-Hosted em PSRAM
+
+**Decisão:** habilitar `CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y` no P4. O
+alocador alinhado do ESP-Hosted deve preferir PSRAM DMA-capable para buffers de
+transporte SDIO e manter fallback para SRAM DMA interna. TLS, pilhas e outros
+buffers com requisito interno continuam usando suas capacidades atuais; C6,
+perfil SW_AGGR e tamanho dos buffers do protocolo não mudam.
+
+**Motivo e trade-off:** em bancada, o Hosted perdeu uma leitura SDIO de 4.776 B
+(`dma_alloc(5120) failed`) enquanto o executor HTTPS estava ativo; após isso,
+as associações/IP permaneceram aparentes, mas conexões HTTPS e DNS de produto
+falharam. O limite de 32 KiB em `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` não reserva
+uma região contígua DMA interna para essas leituras. O ESP32-P4 oferece EDMA
+para buffers DMA em PSRAM quando alocados com `MALLOC_CAP_SPIRAM |
+MALLOC_CAP_DMA`, conforme a documentação do ESP-IDF 5.5. O ESP-Hosted 3.0.6 já
+fornece a opção e tenta a PSRAM antes de recuar para a SRAM interna. O trade-off
+é tráfego adicional/banda de cache da PSRAM e latência de DMA; o buffer máximo
+de SDIO segue limitado pelo transporte e a carga combinada com display/TLS
+continua gate físico obrigatório. Não altera fontes em `managed_components/`.
+
+**Validação exigida:** build P4 limpo com configuração efetiva confirmada,
+flash apenas do app P4 e bancada com HTTPS serializado sob tráfego recebido.
+Confirmar ausência de `dma_alloc`/`rx_get_buffer` failure, sucesso dos domínios
+de dados, associação/IP e render sem regressão. A build isolada não fecha esse
+gate.
+
+## ADR-069 — Tela principal configurável no perfil local
+
+**Decisão:** permitir que o usuário escolha em Perfil > Preferências pessoais >
+Tela inicial entre Home, Clima, Mercado, Dispositivos e Pomodoro. A escolha é
+salva junto ao perfil no armazenamento local e aplicada no próximo boot. Um
+perfil antigo ou inexistente continua iniciando em Home; registros antigos são
+lidos com esse valor padrão.
+
+**Motivo e trade-off:** o painel tem várias telas principais e não deve impor a
+Home a quem usa outra delas como ponto de partida. Reutilizar o registro de
+perfil e o FlashCoordinator evita criar um segundo caminho de persistência. A
+preferência pode existir antes de o usuário preencher o nome; nesse caso o
+registro local guarda a seleção sem inventar uma identidade.
+
+## ADR-070 — Navegação por gesto entre telas principais
+
+**Decisão:** permitir deslizar horizontalmente na área de conteúdo para navegar
+na ordem Home, Clima, Mercado, Dispositivos e Pomodoro, com indicador de páginas
+no padrão expanding-dot no rodapé: o ponto ativo se alonga e muda para a cor de
+destaque. A navegação para nos limites, ignora movimentos iniciados no header e
+usa o Navigation Manager existente para preservar o ciclo de vida das telas.
+
+**Motivo e trade-off:** o painel é touch-first e essas telas formam o conjunto
+principal de navegação. Ler os pontos de toque do indev evita habilitar o
+reconhecedor genérico de gestos do LVGL, que depende de suporte a float. A
+classificação simples exige deslocamento horizontal mínimo e predominância
+horizontal para reduzir conflitos com toques e movimentos verticais. Objetos
+genéricos do LVGL são clicáveis por padrão; por isso a flag `CLICKABLE` não é
+usada para distinguir controles. Quando reconhecido, o swipe consome os eventos
+de clique da mesma interação antes de eles alcançarem o widget. Em callbacks
+registrados diretamente no indev, o próprio dispositivo vem de
+`lv_event_get_target()`; o parâmetro do evento é o objeto tocado.
+
+## ADR-071 — Ações do header e histórico local de notificações
+
+**Decisão:** o ícone Wi-Fi abre a configuração de rede pela navegação existente.
+O sino abre um modal sobre a tela atual com notificações de rede, mercado e
+sistema. O `app_loop` produz eventos somente para transições observadas:
+desconexão/recuperação com credenciais ativas, nova cotação de mercado,
+falha/recuperação de armazenamento e falha de reinício. O histórico mantém os
+oito eventos mais recentes em RAM; abrir um item ou usar “Marcar todas como
+lidas” remove o evento da contagem de não lidas sem removê-lo do histórico.
+
+**Motivo e trade-off:** esses sinais tornam o header acionável e mostram
+mudanças que já são observadas pelo estado central, sem chamadas de rede ou
+LVGL fora dos seus proprietários. Um limite fixo evita crescimento de heap; o
+histórico é volátil e o evento mais antigo é descartado quando a capacidade é
+atingida. Persistência do histórico após reboot fica para uma decisão posterior.
+As preferências de entrega já persistidas continuam controlando eventos gerais
+e de sistema.
+
+## ADR-072 — Sincronização eWeLink sob demanda com inventário local
+
+**Decisão:** manter autenticação direta eWeLink como funcionalidade permanente
+do serviço, acionada somente sob demanda. A senha e os tokens existem apenas
+durante a sessão de sincronização em RAM e são zerados/descartados ao concluir,
+inclusive em falha. O fluxo usa o APP_ID e a derivação de assinatura validados
+no POC/SonoffLAN, faz login e consulta de devices sequencialmente no executor
+HTTPS único, e reconcilia por `deviceid`. A `devicekey` é distinta de `apikey`
+e integra o inventário persistido. Devices novos são adicionados; existentes
+recebem metadados atualizados preservando configurações exclusivamente locais;
+devices ausentes são marcados como ausentes na última sincronização, sem
+remoção automática. Após sincronizar, controle dos dispositivos segue pela LAN.
+
+O inventário é persistido através do `FlashCoordinator` e carregado no boot.
+Enquanto NVS Encryption/Flash Encryption não estiverem habilitadas, as chaves
+ficam expostas a extração física; esse risco é uma pendência de segurança do
+protótipo, não uma exigência para autenticar novamente após reboot. Nenhuma
+senha, token ou `devicekey` pode aparecer em logs, AppState, eventos ou
+view-models. Esta decisão supersede o ADR-057; o ADR antigo permanece como
+histórico da direção anterior baseada em OAuth.
+
+**Motivo e trade-off:** a sincronização direta reproduz o fluxo já validado
+para importar o inventário e as chaves sem exigir conta de desenvolvedor. A
+sessão temporária evita retenção de credenciais cloud e mantém a operação
+normal independente da nuvem. Persistir as `devicekey` permite continuidade
+LAN após reboot e sincronizações futuras corrigem chaves e metadados. A
+reconciliação não exclui devices ausentes para evitar perda acidental de
+configurações locais. A NVS atual não oferece proteção contra extração física;
+NVS Encryption/Flash Encryption e gates de segurança continuam necessários
+antes de produção. A derivação HMAC depende da ordem e serialização exatas da
+tabela de regiões do mecanismo de referência, que deve ser preservada e
+validada por vetor conhecido do POC. Workspaces de inventário e derivação
+temporários ficam em PSRAM; o corpo HTTP limitado é alocado em SRAM interna
+somente durante a sincronização e liberado ao terminar. Isso mantém livre a
+RAM interna de DMA usada pelo áudio e pelo transporte de rede; o inventário
+persistente continua disponível sem alocação no caminho de boot.
+
+## ADR-073 — Buffer temporário eWeLink em PSRAM
+
+**Decisão:** manter o corpo HTTP eWeLink limitado a 48 KiB, mas alocar seu
+buffer temporário em PSRAM. Buffers TLS e a política de uma conexão HTTPS em voo
+permanecem inalterados. O buffer é zerado e liberado ao fim da sincronização;
+respostas acima do limite falham sem truncamento.
+
+**Motivo e trade-off:** depois de abrir a tela Dispositivos, havia cerca de
+27 KiB no maior bloco contíguo de SRAM interna, enquanto o cliente reservava
+49.153 bytes antes de iniciar o login. A sincronização terminava em
+`ESP_ERR_NO_MEM` antes de qualquer requisição de autenticação. O corpo real do
+POC tem 9.401 bytes; mantemos o limite de 48 KiB para comportar respostas maiores
+sem competir com DMA/TLS pela SRAM interna. O custo transitório é uma cópia
+limitada em PSRAM, cuja banda já é compartilhada com display; medir duração e
+renderização no teste de sincronização. JSON/cJSON e TLS conservam seus
+alocadores atuais. Esta decisão ajusta para eWeLink a preferência geral por
+SRAM interna dos corpos HTTP e supersede somente essa parte do ADR-072.
+
+## ADR-074 — Params transitórios e registro eWeLink compacto
+
+**Decisão:** manter `params` integralmente no inventário de sessão durante o
+fetch/reconcile, com buffer de 1 KiB por device e falha explícita caso uma
+resposta futura exceda esse limite. O registro duplicado A/B da NVS persiste
+somente os campos necessários para o inventário LAN e as configurações locais;
+`params` não é necessário para o controle LAN após reboot e não é gravado. A UI
+aloca seu snapshot maior em PSRAM, sem aumentar o uso de stack LVGL.
+
+**Motivo e trade-off:** o POC retornou `params` entre 462 e 835 bytes, excedendo
+o antigo limite de 256 bytes que era ignorado silenciosamente. Aumentar o
+registro completo duplicado na partição NVS de 32 KiB consumiria espaço
+desnecessário. O novo limite comporta os dados observados; acima dele a
+sincronização falha visivelmente em vez de salvar um inventário parcial. A
+persistência mantém `deviceid`, `devicekey`, `apikey`, nomes, modelos, canais,
+estado de presença e settings locais. A versão de registro compacta rejeita
+slots legados por tamanho/CRC e grava a geração válida seguinte sem formatar a
+NVS.
+
+## ADR-075 — Limites dos buffers HTTP na sincronização eWeLink
+
+**Decisão:** para as requisições eWeLink, usar buffers HTTP de 2 KiB RX/1 KiB
+TX. O corpo JSON segue sendo copiado em PSRAM por eventos HTTP. Não forçar
+`HTTP_TLS_DYN_BUF_RX_STATIC`: a primeira tentativa não evitou a falha de AES e
+essa opção mantém um buffer de recepção TLS maior durante a conexão.
+
+**Evidência/correção:** o reteste confirmou a mesma falha AES com essa estratégia
+e buffers reduzidos, logo esses limites não corrigem a alocação que falha. A
+origem foi localizada no alocador AES-DMA do IDF; ver ADR-076. Os limites menores
+permanecem para o cliente HTTP, mas não são uma mitigação de capacidade do
+AES-DMA. A configuração efetiva deve seguir o buffer TLS dinâmico padrão.
+
+## ADR-076 — AES por software no mbedTLS do P4 até validar o caminho DMA
+
+**Decisão:** desabilitar `CONFIG_MBEDTLS_HARDWARE_AES` no perfil P4 e usar AES
+por software no mbedTLS, mantendo seus buffers em SRAM interna. Não alterar
+drivers ou fontes do ESP-IDF. A mudança abrange todas as operações AES/GCM via
+mbedTLS neste firmware, inclusive TLS de providers e qualquer cliente LAN que
+use essas APIs; não é uma opção por requisição.
+
+**Motivo e trade-off:** login eWeLink completa, mas a leitura HTTPS falha com
+`esp-aes: Failed to allocate memory`. O código do ESP-IDF 5.5.4 mostra que o
+caminho AES acelerado do P4 usa alocações com `MALLOC_CAP_DMA` para buffers de
+entrada/saída temporários e descritores. Reduzir os buffers de `esp_http_client`
+não muda essas alocações, e `heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)`
+não informa o maior bloco que atende exatamente às capabilities DMA usadas por
+AES. O caminho de software elimina a dependência do alocador AES-DMA sem mover
+TLS ou dados criptográficos para PSRAM. O trade-off é maior uso de CPU/latência
+de criptografia; medir sincronização, HTTPS dos providers, heap e temperatura.
+Reavaliar aceleração quando houver métricas do heap DMA no ponto da falha e
+ensaio de regressão da carga combinada.
+
+**Validação:** build limpo P4; conferir no `sdkconfig` efetivo que
+`CONFIG_MBEDTLS_HARDWARE_AES` está desabilitado; gravar somente a aplicação P4 e
+capturar boot. O gate de bancada desta mudança exige fetch eWeLink completo,
+sucesso dos HTTPS existentes, ausência de falha TLS/AES, heap interno dentro dos
+limites do projeto e sem regressão de render/UI. Nenhuma build isolada fecha
+esse gate.
+
+## ADR-078 — Conteúdo de modal contido e rolável
+
+**Decisão:** limitar tamanho/posição do painel de cada modal à tela e tornar
+rolável verticalmente sua área de conteúdo, com barra automática quando houver
+overflow. Textos de inventário com quebra de linha devem crescer naturalmente
+para que a rolagem revele todo o conteúdo. Ao fechar o modal eWeLink, ocultar
+primeiro o teclado virtual e depois limpar os campos vinculados.
+
+**Motivo e trade-off:** após a sincronização, o resumo dos devices pode exceder
+a altura atualmente disponível. Altura fixa em labels cortava o inventário e
+conteúdo posicionado abaixo do viewport deixava controles inacessíveis. A área
+de rolagem mantém cabeçalho, X e botões do modal dentro da tela, permitindo
+alcançar qualquer conteúdo maior. Ocultar o teclado antes da limpeza evita
+alterar uma textarea ainda associada ao teclado durante o fechamento. O
+trade-off é um gesto vertical de rolagem para ler resultados extensos.
+
+**Validação:** build P4, flash somente da aplicação e ensaio em tela dos modais
+de importação eWeLink, incluindo inventário longo, rolagem, fechamento pelo X
+com o teclado ativo e ausência de panic. Build ou boot isolados não comprovam
+layout ou fechamento em HIL.
+
+## ADR-077 — Requisição de inventário eWeLink fora da pilha da task de rede
+
+**Decisão:** enfileirar a gravação do inventário eWeLink usando o envelope
+compartilhado do `FlashCoordinator`, protegido pelo mutex de submissão já
+usado por outras gravações pequenas. Consultar a conclusão por um getter
+específico que copia somente sequência/resultado, sem materializar o status
+completo do coordenador na pilha da task de rede. Registrar a margem mínima de
+pilha ao final da sincronização para medir a carga real.
+
+**Motivo e trade-off:** a task `np2_netcheck` tem pilha limitada e o envelope
+`flash_request_t` inclui um chunk OTA de 4 KiB mesmo quando a operação grava
+somente metadados. A submissão do inventário criava esse objeto localmente e
+também copiava o status completo, que inclui snapshots de dados offline. O
+log de bancada mostrou um stack protection fault após a resposta cloud com
+três devices. Reutilizar o buffer estático serializado remove o chunk OTA da
+pilha do chamador; o getter curto reduz a cópia repetida de status no polling.
+O custo é compartilhar o mesmo mutex/buffer de submissão usado por outras
+gravações já serializadas. A margem reportada em execução deve orientar
+eventual ajuste da pilha, sem aumentar seu tamanho sem medição.
+
+**Validação:** build P4 limpo, flash somente da aplicação e captura do boot;
+executar sincronização eWeLink, confirmar gravação sem panic, inventário
+persistido após reboot e margem de pilha reportada. Nenhuma build isolada
+fecha a validação de sincronização ou retenção.
+
+## ADR-079 — Inventário eWeLink na tela principal de dispositivos
+
+**Decisão:** publicar no AppState uma projeção sanitizada do inventário eWeLink
+persistido e renderizá-la junto às câmeras na seção principal “Dispositivos”. A
+projeção contém somente ID, nome, modelo, contagem de canais e presença na
+última sincronização; chaves, parâmetros e configurações locais permanecem no
+serviço. A área da lista é rolável verticalmente para acomodar devices
+importados e câmeras no mesmo espaço limitado da tela.
+
+**Motivo e trade-off:** a modal já mostrava os devices carregados pelo serviço,
+mas a tela principal recebia somente a projeção ONVIF. Expor um getter público
+com campos secretos ou fazer I/O do serviço pela UI quebraria a fronteira de
+estado. O AppState copia apenas os campos necessários e mantém o app_loop como
+único escritor. Como a projeção agregada é maior que a pilha disponível do
+app_loop, o snapshot temporário de refresh usa armazenamento estático dentro
+do único escritor. A lista compartilha rolagem entre eWeLink e câmeras.
+
+**Validação:** build P4, gravação somente da aplicação e captura do boot sem
+novo panic do app_loop. É necessária confirmação na tela para verificar a
+visibilidade dos devices persistidos e a rolagem; build e boot não validam
+interação tátil.
+
+## ADR-080 — Fluxo dedicado para adicionar e sincronizar dispositivos
+
+**Decisão:** organizar a seção Dispositivos em uma tela vazia com chamada para
+importação, uma tela de escolha do tipo (Sonoff/eWeLink ou câmera ONVIF), uma
+tela dedicada para credenciais eWeLink e uma tela de progresso da sincronização.
+Quando houver inventário, mostrar os cards e manter a ação de adicionar
+disponível. A sincronização continua sob demanda e o estado de progresso vem do
+serviço. Os cards informam que o estado LAN ainda não foi consultado; não
+simulam estados ligados/desligados antes da integração de controle LAN.
+
+**Motivo e trade-off:** o fluxo anterior concentrava a importação numa modal e
+não orientava o usuário entre lista vazia, seleção de tipo, login e atualização.
+Páginas explícitas tornam cada etapa alcançável e a lista principal continua
+sendo o inventário local. A ação “Continuar em segundo plano” apenas volta à
+lista enquanto a operação segue; cancelamento de HTTPS em voo ainda não é
+suportado.
+
+**Validação:** build e flash P4 confirmam integração e boot, mas a composição,
+rolagem e navegação entre telas ainda precisam de confirmação tátil no painel.
+
+## ADR-081 — Criar cartões de dispositivos conforme o inventário
+
+**Decisão:** construir cartões eWeLink somente para os dispositivos presentes
+na projeção local. Quando uma sincronização trouxer novos devices, criar os
+cartões ausentes durante a atualização da tela. Manter os limites máximos do
+inventário, sem reservar objetos LVGL para slots vazios.
+
+**Motivo e trade-off:** o backtrace do congelamento mostrou a task LVGL parada
+no assert de alocação chamado por `lv_obj_add_style()` durante a construção da
+página. A tela instanciava todos os cartões possíveis mesmo com poucos devices
+cadastrados, pressionando o pool LVGL de 64 KiB. A construção sob demanda
+reduz objetos e estilos para o inventário atual; uma nova sincronização faz a
+alocação dos cartões adicionais quando eles forem necessários.
+
+**Validação:** build limpo ESP-IDF 5.5.4 e flash P4 concluídos. Boot serial
+chegou à tela inicial; a confirmação tátil de entrada e permanência na página
+Dispositivos está pendente.
+
+## ADR-082 — Pool adicional de objetos LVGL em PSRAM
+
+**Decisão:** registrar uma única área fixa de 128 KiB em PSRAM no alocador
+interno do LVGL, antes de criar a UI. Configurar
+`CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=128` para que o TLSF aceite essa área.
+O pool original de 64 KiB permanece;
+buffers de desenho, TLS e JSON conservam suas políticas próprias. Se a reserva
+ou o registro falhar, o bring-up da UI retorna erro em vez de iniciar com um
+orçamento de objetos insuficiente.
+
+**Motivo e trade-off:** a página Dispositivos ainda esgotou o orçamento de
+montagem após reduzir os cartões ao inventário presente e ocultar subpáginas
+durante a construção. A navegação registrou apenas 40.296 bytes livres no
+pool LVGL após limpar a página anterior. O watchdog ficou repetidamente na
+task `lvgl` antes de emitir `BUILD`, em endereços diferentes da biblioteca,
+compatível com falha de alocação seguida pelo handler padrão de assert do
+LVGL. A reserva externa limitada aumenta a capacidade dos objetos e preserva
+SRAM interna para TLS, DMA e pilhas, ao custo de 128 KiB e acesso adicional à
+PSRAM compartilhada com o display.
+
+**Validação:** build P4 e gravação confirmaram o pool de 128 KiB registrado
+(194.596 bytes totais, maior bloco de 131.064 bytes). O operador confirmou que
+a tela Dispositivos passou a funcionar após a gravação. Uma sessão prolongada,
+a navegação pelas demais telas e o acesso ao login eWeLink seguem como
+validações adicionais de regressão gráfica.
+
+## ADR-083 — Controles Sonoff criptografados pela LAN
+
+**Decisão:** complementar o inventário eWeLink persistido com descoberta mDNS,
+leitura do estado anunciado localmente e comandos Sonoff LAN criptografados por
+canal. A tela publica intenção pelo event bus; uma task do serviço resolve o
+IP, obtém a `devicekey` do storage e executa HTTP local no endpoint
+`/zeroconf/switch` ou `/zeroconf/switches`. O AppState projeta somente
+descoberta, disponibilidade, estado e resultado; chaves não saem do serviço.
+Cada canal é um subcard clicável dentro do card do device; tocar nele alterna
+seu estado e destaca visualmente o canal ligado. O subcard fica desabilitado
+até o serviço conhecer o estado do canal ou enquanto o comando está pendente.
+A cloud continua usada apenas para importação/sincronização sob demanda.
+
+**Motivo e trade-off:** a página já mostrava o inventário importado, mas não
+consultava estado nem oferecia controle. Fazer HTTP/AES ou acesso à chave na
+task LVGL violaria os limites de I/O e de segredos. A task dedicada mantém o
+trabalho fora da UI e serializa os comandos locais; inicialmente há uma
+operação por vez e até três canais por device. O estado inicial depende dos
+anúncios mDNS Sonoff; tipos sem estado interpretável permanecem sem controle
+até uma consulta de estado futura. A `devicekey` persistida ainda depende da
+proteção de storage disponível no firmware e isso continua sendo pendência de
+segurança até haver armazenamento protegido apropriado.
+
+**Validação:** build limpo P4, flash somente da aplicação e boot serial
+confirmam integração e inicialização. O teste HIL deve confirmar descoberta,
+estado inicial e alternância de pelo menos um relé; build e boot não provam a
+compatibilidade do comando criptografado com cada modelo Sonoff.
+
+## ADR-084 — Fragmentos TLS de entrada de 8 KiB
+
+**Decisão:** configurar `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192` no perfil P4,
+mantendo alocações mbedTLS na SRAM interna e streaming dos corpos HTTP para os
+buffers já limitados por endpoint. A saída TLS continua com o tamanho atual.
+
+**Motivo e trade-off:** a conexão TLS validava o certificado, mas o ESP-IDF
+falhava ao alocar 17.058 bytes para o buffer RX, enquanto o maior bloco
+contíguo interno observado era 15.360 bytes. O novo RX exige aproximadamente
+8.866 bytes incluindo cabeçalho/alinhamento, reduzindo a exigência por bloco.
+Como cada TLS record de entrada agora tem limite de 8 KiB, endpoints que
+transmitam records maiores podem falhar; corpos HTTP maiores continuam
+possíveis quando divididos em records menores e são consumidos por streaming.
+Não direcionamos TLS para PSRAM porque o produto mantém TLS na memória interna.
+
+**Validação:** build limpo, flash somente do app P4 e captura serial de 75 s
+concluídos. O domínio inicial de produto retornou DNS/NTP/HTTPS `ESP_OK`, a
+descoberta LAN manteve três devices e não houve falha de alocação RX de
+17.058 bytes, watchdog ou panic nessa janela. A sincronização eWeLink, os demais
+domínios HTTPS e estabilidade sob carga gráfica ainda precisam de validação
+específica; este resultado não fecha esses gates.
+
+## ADR-085 — Presença e estado LAN tolerantes a anúncios incompletos
+
+**Decisão:** a bolinha de estado do card eWeLink acompanha a presença LAN. Uma
+falha de descoberta mDNS isolada mantém o último estado do device e dos canais,
+e dispara uma nova varredura após 5 s; a segunda ausência consecutiva confirma
+offline, limpa os estados de canal e desabilita seus cards. Quando o mesmo
+device continua sendo anunciado mas um pacote TXT não traz estado decodificável,
+preservar seu último estado conhecido. Para devices online sem estado válido no
+mDNS, consultar `/zeroconf/getState` e tentar `/zeroconf/info` como fallback,
+sempre pela LAN e usando a `devicekey` local.
+
+**Motivo e trade-off:** a bolinha era criada cinza e nunca atualizada, embora o
+texto mudasse para “Online na rede local”. Além disso, a varredura substituía
+todo o snapshot, convertendo uma única resposta mDNS ausente em offline e
+apagando o estado do canal. Os modelos TX1C/TX2C/TX3C anunciam formatos e
+estados que não foram todos decodificados pelo primeiro caminho mDNS; a consulta
+LAN read-only cobre dispositivos que não incluem estado utilizável no anúncio.
+A confirmação adicional evita o flicker observado; um device realmente
+desconectado pode permanecer apresentado como online até a varredura de
+confirmação seguinte, por alguns segundos. Consultas seguem sequenciais, com
+intervalo mínimo de 200 ms no mesmo device.
+
+**Validação:** a primeira imagem foi compilada e gravada no P4, mas a captura
+mostrou três devices online e apenas um com estado conhecido:
+`state_queries=2 query_ok=0`. Um toque também falhou com
+`ESP_ERR_HTTP_EAGAIN`. O estado inicial dos três modelos e a alternância
+física continuam pendentes. Formato dos endpoints: protocolo ITEAD
+[SONOFF DIY MODE](https://github.com/itead/Sonoff_Devices_DIY_Tools/blob/master/other/SONOFF%20DIY%20MODE%20Protocol%20Doc%20v1.4.md); consulta `getState` conforme
+[implementação LAN do SonoffLAN](https://github.com/AlexxIT/SonoffLAN/blob/master/custom_components/sonoff/core/ewelink/local.py).
+
+## ADR-086 — Corrigir a mensagem criptografada e o limite do estado mDNS Sonoff
+
+**Decisão:** conservar o IV original da requisição antes da chamada
+`mbedtls_aes_crypt_cbc`, que modifica seu argumento IV; transmitir o IV
+original em Base64. Serializar `sequence` como string única, conforme o
+protocolo LAN usado pelo SonoffLAN. Consultar `/zeroconf/getState` antes de
+`/zeroconf/info`. Ampliar o buffer de estado mDNS para acomodar os quatro
+campos TXT `data1` a `data4`, até 1.020 bytes codificados, e descriptografar
+diretamente no buffer de saída para limitar o aumento de pilha. Registrar
+somente contagens e tamanhos no diagnóstico, sem corpo HTTP, chave ou IV.
+
+**Motivo e trade-off:** o mbedTLS altera o IV após AES-CBC, portanto o código
+anterior enviava um IV diferente do usado para cifrar o corpo. O formato
+numérico de `sequence` também divergia do protocolo de referência. O buffer
+anterior de 512 bytes podia truncar os anúncios de modelos com vários canais;
+o JSON `params` real de TX2C/TX3C capturado no POC possui 835 bytes, embora
+isso não prove que seus anúncios mDNS tenham o mesmo tamanho. Os buffers
+maiores elevam o pico de pilha do worker. A primeira imagem excedeu os 8 KiB
+da task `sonoff_lan`; o inventário público e o próximo snapshot da varredura
+passaram então para uma área reutilizável em PSRAM. Chaves, buffers AES e
+corpos HTTP continuam na SRAM interna e são apagados após o uso.
+
+**Validação:** build P4 e `app-flash` na COM8 concluídos. Três varreduras da
+imagem corrigida mostraram `online=3 stateful=3 state_queries=0`, com maior
+anúncio de 664 bytes Base64 e mínimo de 1.956 bytes livres na pilha da task.
+O contador bruto de estados deu sete posições para seis canais físicos
+cadastrados; o POC mostra quatro posições `switches` anunciadas pelo TX2C,
+embora ele possua dois canais físicos. A contagem agregada não substitui a
+verificação de cada canal na UI. A alternância do relé físico por toque requer
+confirmação na placa. A bolinha de disponibilidade agora usa somente o estado
+LAN, independentemente da presença na última importação cloud. A referência de
+criptografia, formato e consulta é a
+[implementação LAN do SonoffLAN](https://github.com/AlexxIT/SonoffLAN/blob/master/custom_components/sonoff/core/ewelink/local.py); a
+[API AES-CBC do mbedTLS](https://github.com/Mbed-TLS/mbedtls/blob/development/include/mbedtls/aes.h)
+documenta que atualiza o argumento IV.
+
+## ADR-087 — Configuração TLS efetiva e diagnóstico de refresh por etapa
+
+**Decisão:** impedir build P4 com `CONFIG_MBEDTLS_HARDWARE_AES=y`, conforme
+o ADR-076. A verificação usa o sdkconfig efetivo: defaults não sobrescrevem
+um arquivo gerado antigo. Registrar provider fixo, fase, status, erro TLS,
+duração e heap antes de destruir o cliente, sem URL, headers ou segredos.
+Registrar entrega do snapshot e transições de stale no escritor de estado.
+
+Na investigação de falha BTC, permitir um HEAD de controle em `example.com`
+após timeout de conexão/resposta, somente quando restarem pelo menos 2 s
+do orçamento de 20 s e no máximo uma vez a cada 10 min. Destruir o cliente
+anterior antes da sonda. O resultado não substitui o resultado do mercado,
+não muda cadência, autenticação TLS, cache ou estado de conectividade.
+
+**Evidência:** em 04/10/2026, a configuração/hash do último build gravado
+mantinha AES/GCM de hardware, em desacordo com o ADR-076. O configure
+negativo isolado foi recusado pelo novo gate; o build com AES por software
+passou e foi gravado. A primeira captura instrumentada ainda reproduziu
+timeout TLS `0x8006` e timeout de headers para CoinGecko: a divergência AES
+não é causa suficiente para explicar todas as falhas. A entrega do snapshot
+e a projeção funcionaram; o operador confirmou Bitcoin amarelo. A memória
+interna medida permanece abaixo do piso do plano. Esta decisão melhora
+diagnóstico e evita regressão de configuração; não encerra o gate de rede.
+Comandos, hashes e limites: [diagnóstico de refresh](DATA-REFRESH-DIAGNOSIS.md).
+
+## ADR-088 — Fila compacta com snapshots limitados e reenvio do mais recente
+
+**Decisão:** manter 32 entradas no EventBus, com union privada para o payload
+ativo. Snapshots ficam em quatro posições estáticas na SRAM interna. Cada
+entrada de produto leva índice e geração; o barramento copia o valor recebido
+e libera a posição antes de devolver ao app_loop. Nenhum ponteiro emprestado
+cruza tasks. Reserva, geração e liberação têm lock; operações de fila ficam
+fora da seção crítica. Fila ou pool cheio retorna `ESP_ERR_TIMEOUT`, aumenta
+o contador de rejeições e não retém o dado do produtor. Outros comandos
+continuam usando as 32 vagas, mesmo com o pool de produto cheio.
+
+O worker HTTPS mantém o snapshot mais recente pendente após rejeição e tenta
+entregá-lo no próximo ciclo do worker, sem outra consulta HTTP nem escrita de
+cache. Uma nova atualização substitui o valor pendente; snapshots já aceitos
+mantêm a ordem FIFO. O app_loop continua sendo o único escritor de estado.
+
+**Motivo e trade-off:** a fila anterior reservava 616 bytes por entrada no P4,
+mesmo para comandos sem payload: 19.712 bytes. A nova estrutura tem orçamento
+de até 128 bytes por entrada e quatro snapshots; o layout e ganho reais serão
+medidos no ELF/boot. O limite de snapshots simultâneos cai de 32 para quatro,
+com backpressure explícito e reenvio pelo produtor de rede. Isso reduz a
+pressão de SRAM sem mover TLS/JSON/corpos para PSRAM. A mudança não presume
+que memória seja a causa dos timeouts TLS e não encerra o gate de rede.
+
+**Validação:** teste host do código real passou com saturação, propriedade das
+cópias, reciclagem, handles antigos/wrap de geração, 8.000 snapshots de quatro
+produtores concorrentes e reenvio do mais recente sem persistência extra.
+Build P4 limpo passou sem warnings; DWARF/boot confirmaram item de 56 B,
+pool de 1.984 B e economia de 15.936 B. App-flash COM8 verificou o hash;
+primeiras consultas e renovações BTC responderam HTTP 200, com aumento da
+memória interna livre e do maior bloco. A margem ainda está abaixo do piso
+do plano. A bancada não provocou saturação nem reproduziu timeout nesta
+imagem; a recuperação após falha e o ensaio por horas continuam abertos.
+Hashes, amostra e limites: [diagnóstico de refresh](DATA-REFRESH-DIAGNOSIS.md).
+
+## ADR-089 — Exibir a idade nas notificações
+
+**Decisão:** o centro de notificações mostra o título, a explicação já definida
+para o tipo, o estado visual de não lida e a idade do evento em relação ao
+horário atual projetado pelo `app_loop`. O resumo usa pluralização natural da
+contagem. Sem horário válido no evento, informar que ele está indisponível.
+
+**Motivo e trade-off:** a projeção já contém `timestamp_unix_s`, mas a modal não
+o mostrava, tornando difícil distinguir eventos recentes dos antigos. Usar a
+idade relativa evita apresentar hora local incorreta antes de sincronização
+ou no ajuste de fuso. A mudança é apenas visual e mantém a política atual de
+histórico volátil, leitura e capacidade fixa; detalhes técnicos além dos já
+guardados pelo evento não podem ser inventados pela UI.
+
+## ADR-090 — Notificar ocorrências relevantes, não atualizações de API
+
+**Decisão:** o centro registra falhas e alertas, além de sucessos pontuais que
+representam uma transição relevante, como a recuperação da rede ou do
+armazenamento. Consultas bem-sucedidas e atualizações rotineiras de dados dos
+provedores não geram notificações.
+
+**Motivo e trade-off:** atualizações frequentes de mercado ocupavam o histórico
+sem exigir ação ou atenção da pessoa. A remoção reduz ruído e preserva a
+capacidade para eventos que indiquem problema, alerta ou resolução. A idade,
+leitura, capacidade de oito itens e controles de preferências permanecem como
+estão.
+
+## ADR-091 — Evitar cópia aninhada da projeção na pilha LVGL
+
+**Decisão:** manter a pilha da task LVGL em 16 KiB, conforme o orçamento do
+plano, e consultar somente `app_device_control_projection_t` ao instalar os
+callbacks de brilho, volume e modo noturno. A navegação continua usando sua
+projeção completa para montar a tela; o instalador de callbacks não cria uma
+segunda cópia completa na mesma pilha.
+
+**Motivo e trade-off:** ao abrir Preferências > Tela e som, a task `lvgl` sofreu
+`Stack protection fault`; o ponteiro da falha ficou 680 bytes abaixo do limite
+inferior da pilha de 12 KiB. O fluxo mantinha uma `app_ui_projection_t` durante
+a construção da cena e copiava outra para obter apenas brilho e volume. O
+getter tipado reduz a cópia aninhada; os 16 KiB alinham a configuração real ao
+valor inicial já definido no plano. O custo são 4 KiB adicionais de SRAM
+reservados à task LVGL.
+
+**Validação:** build limpo P4, gravação somente do app e captura de boot. A
+reprodução tátil de Tela e som deve confirmar ausência de panic e medir o
+high-water mark sob a carga dessa construção; build e boot isolados não fecham
+essa validação.
