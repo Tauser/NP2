@@ -13,9 +13,21 @@ void np_modal_create(np_modal_t *modal, lv_obj_t *parent,
 {
     if (modal == NULL || parent == NULL || width <= 0 || height <= 0) return;
 
+    if (width > NP_SCREEN_W) width = NP_SCREEN_W;
+    if (height > NP_SCREEN_H) height = NP_SCREEN_H;
+    if (height < 78) height = 78;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > NP_SCREEN_W - width) x = NP_SCREEN_W - width;
+    if (y > NP_SCREEN_H - height) y = NP_SCREEN_H - height;
+
     *modal = (np_modal_t){0};
     modal->scrim = np_fill(parent, 0, 0, NP_SCREEN_W, NP_SCREEN_H,
                             np_c_bg(), LV_OPA_70, 0);
+    /* A modal is inactive during construction. Hide its root before building
+     * the panel and content to avoid layout/render work for an overlay that
+     * has not been requested yet. */
+    np_set_visible(modal->scrim, false);
     lv_obj_add_flag(modal->scrim, LV_OBJ_FLAG_CLICKABLE);
     modal->panel = np_panel(modal->scrim, x, y, width, height);
 
@@ -42,7 +54,12 @@ void np_modal_create(np_modal_t *modal, lv_obj_t *parent,
     modal->close_button_user_data = modal;
     np_hline(modal->panel, 24, 76, width - 48);
     modal->content = np_group(modal->panel, 0, 77, width, height - 77);
-    np_set_visible(modal->scrim, false);
+    if (modal->content != NULL) {
+        lv_obj_add_flag(modal->content, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(modal->content, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(modal->content, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_remove_flag(modal->content, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    }
 }
 
 void np_modal_set_close_callback(np_modal_t *modal,
