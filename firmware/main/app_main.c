@@ -13,6 +13,7 @@
 #include "notification_service.h"
 #include "onvif_discovery_service.h"
 #include "onboarding_service.h"
+#include "np_ewelink.h"
 #include "provisioning_service.h"
 #include "sonoff_lan_service.h"
 #include "time_service.h"
@@ -71,6 +72,12 @@ void app_main(void)
     if (connectivity_err != ESP_OK) {
         ESP_LOGE(TAG, "Phase 3 connectivity probe unavailable: %s",
                  esp_err_to_name(connectivity_err));
+    }
+
+    const esp_err_t ewelink_err = np_ewelink_init();
+    if (ewelink_err != ESP_OK) {
+        ESP_LOGE(TAG, "eWeLink inventory service unavailable: %s",
+                 esp_err_to_name(ewelink_err));
     }
 
     const esp_err_t sonoff_lan_err = sonoff_lan_service_start();

@@ -23,7 +23,15 @@ CONFIG_LV_DRAW_BUF_ALIGN=64
 CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=64
 CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+# Keep the internal TLS RX allocation below the measured 15 KiB contiguous
+# heap block while preserving streaming of larger HTTP response bodies.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
 CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y
+# ESP32-P4 mbedTLS AES-DMA allocation fails during the eWeLink response read
+# under the real UI/network heap profile. Keep TLS allocations internal and
+# use the constant-time software AES implementation until DMA heap behavior
+# is measured and the accelerated path is validated on the board.
+CONFIG_MBEDTLS_HARDWARE_AES=n
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 CONFIG_ESP_CONSOLE_UART_DEFAULT=n
@@ -33,6 +41,10 @@ CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_HOSTED=y
 CONFIG_ESP_HOST_WIFI_ENABLED=n
 CONFIG_ESP_HOSTED_HOST_FEAT_WIFI_EXT_ITWT=n
+# Keep aligned ESP-Hosted SDIO buffers out of scarce internal DMA heap during
+# TLS traffic. ESP32-P4 EDMA supports aligned DMA buffers in external PSRAM;
+# the component allocator falls back to internal DMA RAM when needed.
+CONFIG_EH_HOST_PORT_DMA_PREFER_SPIRAM=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
@@ -42,4 +54,5 @@ CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y
 # Do not use flash suspend on JEDEC 0xC84019. It has produced a boot loop on
 # this board and is independent from the XiP experiment above.
 CONFIG_SPI_FLASH_AUTO_SUSPEND=n
+CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=128
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

@@ -13,7 +13,9 @@
 #include "offline_data_codec.h"
 #include "onboarding_service.h"
 #include "notification_service.h"
+#include "np_ewelink.h"
 #include "onvif_discovery_service.h"
+#include "sonoff_lan_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "time_service.h"
@@ -52,10 +54,20 @@ static bool s_profile_inflight;
 static uint32_t s_profile_sequence;
 static uint32_t s_profile_persisted_generation;
 static esp_err_t s_profile_result = ESP_OK;
+static app_notification_center_projection_t s_notification_center;
+static np_ewelink_public_inventory_t s_ewelink_public_inventory;
+static bool s_notification_sources_initialized;
+static bool s_previous_network_online;
+static bool s_previous_network_credentials;
+static bool s_previous_storage_ready;
+static esp_err_t s_previous_storage_result = ESP_OK;
+static uint32_t s_previous_restart_completion_id;
+static uint32_t s_next_notification_id = 1U;
 
 static bool user_profiles_equal(const user_profile_t *a, const user_profile_t *b)
 {
     return a->avatar_color == b->avatar_color &&
+           a->initial_screen == b->initial_screen &&
            memcmp(a->name, b->name, sizeof(a->name)) == 0;
 }
 
@@ -150,6 +162,98 @@ static uint32_t snapshot_age_s(uint32_t observed_at_unix_s, bool time_trusted)
                : 0U;
 }
 
+static void notification_center_push(app_notification_kind_t kind,
+                                     uint32_t timestamp_unix_s)
+{
+    if (s_notification_center.count == APP_NOTIFICATION_HISTORY_MAX) {
+        if (s_notification_center.items[0].unread &&
+            s_notification_center.unread_count > 0U) {
+            --s_notification_center.unread_count;
+        }
+        memmove(&s_notification_center.items[0], &s_notification_center.items[1],
+                sizeof(s_notification_center.items[0]) *
+                    (APP_NOTIFICATION_HISTORY_MAX - 1U));
+        --s_notification_center.count;
+    }
+    uint32_t id = s_next_notification_id++;
+    if (id == 0U) id = s_next_notification_id++;
+    s_notification_center.items[s_notification_center.count++] = (app_notification_item_t){
+        .id = id,
+        .timestamp_unix_s = timestamp_unix_s,
+        .kind = kind,
+        .unread = true,
+    };
+    if (s_notification_center.unread_count < APP_NOTIFICATION_HISTORY_MAX)
+        ++s_notification_center.unread_count;
+}
+
+static void notification_center_mark_read(uint32_t id, bool all)
+{
+    for (uint8_t i = 0U; i < s_notification_center.count; ++i) {
+        app_notification_item_t *const item = &s_notification_center.items[i];
+        if (item->unread && (all || item->id == id)) {
+            item->unread = false;
+            if (s_notification_center.unread_count > 0U)
+                --s_notification_center.unread_count;
+        }
+    }
+}
+
+static void collect_notifications(app_ui_projection_t *candidate)
+{
+    if (candidate == NULL) return;
+    if (!s_notification_sources_initialized) {
+        s_previous_network_online = candidate->network.online;
+        s_previous_network_credentials = candidate->network.credentials_active;
+        s_previous_storage_ready = candidate->storage.ready;
+        s_previous_storage_result = candidate->storage.last_result;
+        s_previous_restart_completion_id = candidate->system.restart_completion_id;
+        s_notification_sources_initialized = true;
+    } else {
+        if (candidate->network.credentials_active && s_previous_network_credentials &&
+            s_previous_network_online != candidate->network.online &&
+            candidate->notifications.ready &&
+            candidate->notifications.general_enabled) {
+            notification_center_push(candidate->network.online
+                ? APP_NOTIFICATION_KIND_WIFI_RESTORED
+                : APP_NOTIFICATION_KIND_WIFI_DISCONNECTED,
+                candidate->current_unix_s);
+        }
+
+        if (candidate->notifications.ready &&
+            candidate->notifications.system_alerts_enabled &&
+            candidate->storage.ready && s_previous_storage_ready &&
+            candidate->storage.last_result != s_previous_storage_result) {
+            if (candidate->storage.last_result != ESP_OK &&
+                candidate->storage.last_result != ESP_ERR_INVALID_STATE) {
+                notification_center_push(APP_NOTIFICATION_KIND_STORAGE_ERROR,
+                                         candidate->current_unix_s);
+            } else if (candidate->storage.last_result == ESP_OK &&
+                       s_previous_storage_result != ESP_OK) {
+                notification_center_push(APP_NOTIFICATION_KIND_STORAGE_RECOVERED,
+                                         candidate->current_unix_s);
+            }
+        }
+
+        if (candidate->notifications.ready &&
+            candidate->notifications.system_alerts_enabled &&
+            candidate->system.restart_completion_id != 0U &&
+            candidate->system.restart_completion_id !=
+                s_previous_restart_completion_id &&
+            candidate->system.restart_result != ESP_OK) {
+            notification_center_push(APP_NOTIFICATION_KIND_RESTART_FAILED,
+                                     candidate->current_unix_s);
+        }
+
+        s_previous_network_online = candidate->network.online;
+        s_previous_network_credentials = candidate->network.credentials_active;
+        s_previous_storage_ready = candidate->storage.ready;
+        s_previous_storage_result = candidate->storage.last_result;
+        s_previous_restart_completion_id = candidate->system.restart_completion_id;
+    }
+    candidate->notification_center = s_notification_center;
+}
+
 static offline_data_snapshot_t project_offline_data(const offline_data_snapshot_t *snapshot,
                                                     offline_data_origin_t origin,
                                                     bool time_trusted,
@@ -230,8 +334,13 @@ static void refresh_projection(void)
     weather_asset_service_status_t weather_assets = {0};
     notification_service_status_t notifications = {0};
     onvif_discovery_status_t onvif = {0};
+    sonoff_lan_status_t sonoff = {0};
     device_control_status_t controls = {0};
-    app_ui_projection_t candidate = {0};
+    /* Projection snapshots contain the cached market payload and exceed the
+     * spare stack budget of app_loop. This routine is only called by app_loop,
+     * so keep its single-writer candidate in static storage. */
+    static app_ui_projection_t candidate;
+    memset(&candidate, 0, sizeof(candidate));
 
     flash_coordinator_get_status(&storage);
     connectivity_diagnostic_get_status(&network);
@@ -241,6 +350,7 @@ static void refresh_projection(void)
     onboarding_service_get_status(&onboarding);
     notification_service_get_status(&notifications);
     onvif_discovery_service_get_status(&onvif);
+    sonoff_lan_service_get_status(&sonoff);
     device_control_get_status(&controls);
 
     if (time_status.ready && time_status.timezone_index != onboarding.timezone_index) {
@@ -331,7 +441,7 @@ static void refresh_projection(void)
         .save_result = controls.save_result,
     };
     candidate.iot = (app_iot_projection_t){
-        .ready = onvif.ready,
+        .ready = onvif.ready || sonoff.ready,
         .scan_busy = onvif.scan_busy,
         .scan_generation = onvif.scan_generation,
         .camera_count = onvif.camera_count,
@@ -345,6 +455,41 @@ static void refresh_projection(void)
                sizeof(candidate.iot.cameras[i].model));
         candidate.iot.cameras[i].online = onvif.cameras[i].online;
     }
+    memset(&s_ewelink_public_inventory, 0, sizeof(s_ewelink_public_inventory));
+    if (np_ewelink_get_public_inventory(&s_ewelink_public_inventory) == ESP_OK) {
+        candidate.iot.ewelink_device_count =
+            s_ewelink_public_inventory.count > APP_IOT_MAX_EWELINK_DEVICES
+                ? APP_IOT_MAX_EWELINK_DEVICES : s_ewelink_public_inventory.count;
+        for (uint8_t i = 0U; i < candidate.iot.ewelink_device_count; ++i) {
+            const np_ewelink_public_device_t *const source =
+                &s_ewelink_public_inventory.devices[i];
+            app_iot_ewelink_device_projection_t *const target =
+                &candidate.iot.ewelink_devices[i];
+            memcpy(target->device_id, source->device_id, sizeof(target->device_id));
+            memcpy(target->name, source->name, sizeof(target->name));
+            memcpy(target->product_model, source->product_model,
+                   sizeof(target->product_model));
+            target->channel_count = source->channel_count;
+            memcpy(target->channel_names, source->channel_names,
+                   sizeof(target->channel_names));
+            target->present_last_sync = source->present_last_sync;
+            for (uint8_t local = 0U; local < sonoff.device_count &&
+                 local < SONOFF_LAN_MAX_DISCOVERED; ++local) {
+                const sonoff_lan_device_t *const lan = &sonoff.devices[local];
+                if (strcmp(lan->device_id, source->device_id) != 0) continue;
+                target->lan_discovered = true;
+                target->lan_online = lan->online;
+                for (uint8_t channel = 0U; channel < 3U; ++channel) {
+                    target->channel_state_known[channel] = lan->state_known[channel];
+                    target->channel_on[channel] = lan->switch_on[channel];
+                    target->channel_pending[channel] = lan->channel_pending[channel];
+                    target->channel_result[channel] = lan->last_result;
+                }
+                break;
+            }
+        }
+    }
+    memset(&s_ewelink_public_inventory, 0, sizeof(s_ewelink_public_inventory));
     memcpy(candidate.network.scan_results, network.scan_results, sizeof(candidate.network.scan_results));
     memcpy(candidate.system.firmware_version, controls.firmware_version,
            sizeof(candidate.system.firmware_version));
@@ -384,6 +529,22 @@ static void refresh_projection(void)
         source, s_live_offline_data_valid ? OFFLINE_DATA_ORIGIN_LIVE : OFFLINE_DATA_ORIGIN_CACHE,
         candidate.time_trusted, &candidate.weather_age_s, &candidate.market_age_s,
         &candidate.exchange_age_s);
+    /* Log only transitions of the indicators, not prices, profile or network identity. */
+    static unsigned int previous_data_flags = UINT32_MAX;
+    const unsigned int data_flags =
+        (candidate.offline_data.market.stale ? 1U : 0U) |
+        (candidate.offline_data.weather.stale ? 2U : 0U) |
+        (candidate.offline_data.exchange.stale ? 4U : 0U) |
+        (candidate.offline_data.ibovespa.stale ? 8U : 0U) |
+        (candidate.time_trusted ? 16U : 0U);
+    if (data_flags != previous_data_flags) {
+        ESP_LOGI("np2_data", "projection flags=0x%x trusted=%u market_age=%lu weather_age=%lu exchange_age=%lu",
+                 data_flags, (unsigned int)candidate.time_trusted,
+                 (unsigned long)candidate.market_age_s, (unsigned long)candidate.weather_age_s,
+                 (unsigned long)candidate.exchange_age_s);
+        previous_data_flags = data_flags;
+    }
+    collect_notifications(&candidate);
 
     /* app_loop only posts a desired visual to the SD worker. It never reads a
      * file itself, and the LVGL task consumes only the published descriptor. */
@@ -475,6 +636,21 @@ static void app_loop_task(void *arg)
                 ESP_LOGW(TAG, "ONVIF address check unavailable: %s",
                          esp_err_to_name(scan_result));
             }
+        } else if (result == ESP_OK &&
+                   event.type == APP_EVENT_SONOFF_SWITCH_REQUEST) {
+            const esp_err_t command_result = sonoff_lan_service_request_switch(
+                event.sonoff_device_id, event.sonoff_channel,
+                event.sonoff_enabled);
+            if (command_result != ESP_OK) {
+                ESP_LOGW(TAG, "Sonoff LAN switch request rejected: %s",
+                         esp_err_to_name(command_result));
+            }
+        } else if (result == ESP_OK &&
+                   event.type == APP_EVENT_NOTIFICATION_MARK_READ) {
+            notification_center_mark_read(event.notification_id, false);
+        } else if (result == ESP_OK &&
+                   event.type == APP_EVENT_NOTIFICATION_MARK_ALL_READ) {
+            notification_center_mark_read(0U, true);
         } else if (result == ESP_OK && event.type != APP_EVENT_REFRESH_PLATFORM) {
             ESP_LOGW(TAG, "discarded unknown app event %u", (unsigned int)event.type);
         }
@@ -526,6 +702,16 @@ esp_err_t app_state_request_user_profile_update(const user_profile_t *profile)
     return app_event_bus_post(&event);
 }
 
+esp_err_t app_state_request_notification_mark_read(uint32_t id)
+{
+    return app_event_bus_post_notification_mark_read(id);
+}
+
+esp_err_t app_state_request_notification_mark_all_read(void)
+{
+    return app_event_bus_post_notification_mark_all_read();
+}
+
 void app_state_get_ui_projection(app_ui_projection_t *out_projection)
 {
     if (out_projection == NULL) {
@@ -533,6 +719,15 @@ void app_state_get_ui_projection(app_ui_projection_t *out_projection)
     }
     portENTER_CRITICAL(&s_state_lock);
     *out_projection = s_projection;
+    portEXIT_CRITICAL(&s_state_lock);
+}
+
+void app_state_get_device_control_projection(
+    app_device_control_projection_t *out_projection)
+{
+    if (out_projection == NULL) return;
+    portENTER_CRITICAL(&s_state_lock);
+    *out_projection = s_projection.device_controls;
     portEXIT_CRITICAL(&s_state_lock);
 }
 

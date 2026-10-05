@@ -22,6 +22,9 @@ typedef enum {
     APP_EVENT_POMODORO_COMMAND,
     APP_EVENT_ONVIF_SCAN_REQUEST,
     APP_EVENT_ONVIF_ADDRESS_REQUEST,
+    APP_EVENT_SONOFF_SWITCH_REQUEST,
+    APP_EVENT_NOTIFICATION_MARK_READ,
+    APP_EVENT_NOTIFICATION_MARK_ALL_READ,
 } app_event_type_t;
 
 typedef struct {
@@ -30,7 +33,11 @@ typedef struct {
     user_profile_t user_profile;
     pomodoro_command_t pomodoro_command;
     uint16_t pomodoro_value;
+    uint32_t notification_id;
     char onvif_address[16];
+    char sonoff_device_id[32];
+    uint8_t sonoff_channel;
+    bool sonoff_enabled;
 } app_event_t;
 
 typedef struct {
@@ -41,10 +48,18 @@ typedef struct {
 
 esp_err_t app_event_bus_start(void);
 esp_err_t app_event_bus_post(const app_event_t *event);
+/* Copies the validated snapshot into one of four bus-owned slots. A full
+ * queue or pool returns ESP_ERR_TIMEOUT without retaining the caller's data;
+ * the producer must retry its newest snapshot. Receive releases the slot. */
 esp_err_t app_event_bus_post_product_data(const offline_data_snapshot_t *snapshot);
 esp_err_t app_event_bus_post_pomodoro(pomodoro_command_t command, uint16_t value);
 esp_err_t app_event_bus_post_onvif_scan_request(void);
 esp_err_t app_event_bus_post_onvif_address_request(const char *address);
+esp_err_t app_event_bus_post_sonoff_switch_request(const char *device_id,
+                                                    uint8_t channel,
+                                                    bool enabled);
+esp_err_t app_event_bus_post_notification_mark_read(uint32_t id);
+esp_err_t app_event_bus_post_notification_mark_all_read(void);
 esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms);
 void app_event_bus_get_status(app_event_bus_status_t *out_status);
 

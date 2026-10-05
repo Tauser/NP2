@@ -3,6 +3,7 @@
 #include "../assets/np_btc_tilted_icon.h"
 
 #include <limits.h>
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -671,11 +672,17 @@ np_header_t np_header(lv_obj_t *parent)
         np_icon_button(parent, 650, 12, NP_TOUCH_TARGET, NP_ICON_WIFI_OFF);
     header.notifications_button =
         np_icon_button(parent, 706, 12, NP_TOUCH_TARGET, NP_ICON_NOTIFICATIONS);
+    header.notification_badge = np_fill(parent, 738, 7, 18, 18,
+                                        np_c_accent(), LV_OPA_COVER,
+                                        LV_RADIUS_CIRCLE);
+    np_label(header.notification_badge, "0", NP_FONT_SM, np_c_text_on_accent(),
+             0, 1, 18, LV_TEXT_ALIGN_CENTER);
+    np_set_visible(header.notification_badge, false);
     header.settings_button =
         np_icon_button(parent, 762, 12, NP_TOUCH_TARGET, NP_ICON_SETTINGS);
     header.bluetooth_button = NULL;
 
-    header.alert_dot = np_dot(parent, 742, 12, 7, np_c_accent());
+    header.alert_dot = np_dot(parent, 686, 12, 7, np_c_warning());
     np_set_visible(header.alert_dot, false);
 
     header.divider = np_vline(parent, 826, 12, 48);
@@ -815,6 +822,24 @@ void np_header_set_notifications_enabled(np_header_t *header, bool enabled)
     if (header == NULL || header->notifications_button == NULL) return;
     np_set_text_color(icon_label(header->notifications_button),
                       enabled ? np_c_text_2() : np_c_text_3());
+}
+
+void np_header_set_notification_count(np_header_t *header, uint8_t unread_count)
+{
+    if (header == NULL || header->notification_badge == NULL) return;
+    if (unread_count == 0U) {
+        np_set_visible(header->notification_badge, false);
+        return;
+    }
+    char count[4] = {0};
+    if (unread_count > 9U) {
+        (void)snprintf(count, sizeof(count), "9+");
+    } else {
+        (void)snprintf(count, sizeof(count), "%u", (unsigned)unread_count);
+    }
+    lv_obj_t *const label = lv_obj_get_child(header->notification_badge, 0);
+    np_set_text(label, count);
+    np_set_visible(header->notification_badge, true);
 }
 
 /* ---------------- componentes existentes ---------------- */

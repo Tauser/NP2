@@ -156,6 +156,7 @@ typedef struct {
     lv_obj_t *wifi_button;
     lv_obj_t *bluetooth_button;
     lv_obj_t *notifications_button;
+    lv_obj_t *notification_badge;
     lv_obj_t *alert_dot;
 
     lv_obj_t *brand_nova;
@@ -179,6 +180,7 @@ void np_header_set_connections(np_header_t *header, bool wifi_online,
                                int8_t wifi_rssi, bool wifi_rssi_measured,
                                bool bluetooth_online, bool has_alert);
 void np_header_set_notifications_enabled(np_header_t *header, bool enabled);
+void np_header_set_notification_count(np_header_t *header, uint8_t unread_count);
 
 /* ---------------- componentes existentes ---------------- */
 

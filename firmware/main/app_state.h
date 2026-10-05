@@ -105,6 +105,29 @@ typedef struct {
     esp_err_t last_result;
 } app_notification_projection_t;
 
+#define APP_NOTIFICATION_HISTORY_MAX 8U
+
+typedef enum {
+    APP_NOTIFICATION_KIND_WIFI_DISCONNECTED = 0,
+    APP_NOTIFICATION_KIND_WIFI_RESTORED,
+    APP_NOTIFICATION_KIND_STORAGE_ERROR,
+    APP_NOTIFICATION_KIND_STORAGE_RECOVERED,
+    APP_NOTIFICATION_KIND_RESTART_FAILED,
+} app_notification_kind_t;
+
+typedef struct {
+    uint32_t id;
+    uint32_t timestamp_unix_s;
+    app_notification_kind_t kind;
+    bool unread;
+} app_notification_item_t;
+
+typedef struct {
+    uint8_t count;
+    uint8_t unread_count;
+    app_notification_item_t items[APP_NOTIFICATION_HISTORY_MAX];
+} app_notification_center_projection_t;
+
 typedef struct {
     bool ready;
     uint8_t brightness_percent;
@@ -137,6 +160,7 @@ typedef struct {
 } app_user_profile_projection_t;
 
 #define APP_IOT_MAX_CAMERAS 4U
+#define APP_IOT_MAX_EWELINK_DEVICES 8U
 
 typedef struct {
     char address[16];
@@ -145,12 +169,29 @@ typedef struct {
 } app_iot_camera_projection_t;
 
 typedef struct {
+    char device_id[32];
+    char name[48];
+    char product_model[24];
+    uint8_t channel_count;
+    char channel_names[3][32];
+    bool present_last_sync;
+    bool lan_discovered;
+    bool lan_online;
+    bool channel_state_known[3];
+    bool channel_on[3];
+    bool channel_pending[3];
+    esp_err_t channel_result[3];
+} app_iot_ewelink_device_projection_t;
+
+typedef struct {
     bool ready;
     bool scan_busy;
     uint32_t scan_generation;
     uint8_t camera_count;
     esp_err_t last_result;
     app_iot_camera_projection_t cameras[APP_IOT_MAX_CAMERAS];
+    uint8_t ewelink_device_count;
+    app_iot_ewelink_device_projection_t ewelink_devices[APP_IOT_MAX_EWELINK_DEVICES];
 } app_iot_projection_t;
 
 typedef struct {
@@ -161,6 +202,7 @@ typedef struct {
     app_onboarding_projection_t onboarding;
     app_weather_asset_projection_t weather_assets;
     app_notification_projection_t notifications;
+    app_notification_center_projection_t notification_center;
     app_device_control_projection_t device_controls;
     app_system_projection_t system;
     app_user_profile_projection_t user_profile;
@@ -187,9 +229,14 @@ esp_err_t app_state_start(void);
 esp_err_t app_state_request_refresh(void);
 /* Posts a bounded non-secret identity update to the app_loop writer. */
 esp_err_t app_state_request_user_profile_update(const user_profile_t *profile);
+/* Notification actions are bounded intents; app_loop remains the sole writer. */
+esp_err_t app_state_request_notification_mark_read(uint32_t id);
+esp_err_t app_state_request_notification_mark_all_read(void);
 
 /* Lock-protected copy for the LVGL task; no service I/O is performed here. */
 void app_state_get_ui_projection(app_ui_projection_t *out_projection);
+void app_state_get_device_control_projection(
+    app_device_control_projection_t *out_projection);
 
 /* Read-only heartbeat produced by app_loop after each state projection pass. */
 void app_state_get_health(app_state_health_t *out_health);

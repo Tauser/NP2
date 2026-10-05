@@ -25,11 +25,40 @@
 static const char *const TAG = "np2_bringup";
 static portMUX_TYPE s_health_lock = portMUX_INITIALIZER_UNLOCKED;
 static board_bringup_health_t s_health;
+static void *s_lvgl_psram_pool;
 
 #define NP2_EXPECTED_PSRAM_BYTES (32U * 1024U * 1024U)
 #define NP2_BOOT_BACKLIGHT_PERCENT 60
-#define NP2_LVGL_TASK_STACK_BYTES (12U * 1024U)
+#define NP2_LVGL_TASK_STACK_BYTES (16U * 1024U)
 #define NP2_LVGL_TASK_PRIORITY 8U
+#define NP2_LVGL_PSRAM_POOL_BYTES (128U * 1024U)
+
+static esp_err_t extend_lvgl_object_pool(void)
+{
+    if (s_lvgl_psram_pool != NULL) return ESP_OK;
+
+    void *const pool = heap_caps_malloc(NP2_LVGL_PSRAM_POOL_BYTES,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (pool == NULL) {
+        ESP_LOGE(TAG, "LVGL PSRAM pool allocation failed (%u bytes)",
+                 (unsigned)NP2_LVGL_PSRAM_POOL_BYTES);
+        return ESP_ERR_NO_MEM;
+    }
+    if (lv_mem_add_pool(pool, NP2_LVGL_PSRAM_POOL_BYTES) == NULL) {
+        heap_caps_free(pool);
+        ESP_LOGE(TAG, "LVGL could not register PSRAM pool");
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_lvgl_psram_pool = pool;
+    lv_mem_monitor_t memory = {0};
+    lv_mem_monitor(&memory);
+    ESP_LOGI(TAG, "LVGL object pools total=%u free=%u largest=%u PSRAM_added=%u",
+             (unsigned)memory.total_size, (unsigned)memory.free_size,
+             (unsigned)memory.free_biggest_size,
+             (unsigned)NP2_LVGL_PSRAM_POOL_BYTES);
+    return ESP_OK;
+}
 
 static esp_err_t verify_psram(void)
 {
@@ -159,7 +188,8 @@ esp_err_t board_bringup_start(void)
      * indefinitely for the mutex before it has installed any screen.
      */
     ESP_RETURN_ON_ERROR(esp_lv_adapter_lock(-1), TAG, "LVGL lock failed");
-    err = product_ui_create(display, touch_indev);
+    err = extend_lvgl_object_pool();
+    if (err == ESP_OK) err = product_ui_create(display, touch_indev);
     if (err == ESP_OK) {
         lv_display_add_event_cb(display, display_render_ready_cb, LV_EVENT_RENDER_READY, NULL);
         if (lv_timer_create(ui_health_timer_cb, 250U, NULL) == NULL) {

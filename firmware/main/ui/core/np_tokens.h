@@ -141,6 +141,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_DOLLAR        "\xEE\x88\xA7"
 #define NP_ICON_MARKET        "\xEE\xBE\x92"
 #define NP_ICON_HOME          "\xEE\xA2\x8A"
+#define NP_ICON_LIGHTBULB     "\xEE\x83\xB0" /* lightbulb U+E0F0 */
 #define NP_ICON_ACCOUNT       "\xEE\xA1\x93" /* account_circle U+E853 */
 #define NP_ICON_IMAGE         "\xEE\x8F\xB4" /* image U+E3F4 */
 #define NP_ICON_CAMERA        "\xEE\x90\x92" /* photo_camera U+E412 */

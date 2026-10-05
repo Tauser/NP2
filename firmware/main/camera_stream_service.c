@@ -857,13 +857,14 @@ static void query_onvif_h264_options(stream_session_t *session,
     body = NULL;
     body_length = 0U;
     status = 0;
-    if (!onvif_soap_post(session, ipv4, media_path, options_action,
-                         get_options, true, &body, &body_length, &status) ||
-        status != 200 || body == NULL ||
-        strstr(body, "H264Options") == NULL) {
+    const bool options_received = onvif_soap_post(session, ipv4, media_path,
+        options_action, get_options, true, &body, &body_length, &status);
+    if (!options_received || status != 200 || body == NULL ||
+        body_length == 0U ||
+        strstr(body, "H264ProfilesSupported") == NULL) {
         ESP_LOGW(TAG, "ONVIF GetVideoEncoderConfigurationOptions failed "
-                      "status=%d fault=%s",
-                 status, onvif_known_fault(body));
+                      "status=%d body_bytes=%u fault=%s",
+                 status, (unsigned int)body_length, onvif_known_fault(body));
         goto done;
     }
     log_h264_profile_options(parse_h264_profile_options(body));

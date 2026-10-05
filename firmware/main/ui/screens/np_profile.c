@@ -12,6 +12,14 @@ static lv_color_t avatar_color(uint8_t index)
     }
 }
 
+static const char *startup_screen_name(uint8_t index)
+{
+    static const char *const names[USER_PROFILE_START_SCREEN_COUNT] = {
+        "Home", "Clima", "Mercado", "Dispositivos", "Pomodoro",
+    };
+    return index < USER_PROFILE_START_SCREEN_COUNT ? names[index] : names[0];
+}
+
 static void initials_for(const char *name, char out[4])
 {
     out[0] = '-'; out[1] = '-'; out[2] = '\0';
@@ -105,7 +113,8 @@ np_profile_view_t np_profile_build(lv_obj_t *parent)
     np_label(personal, "Seu painel", NP_FONT_SM, np_c_text_2(),
               24, 54, 428, LV_TEXT_ALIGN_LEFT);
     view.initial_screen_row = profile_row(personal, 100, NP_ICON_HOME,
-                                           "Tela inicial", "Home", NULL, false);
+                                           "Tela inicial", "Home",
+                                           &view.initial_screen_value, true);
     view.preferences_row = profile_row(personal, 188, NP_ICON_SETTINGS, "Abrir preferências",
                                        "Configurações do sistema", NULL, true);
     return view;
@@ -132,11 +141,58 @@ void np_profile_sync(np_profile_view_t *view, bool configured,
     np_set_text(view->name_value, name[0] != '\0' ? name : "Não informado");
     lv_snprintf(avatar_detail, sizeof(avatar_detail), "Iniciais %s", initials);
     np_set_text(view->avatar_value, avatar_detail);
-    np_set_bg_color(view->avatar, avatar_color(configured ? profile->avatar_color : 0U));
-    view->current_color = configured ? profile->avatar_color : 0U;
+    const uint8_t color = configured && profile != NULL ? profile->avatar_color : 0U;
+    const uint8_t start_screen = configured && profile != NULL &&
+        profile->initial_screen < USER_PROFILE_START_SCREEN_COUNT
+            ? profile->initial_screen : USER_PROFILE_START_HOME;
+    np_set_bg_color(view->avatar, avatar_color(color));
+    view->current_color = color;
+    view->current_initial_screen = start_screen;
+    np_set_text(view->initial_screen_value, startup_screen_name(start_screen));
     np_set_text(view->identity_hint, pending ? "Salvando perfil..." :
                 result != ESP_OK ? "Falha ao salvar · tente novamente" :
-                configured ? "Perfil salvo neste dispositivo" : "Nome ainda não informado");
+                name[0] != '\0' ? "Perfil salvo neste dispositivo" :
+                configured ? "Preferências salvas neste dispositivo" :
+                "Nome ainda não informado");
+}
+
+void np_profile_open_initial_screen_picker(np_profile_view_t *view)
+{
+    if (view == NULL || view->root == NULL) return;
+    if (view->initial_screen_picker.scrim == NULL) {
+        np_modal_create(&view->initial_screen_picker, view->root,
+                        292, 32, 440, 536, NULL, np_c_accent(),
+                        "Tela inicial", "Escolha uma das telas principais");
+        if (view->initial_screen_picker.content == NULL) return;
+        static const char *const names[USER_PROFILE_START_SCREEN_COUNT] = {
+            "Home", "Clima", "Mercado", "Dispositivos", "Pomodoro",
+        };
+        for (uint8_t i = 0U; i < USER_PROFILE_START_SCREEN_COUNT; ++i) {
+            view->initial_screen_options[i] = np_form_button(
+                view->initial_screen_picker.content, 24, 16 + i * 68,
+                392, 52, names[i], NP_FORM_BUTTON_SECONDARY);
+            if (view->initial_screen_options[i] == NULL) continue;
+        }
+    }
+    for (uint8_t i = 0U; i < USER_PROFILE_START_SCREEN_COUNT; ++i) {
+        if (view->initial_screen_options[i] == NULL) continue;
+        lv_obj_set_style_border_width(view->initial_screen_options[i],
+                                      i == view->current_initial_screen ? 2 : 1, 0);
+        lv_obj_set_style_border_color(view->initial_screen_options[i],
+            i == view->current_initial_screen ? np_c_accent() : np_c_hairline(), 0);
+    }
+    np_modal_show(&view->initial_screen_picker);
+}
+
+void np_profile_close_initial_screen_picker(np_profile_view_t *view)
+{
+    if (view != NULL) np_modal_hide(&view->initial_screen_picker);
+}
+
+lv_obj_t *np_profile_initial_screen_option(np_profile_view_t *view, uint8_t index)
+{
+    if (view == NULL || index >= USER_PROFILE_START_SCREEN_COUNT) return NULL;
+    return view->initial_screen_options[index];
 }
 
 static void editor_closed(void *user_data)
@@ -251,5 +307,6 @@ bool np_profile_editor_value(const np_profile_view_t *view, user_profile_t *out_
     *out_profile = (user_profile_t){0};
     memcpy(out_profile->name, text + start, length - start);
     out_profile->avatar_color = view->draft_color;
-    return user_profile_is_valid(out_profile);
+    out_profile->initial_screen = view->current_initial_screen;
+    return out_profile->name[0] != '\0' && user_profile_is_valid(out_profile);
 }

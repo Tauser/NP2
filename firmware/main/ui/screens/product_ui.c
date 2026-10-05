@@ -9,6 +9,7 @@
 #include "app_event_bus.h"
 #include "camera_stream_service.h"
 #include "device_control_service.h"
+#include "np_ewelink.h"
 #include "network_validation_service.h"
 #include "sonoff_lan_service.h"
 #include "flash_coordinator.h"
@@ -35,12 +36,17 @@
 #include "settings/np_settings_timezone.h"
 #include "settings/np_settings_wifi.h"
 #include "settings/np_wifi_password.h"
+#include "np_notification_center.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define BOOT_SAVED_NETWORK_MAXIMUM_MS 15000U
 #define BOOT_TRANSITION_MS 180U
+#define MAIN_PAGE_SWIPE_MIN_PIXELS 96
+#define MAIN_PAGE_INDICATOR_SIZE 8
+#define MAIN_PAGE_INDICATOR_ACTIVE_WIDTH 20
+#define MAIN_PAGE_INDICATOR_GAP 10
 
 typedef struct {
     enum {
@@ -58,11 +64,14 @@ typedef struct {
         PRODUCT_SCREEN_WIFI,
         PRODUCT_SCREEN_TIMEZONE,
     } active_screen;
+    uintptr_t wifi_return_screen;
     lv_display_t *display;
     lv_indev_t *touch_indev;
     lv_obj_t *shell;
     lv_obj_t *content_host;
+    lv_obj_t *main_page_indicators[USER_PROFILE_START_SCREEN_COUNT];
     np_header_t shell_header;
+    np_notification_center_t notification_center;
     np_navigation_manager_t navigation;
     np_boot_view_t boot;
     np_home_view_t home;
@@ -109,9 +118,13 @@ typedef struct {
     uint32_t wifi_scan_idle_since_tick;
     bool profile_editor_pending;
     bool notification_feedback_initialized;
+    bool notification_center_close_pending;
     bool syncing_notification_controls;
     bool syncing_night_control;
     bool home_data_rendered;
+    bool main_page_swipe_start_valid;
+    bool main_page_swipe_consumed;
+    lv_point_t main_page_swipe_start;
     bool display_sound_callbacks_initialized;
     uint8_t projected_brightness;
     uint8_t projected_volume;
@@ -140,6 +153,12 @@ static void discard_system_confirmation(void);
 static void system_restart_event_cb(lv_event_t *event);
 static np_wifi_status_t wifi_status_for(const app_network_projection_t *network);
 static void scene_navigation_event_cb(lv_event_t *event);
+static void wifi_back_event_cb(lv_event_t *event);
+static void notification_header_event_cb(lv_event_t *event);
+static void notification_center_event_cb(lv_event_t *event);
+static bool notification_center_build(void);
+static void notification_center_close(void);
+static void notification_center_dispose_async(void *user_data);
 static void iot_action_event_cb(lv_event_t *event);
 static void release_current_scene(void);
 static void profile_identity_event_cb(lv_event_t *event);
@@ -303,10 +322,10 @@ static void install_display_sound_callbacks(void)
     if (active_display_controls()->brightness_slider == NULL ||
         active_display_controls()->volume_slider == NULL ||
         active_display_controls()->night_switch == NULL) return;
-    app_ui_projection_t projection = {0};
-    app_state_get_ui_projection(&projection);
-    s_ui.projected_brightness = projection.device_controls.brightness_percent;
-    s_ui.projected_volume = projection.device_controls.volume_percent;
+    app_device_control_projection_t controls = {0};
+    app_state_get_device_control_projection(&controls);
+    s_ui.projected_brightness = controls.brightness_percent;
+    s_ui.projected_volume = controls.volume_percent;
     s_ui.display_sound_callbacks_initialized = true;
     lv_obj_add_event_cb(active_display_controls()->night_switch, night_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, NULL);
@@ -931,6 +950,8 @@ static void update_header(np_header_t *header,
             projection->storage.last_result != ESP_OK);
     np_header_set_notifications_enabled(header,
                                         projection->notifications.general_enabled);
+    np_header_set_notification_count(header,
+                                     projection->notification_center.unread_count);
 
     struct tm local = {0};
     if (!projection_local_time(projection, &local)) {
@@ -1545,6 +1566,22 @@ static void navigation_shell_create(void)
     s_ui.shell = np_scene(lv_screen_active());
     s_ui.content_host = np_scene(s_ui.shell);
     s_ui.shell_header = np_header(s_ui.shell);
+    const int32_t indicator_count = (int32_t)USER_PROFILE_START_SCREEN_COUNT;
+    const int32_t total_width = indicator_count * MAIN_PAGE_INDICATOR_SIZE +
+        (indicator_count - 1) * MAIN_PAGE_INDICATOR_GAP +
+        MAIN_PAGE_INDICATOR_ACTIVE_WIDTH - MAIN_PAGE_INDICATOR_SIZE;
+    for (uint8_t i = 0U; i < USER_PROFILE_START_SCREEN_COUNT; ++i) {
+        s_ui.main_page_indicators[i] = np_fill(
+            s_ui.shell, (NP_SCREEN_W - total_width) / 2 + (int32_t)i *
+                (MAIN_PAGE_INDICATOR_SIZE + MAIN_PAGE_INDICATOR_GAP),
+            NP_SCREEN_H - 13, MAIN_PAGE_INDICATOR_SIZE, MAIN_PAGE_INDICATOR_SIZE,
+            np_c_text_3(), LV_OPA_COVER, LV_RADIUS_CIRCLE);
+    }
+    lv_obj_add_event_cb(s_ui.shell_header.wifi_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_WIFI);
+    lv_obj_add_event_cb(s_ui.shell_header.notifications_button,
+                        notification_header_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(s_ui.shell_header.drawer_home_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
@@ -1569,6 +1606,269 @@ static void navigation_shell_create(void)
     np_set_visible(s_ui.shell, false);
 }
 
+static void notification_header_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.active_screen == PRODUCT_SCREEN_BOOT) return;
+    if (s_ui.notification_center.root != NULL &&
+        !lv_obj_has_flag(s_ui.notification_center.root, LV_OBJ_FLAG_HIDDEN)) {
+        notification_center_close();
+        return;
+    }
+    if (s_ui.notification_center_close_pending) {
+        (void)lv_async_call_cancel(notification_center_dispose_async, NULL);
+        s_ui.notification_center_close_pending = false;
+    }
+    if (s_ui.notification_center.root == NULL && !notification_center_build()) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Notificações indisponíveis",
+                               "Libere memória e tente novamente", 2400U);
+        return;
+    }
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    np_notification_center_sync(&s_ui.notification_center,
+                                &projection.notification_center,
+                                projection.current_unix_s);
+    np_set_visible(s_ui.notification_center.root, true);
+    lv_obj_move_foreground(s_ui.notification_center.root);
+}
+
+static bool notification_center_build(void)
+{
+    np_notification_center_t view =
+        np_notification_center_create(lv_screen_active());
+    if (view.root == NULL) return false;
+    s_ui.notification_center = view;
+    lv_obj_add_event_cb(view.root, notification_center_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(view.close_button, notification_center_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(view.mark_all_button, notification_center_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+    for (uint8_t i = 0U; i < APP_NOTIFICATION_HISTORY_MAX; ++i) {
+        if (view.rows[i] != NULL) {
+            lv_obj_add_event_cb(view.rows[i], notification_center_event_cb,
+                                LV_EVENT_CLICKED,
+                                &s_ui.notification_center.row_ids[i]);
+        }
+    }
+    return true;
+}
+
+static void notification_center_dispose_async(void *user_data)
+{
+    (void)user_data;
+    s_ui.notification_center_close_pending = false;
+    if (s_ui.notification_center.root == NULL ||
+        !lv_obj_has_flag(s_ui.notification_center.root, LV_OBJ_FLAG_HIDDEN)) return;
+    lv_obj_delete(s_ui.notification_center.root);
+    s_ui.notification_center = (np_notification_center_t){0};
+}
+
+static void notification_center_close(void)
+{
+    if (s_ui.notification_center.root == NULL) return;
+    np_set_visible(s_ui.notification_center.root, false);
+    if (!s_ui.notification_center_close_pending &&
+        lv_async_call(notification_center_dispose_async, NULL) == LV_RESULT_OK) {
+        s_ui.notification_center_close_pending = true;
+    }
+}
+
+static void notification_center_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_obj_t *const target = lv_event_get_target(event);
+    np_notification_center_t *const center = &s_ui.notification_center;
+    if (target == center->root || target == center->close_button) {
+        notification_center_close();
+    } else if (target == center->mark_all_button) {
+        const esp_err_t result = app_state_request_notification_mark_all_read();
+        if (result != ESP_OK) {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Não foi possível atualizar",
+                                   "Tente novamente", 2200U);
+        }
+    } else {
+        uint32_t *const id = lv_event_get_user_data(event);
+        if (id == NULL || *id == 0U) return;
+        const esp_err_t result = app_state_request_notification_mark_read(*id);
+        if (result != ESP_OK) {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Não foi possível marcar como lida",
+                                   "Tente novamente", 2200U);
+        }
+    }
+}
+
+static bool is_main_page(uintptr_t page)
+{
+    return page == PRODUCT_SCREEN_HOME || page == PRODUCT_SCREEN_WEATHER ||
+        page == PRODUCT_SCREEN_MARKET || page == PRODUCT_SCREEN_IOT ||
+        page == PRODUCT_SCREEN_POMODORO;
+}
+
+static int8_t main_page_index(uintptr_t page)
+{
+    switch (page) {
+    case PRODUCT_SCREEN_HOME: return USER_PROFILE_START_HOME;
+    case PRODUCT_SCREEN_WEATHER: return USER_PROFILE_START_WEATHER;
+    case PRODUCT_SCREEN_MARKET: return USER_PROFILE_START_MARKET;
+    case PRODUCT_SCREEN_IOT: return USER_PROFILE_START_DEVICES;
+    case PRODUCT_SCREEN_POMODORO: return USER_PROFILE_START_POMODORO;
+    default: return -1;
+    }
+}
+
+static void sync_main_page_indicators(uintptr_t page)
+{
+    const int8_t active_index = main_page_index(page);
+    const bool visible = active_index >= 0;
+    const int32_t indicator_count = (int32_t)USER_PROFILE_START_SCREEN_COUNT;
+    const int32_t total_width = indicator_count * MAIN_PAGE_INDICATOR_SIZE +
+        (indicator_count - 1) * MAIN_PAGE_INDICATOR_GAP +
+        MAIN_PAGE_INDICATOR_ACTIVE_WIDTH - MAIN_PAGE_INDICATOR_SIZE;
+    int32_t x = (NP_SCREEN_W - total_width) / 2;
+    for (uint8_t i = 0U; i < USER_PROFILE_START_SCREEN_COUNT; ++i) {
+        lv_obj_t *const dot = s_ui.main_page_indicators[i];
+        if (dot == NULL) continue;
+        const int32_t width = (int8_t)i == active_index
+            ? MAIN_PAGE_INDICATOR_ACTIVE_WIDTH : MAIN_PAGE_INDICATOR_SIZE;
+        lv_obj_set_width(dot, width);
+        lv_obj_set_x(dot, x);
+        np_set_visible(dot, visible);
+        np_set_bg_color(dot, (int8_t)i == active_index ? np_c_accent() : np_c_text_3());
+        x += width + MAIN_PAGE_INDICATOR_GAP;
+    }
+}
+
+static void main_page_swipe_event_cb(lv_event_t *event)
+{
+    const lv_event_code_t code = lv_event_get_code(event);
+    /* On indev event lists the event target is the indev; the event parameter
+     * is the touched object. lv_event_get_indev() would return that object. */
+    lv_indev_t *const indev = lv_event_get_target(event);
+    if (indev == NULL) return;
+
+    if (code == LV_EVENT_SHORT_CLICKED || code == LV_EVENT_SINGLE_CLICKED ||
+        code == LV_EVENT_DOUBLE_CLICKED || code == LV_EVENT_TRIPLE_CLICKED ||
+        code == LV_EVENT_CLICKED) {
+        if (!s_ui.main_page_swipe_consumed) return;
+        lv_indev_stop_processing(indev);
+        if (code == LV_EVENT_CLICKED) s_ui.main_page_swipe_consumed = false;
+        return;
+    }
+
+    if (code == LV_EVENT_PRESSED) {
+        s_ui.main_page_swipe_consumed = false;
+        s_ui.main_page_swipe_start_valid = is_main_page(s_ui.active_screen) &&
+            s_ui.navigation.phase == NP_NAV_IDLE && !s_ui.navigation_pending;
+        if (s_ui.main_page_swipe_start_valid) {
+            lv_indev_get_point(indev, &s_ui.main_page_swipe_start);
+            s_ui.main_page_swipe_start_valid = s_ui.main_page_swipe_start.y >= NP_HEADER_H;
+            lv_obj_t *const touched_object = lv_event_get_param(event);
+            if (s_ui.shell_header.drawer_scrim == NULL ||
+                !lv_obj_has_flag(s_ui.shell_header.drawer_scrim, LV_OBJ_FLAG_HIDDEN) ||
+                touched_object == NULL) {
+                s_ui.main_page_swipe_start_valid = false;
+            }
+        }
+        return;
+    }
+
+    if (code == LV_EVENT_PRESS_LOST) {
+        s_ui.main_page_swipe_start_valid = false;
+        return;
+    }
+    if (code != LV_EVENT_RELEASED) return;
+
+    const bool valid_start = s_ui.main_page_swipe_start_valid;
+    s_ui.main_page_swipe_start_valid = false;
+    if (!valid_start || !is_main_page(s_ui.active_screen) ||
+        s_ui.navigation.phase != NP_NAV_IDLE || s_ui.navigation_pending) return;
+
+    lv_point_t end = {0};
+    lv_indev_get_point(indev, &end);
+    const int32_t delta_x = end.x - s_ui.main_page_swipe_start.x;
+    const int32_t delta_y = end.y - s_ui.main_page_swipe_start.y;
+    const int32_t distance_x = delta_x < 0 ? -delta_x : delta_x;
+    const int32_t distance_y = delta_y < 0 ? -delta_y : delta_y;
+    if (distance_x > 32 || distance_y > 32) {
+        ESP_LOGI(TAG, "page drag page=%u valid=%u start=%d,%d end=%d,%d delta=%ld,%ld phase=%u pending=%u",
+                 (unsigned)s_ui.active_screen, (unsigned)valid_start,
+                 (int)s_ui.main_page_swipe_start.x,
+                 (int)s_ui.main_page_swipe_start.y,
+                 (int)end.x, (int)end.y,
+                 (long)delta_x, (long)delta_y,
+                 (unsigned)s_ui.navigation.phase,
+                 (unsigned)s_ui.navigation_pending);
+    }
+    if (distance_x < MAIN_PAGE_SWIPE_MIN_PIXELS || distance_x < distance_y * 2) return;
+
+    const int8_t index = main_page_index(s_ui.active_screen);
+    if (index < 0) return;
+    const int8_t destination_index = index + (delta_x < 0 ? 1 : -1);
+    if (destination_index < 0 ||
+        destination_index >= (int8_t)USER_PROFILE_START_SCREEN_COUNT) {
+        s_ui.main_page_swipe_consumed = true;
+        return;
+    }
+
+    static const uintptr_t pages[USER_PROFILE_START_SCREEN_COUNT] = {
+        PRODUCT_SCREEN_HOME, PRODUCT_SCREEN_WEATHER, PRODUCT_SCREEN_MARKET,
+        PRODUCT_SCREEN_IOT, PRODUCT_SCREEN_POMODORO,
+    };
+    if (np_navigation_request(&s_ui.navigation, pages[(uint8_t)destination_index])) {
+        s_ui.navigation_pending = true;
+        s_ui.main_page_swipe_consumed = true;
+        ESP_LOGI(TAG, "page swipe %u -> %u dx=%ld dy=%ld",
+                 (unsigned)s_ui.active_screen,
+                 (unsigned)pages[(uint8_t)destination_index],
+                 (long)delta_x, (long)delta_y);
+    }
+}
+
+static void profile_initial_screen_option_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.active_screen != PRODUCT_SCREEN_PROFILE) return;
+    const uintptr_t selected = (uintptr_t)lv_event_get_user_data(event);
+    if (selected >= USER_PROFILE_START_SCREEN_COUNT) return;
+
+    app_ui_projection_t projection = {0};
+    app_state_get_ui_projection(&projection);
+    user_profile_t profile = projection.user_profile.configured
+        ? projection.user_profile.profile : (user_profile_t){0};
+    profile.initial_screen = (uint8_t)selected;
+    const esp_err_t result = app_state_request_user_profile_update(&profile);
+    if (result != ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Preferência indisponível", "Tente novamente", 2400U);
+        return;
+    }
+    np_profile_close_initial_screen_picker(&s_ui.profile);
+    np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_SUCCESS,
+                           "Tela inicial salva", "Será exibida no próximo início", 2400U);
+}
+
+static void profile_initial_screen_picker_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.active_screen != PRODUCT_SCREEN_PROFILE) return;
+    const bool create_options = s_ui.profile.initial_screen_picker.scrim == NULL;
+    np_profile_open_initial_screen_picker(&s_ui.profile);
+    if (create_options) {
+        for (uint8_t i = 0U; i < USER_PROFILE_START_SCREEN_COUNT; ++i) {
+            lv_obj_t *option = np_profile_initial_screen_option(&s_ui.profile, i);
+            if (option != NULL) {
+                lv_obj_add_event_cb(option, profile_initial_screen_option_event_cb,
+                                    LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+            }
+        }
+    }
+}
+
 static void home_dispose_boot_timer_cb(lv_timer_t *timer)
 {
     if (s_ui.boot.root != NULL) lv_obj_delete(s_ui.boot.root);
@@ -1576,7 +1876,19 @@ static void home_dispose_boot_timer_cb(lv_timer_t *timer)
     s_ui.home_transition_timer = NULL;
     s_ui.home_transition_pending = false;
     lv_timer_delete(timer);
-    ESP_LOGI(TAG, "Boot transition complete; Home V2 visible");
+    ESP_LOGI(TAG, "Boot transition complete; startup page visible");
+}
+
+static uintptr_t startup_page_from_preference(uint8_t preference)
+{
+    switch (preference) {
+    case USER_PROFILE_START_WEATHER: return PRODUCT_SCREEN_WEATHER;
+    case USER_PROFILE_START_MARKET: return PRODUCT_SCREEN_MARKET;
+    case USER_PROFILE_START_DEVICES: return PRODUCT_SCREEN_IOT;
+    case USER_PROFILE_START_POMODORO: return PRODUCT_SCREEN_POMODORO;
+    case USER_PROFILE_START_HOME:
+    default: return PRODUCT_SCREEN_HOME;
+    }
 }
 
 static void home_build_timer_cb(lv_timer_t *timer)
@@ -1590,14 +1902,25 @@ static void home_build_timer_cb(lv_timer_t *timer)
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
+    const uintptr_t requested_page = startup_page_from_preference(
+        projection.user_profile.profile.initial_screen);
     navigation_shell_create();
-    s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
-    s_ui.home_data_rendered = false;
+    const bool built_preferred_page = requested_page != PRODUCT_SCREEN_HOME &&
+        navigation_build(NULL, requested_page);
+    if (!built_preferred_page) {
+        s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
+        s_ui.home_data_rendered = false;
+        update_home(&projection);
+        s_ui.active_screen = PRODUCT_SCREEN_HOME;
+        s_ui.navigation.current_page = PRODUCT_SCREEN_HOME;
+        s_ui.navigation.destination = PRODUCT_SCREEN_HOME;
+        navigation_enter(NULL, PRODUCT_SCREEN_HOME);
+    } else {
+        s_ui.navigation.current_page = requested_page;
+        s_ui.navigation.destination = requested_page;
+        navigation_enter(NULL, requested_page);
+    }
     np_feedback_bring_to_front(&s_ui.feedback);
-    update_home(&projection);
-    s_ui.active_screen = PRODUCT_SCREEN_HOME;
-    s_ui.navigation.current_page = PRODUCT_SCREEN_HOME;
-    s_ui.navigation.destination = PRODUCT_SCREEN_HOME;
     ++s_ui.navigation.page_generation;
     s_ui.rendered_revision = projection.revision;
     np_set_visible(s_ui.shell, true);
@@ -1740,6 +2063,13 @@ static void refresh_timer_cb(lv_timer_t *timer)
         s_ui.rendered_revision = projection.revision;
     }
 
+    if (s_ui.notification_center.root != NULL &&
+        !lv_obj_has_flag(s_ui.notification_center.root, LV_OBJ_FLAG_HIDDEN)) {
+        np_notification_center_sync(&s_ui.notification_center,
+                                    &projection.notification_center,
+                                    projection.current_unix_s);
+    }
+
     if (s_ui.active_screen == PRODUCT_SCREEN_BOOT) {
         const uint32_t elapsed = lv_tick_elaps(s_ui.started_at_tick);
         if (projection.network.credentials_active && !s_ui.boot_saved_network_seen) {
@@ -1755,8 +2085,11 @@ static void refresh_timer_cb(lv_timer_t *timer)
         const bool ready_to_leave = projection.time_trusted ||
             (!s_ui.boot_saved_network_seen && elapsed >= BOOT_MAXIMUM_MS) ||
             saved_network_wait_expired || saved_network_failed;
+        const bool startup_preference_ready = projection.user_profile.ready ||
+            elapsed >= BOOT_MAXIMUM_MS;
 
-        if (elapsed >= BOOT_MINIMUM_MS && projection.ready && ready_to_leave) {
+        if (elapsed >= BOOT_MINIMUM_MS && projection.ready && ready_to_leave &&
+            startup_preference_ready) {
             show_home(&projection);
         }
     }
@@ -1788,6 +2121,7 @@ static void release_current_scene(void)
     np_keyboard_hide(&s_ui.keyboard);
     np_devices_close_camera(&s_ui.devices);
     np_profile_close_editor(&s_ui.profile);
+    np_profile_close_initial_screen_picker(&s_ui.profile);
     discard_wifi_add();
     discard_wifi_password();
     discard_wifi_confirmation();
@@ -1971,13 +2305,15 @@ static bool navigation_build(void *context, uintptr_t page)
             s_ui.active_screen = PRODUCT_SCREEN_MARKET;
         } else if (page == PRODUCT_SCREEN_IOT) {
             s_ui.devices = np_devices_build_with_header(s_ui.content_host,
-                                                         &s_ui.shell_header);
+                                                         &s_ui.shell_header,
+                                                         &projection.iot);
             if (s_ui.devices.root == NULL) return false;
             np_devices_rebind(&s_ui.devices);
             for (uint8_t i = 0U; i < APP_IOT_MAX_CAMERAS; ++i) {
                 lv_obj_add_event_cb(s_ui.devices.camera_cards[i],
                                     iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             }
+            np_devices_set_channel_event_cb(&s_ui.devices, iot_action_event_cb);
             lv_obj_add_event_cb(s_ui.devices.camera_stream_start_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.camera_stream_stop_button,
@@ -1986,8 +2322,24 @@ static bool navigation_build(void *context, uintptr_t page)
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.add_device_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
-            lv_obj_add_event_cb(s_ui.devices.add_sensor_button, iot_action_event_cb,
+            lv_obj_add_event_cb(s_ui.devices.empty_import_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.add_type_back_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_choice_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_choice_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_login_back_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_cancel_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_submit_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_sync_back_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.ewelink_sync_action_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.scan_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.camera_scan_button, iot_action_event_cb,
@@ -2000,6 +2352,10 @@ static bool navigation_build(void *context, uintptr_t page)
                 s_ui.devices.camera_username_input, NP_KEYBOARD_MODE_TEXT);
             np_keyboard_bind(&s_ui.keyboard,
                 s_ui.devices.camera_password_input, NP_KEYBOARD_MODE_PASSWORD);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.ewelink_username_input, NP_KEYBOARD_MODE_TEXT);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.ewelink_password_input, NP_KEYBOARD_MODE_PASSWORD);
             lv_obj_add_event_cb(s_ui.devices.modal_close_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
             update_header(&s_ui.shell_header, &projection, false);
@@ -2055,8 +2411,9 @@ static bool navigation_build(void *context, uintptr_t page)
             if (s_ui.profile.root == NULL) return false;
             lv_obj_add_event_cb(s_ui.profile.home_button, scene_navigation_event_cb,
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
-            lv_obj_add_event_cb(s_ui.profile.initial_screen_row, scene_navigation_event_cb,
-                                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+            lv_obj_add_event_cb(s_ui.profile.initial_screen_row,
+                                profile_initial_screen_picker_event_cb,
+                                LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.profile.preferences_row, scene_navigation_event_cb,
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
             lv_obj_add_event_cb(s_ui.profile.edit_button, profile_identity_event_cb,
@@ -2110,9 +2467,8 @@ static bool navigation_build(void *context, uintptr_t page)
             s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
             if (s_ui.wifi_scene.root == NULL) return false;
             np_settings_wifi_scene_bind(&s_ui.wifi_scene);
-            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
-                                LV_EVENT_CLICKED,
-                                (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, wifi_back_event_cb,
+                                LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb,
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb,
@@ -2186,6 +2542,11 @@ static bool navigation_build(void *context, uintptr_t page)
                             (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
         lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+        lv_obj_add_event_cb(header->wifi_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_WIFI);
+        lv_obj_add_event_cb(header->notifications_button,
+                            notification_header_event_cb,
+                            LV_EVENT_CLICKED, NULL);
     }
     update_header(header, &projection, true);
     if (page == PRODUCT_SCREEN_DISPLAY_SOUND) update_display_sound_controls(&projection);
@@ -2216,6 +2577,7 @@ static void navigation_enter(void *context, uintptr_t page)
         np_set_visible(s_ui.shell, true);
         lv_obj_move_foreground(s_ui.shell);
     }
+    sync_main_page_indicators(page);
     np_feedback_bring_to_front(&s_ui.feedback);
     s_ui.navigation_pending = false;
 }
@@ -2401,8 +2763,8 @@ static void scene_navigation_async(void *user_data)
         if (install_header_callbacks) {
             s_ui.wifi_scene = np_settings_wifi_scene_build(lv_screen_active());
             np_settings_wifi_scene_bind(&s_ui.wifi_scene);
-            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, scene_navigation_event_cb,
-                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_add_event_cb(s_ui.wifi_scene.back_button, wifi_back_event_cb,
+                                LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.wifi_scene.add_button, wifi_add_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.wifi_scene.wifi.scan_button, wifi_scan_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.wifi_scene.wifi.connect_button, wifi_manage_event_cb, LV_EVENT_CLICKED, NULL);
@@ -2474,6 +2836,11 @@ static void scene_navigation_async(void *user_data)
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
         lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
+        lv_obj_add_event_cb(header->wifi_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_WIFI);
+        lv_obj_add_event_cb(header->notifications_button,
+                            notification_header_event_cb,
+                            LV_EVENT_CLICKED, NULL);
     }
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
@@ -2528,25 +2895,130 @@ static void scene_navigation_event_cb(lv_event_t *event)
     const uintptr_t destination = (uintptr_t)lv_event_get_user_data(event);
     if (destination == (uintptr_t)s_ui.active_screen) return;
     if (np_navigation_request(&s_ui.navigation, destination)) {
+        if (destination == PRODUCT_SCREEN_WIFI) {
+            s_ui.wifi_return_screen = (uintptr_t)s_ui.active_screen;
+        }
+        s_ui.navigation_pending = true;
+    }
+}
+
+static void wifi_back_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
+        s_ui.navigation_pending || s_ui.active_screen != PRODUCT_SCREEN_WIFI) return;
+
+    uintptr_t destination = s_ui.wifi_return_screen;
+    if (destination == PRODUCT_SCREEN_BOOT || destination == PRODUCT_SCREEN_WIFI ||
+        destination > PRODUCT_SCREEN_TIMEZONE) {
+        destination = PRODUCT_SCREEN_PREFERENCES;
+    }
+    if (np_navigation_request(&s_ui.navigation, destination)) {
         s_ui.navigation_pending = true;
     }
 }
 
 static void iot_action_event_cb(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
-        s_ui.active_screen != PRODUCT_SCREEN_IOT) return;
-    const lv_obj_t *target = lv_event_get_target(event);
+    if (s_ui.active_screen != PRODUCT_SCREEN_IOT) return;
+    lv_obj_t *const target = lv_event_get_current_target(event);
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_CLICKED) return;
+    for (uint8_t device = 0U; device < APP_IOT_MAX_EWELINK_DEVICES; ++device) {
+        for (uint8_t channel = 0U; channel < 3U; ++channel) {
+            if (target != s_ui.devices.ewelink_channel_cards[device][channel])
+                continue;
+            for (uint8_t pending_device = 0U;
+                 pending_device < APP_IOT_MAX_EWELINK_DEVICES;
+                 ++pending_device) {
+                for (uint8_t pending_channel = 0U; pending_channel < 3U;
+                     ++pending_channel) {
+                    if (s_ui.devices.ewelink_channel_pending[pending_device]
+                                                               [pending_channel])
+                        return;
+                }
+            }
+            if (!s_ui.devices.ewelink_channel_control_enabled[device][channel] ||
+                s_ui.devices.ewelink_channel_pending[device][channel]) return;
+            const bool desired = !s_ui.devices.ewelink_channel_on[device][channel];
+            const esp_err_t result = app_event_bus_post_sonoff_switch_request(
+                s_ui.devices.ewelink_device_ids[device], channel, desired);
+            if (result == ESP_OK) {
+                s_ui.devices.ewelink_channel_on[device][channel] = desired;
+                s_ui.devices.ewelink_channel_pending[device][channel] = true;
+                s_ui.devices.ewelink_channel_pending_seen[device][channel] = false;
+                s_ui.devices.ewelink_channel_pending_result[device][channel] =
+                    s_ui.devices.ewelink_channel_last_result[device][channel];
+                s_ui.devices.ewelink_channel_control_enabled[device][channel] = false;
+                lv_obj_t *const message =
+                    s_ui.devices.ewelink_channel_states[device][channel];
+                np_set_visible(message, true);
+                np_set_text(message, desired ? "Ligando..." : "Desligando...");
+                lv_obj_set_style_bg_color(target,
+                    desired ? np_c_accent_bg() : np_c_surface(), LV_PART_MAIN);
+                lv_obj_set_style_border_color(target,
+                    desired ? np_c_accent() : np_c_hairline(), LV_PART_MAIN);
+            } else {
+                np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                    "Comando não enviado",
+                    "A fila local está ocupada. Tente novamente.", 2200U);
+                (void)app_state_request_refresh();
+            }
+            return;
+        }
+    }
     for (uint8_t camera = 0U; camera < APP_IOT_MAX_CAMERAS; ++camera) {
         if (target == s_ui.devices.camera_cards[camera]) {
             np_devices_open_camera(&s_ui.devices, camera);
             return;
         }
     }
-    if (target == s_ui.devices.add_device_button) {
+    if (target == s_ui.devices.add_device_button ||
+        target == s_ui.devices.empty_import_button) {
         np_devices_open_add(&s_ui.devices, false);
-    } else if (target == s_ui.devices.add_sensor_button) {
-        np_devices_open_add(&s_ui.devices, true);
+    } else if (target == s_ui.devices.add_type_back_button) {
+        np_devices_return_to_overview(&s_ui.devices);
+    } else if (target == s_ui.devices.ewelink_choice_button) {
+        np_devices_open_ewelink(&s_ui.devices);
+    } else if (target == s_ui.devices.camera_choice_button) {
+        np_devices_open_camera_add(&s_ui.devices);
+    } else if (target == s_ui.devices.ewelink_login_back_button ||
+               target == s_ui.devices.ewelink_cancel_button) {
+        np_keyboard_hide(&s_ui.keyboard);
+        np_devices_return_to_overview(&s_ui.devices);
+    } else if (target == s_ui.devices.ewelink_submit_button) {
+        char username[96] = {0};
+        char password[128] = {0};
+        const char *const username_input = lv_textarea_get_text(
+            s_ui.devices.ewelink_username_input);
+        const char *const password_input = lv_textarea_get_text(
+            s_ui.devices.ewelink_password_input);
+        if (username_input != NULL)
+            (void)snprintf(username, sizeof(username), "%s", username_input);
+        if (password_input != NULL)
+            (void)snprintf(password, sizeof(password), "%s", password_input);
+
+        const esp_err_t result = np_ewelink_sync_begin(username, password);
+        volatile char *username_bytes = username;
+        volatile char *password_bytes = password;
+        for (size_t index = 0U; index < sizeof(username); ++index)
+            username_bytes[index] = 0;
+        for (size_t index = 0U; index < sizeof(password); ++index)
+            password_bytes[index] = 0;
+        lv_textarea_set_text(s_ui.devices.ewelink_username_input, "");
+        lv_textarea_set_text(s_ui.devices.ewelink_password_input, "");
+        np_keyboard_hide(&s_ui.keyboard);
+        if (result == ESP_OK) {
+            np_devices_open_ewelink_sync(&s_ui.devices);
+        } else {
+            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                                   "Sincronização não iniciada",
+                                   "Conecte o painel ao Wi-Fi e confira os campos.",
+                                   2600U);
+        }
+    } else if (target == s_ui.devices.ewelink_sync_back_button ||
+               target == s_ui.devices.ewelink_sync_action_button) {
+        np_keyboard_hide(&s_ui.keyboard);
+        np_devices_return_to_overview(&s_ui.devices);
     } else if (target == s_ui.devices.scan_button) {
         s_ui.devices.onvif_scan_selected = false;
         np_set_text(s_ui.devices.modal_description,
@@ -2656,6 +3128,20 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
     };
     np_navigation_init(&s_ui.navigation, screen, PRODUCT_SCREEN_BOOT,
                        &navigation_ops, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_PRESSED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_RELEASED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_SHORT_CLICKED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_SINGLE_CLICKED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_DOUBLE_CLICKED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_TRIPLE_CLICKED, NULL);
+    lv_indev_add_event_cb(touch_indev, main_page_swipe_event_cb,
+                          LV_EVENT_CLICKED, NULL);
 
     s_ui.boot = np_boot_build(screen);
     s_ui.feedback = np_feedback_create(screen);

@@ -16,6 +16,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
@@ -33,6 +34,7 @@
 #include "offline_data_codec.h"
 #include "offline_data_provider.h"
 #include "time_service.h"
+#include "np_ewelink.h"
 #include "weather_condition.h"
 #include "update_admission.h"
 #include "update_journal.h"
@@ -58,6 +60,7 @@
 /* The Home sparkline is a short-term trend. A gap larger than this resets the
  * local series so disconnected periods are never joined by a misleading line. */
 #define NP2_MARKET_HISTORY_MAX_GAP_S UINT32_C(300)
+#define NP2_MARKET_CONTROL_PROBE_COOLDOWN_US (10LL * 60LL * 1000LL * 1000LL)
 
 static const char *const TAG = "np2_netcheck";
 static const char *const NP2_HTTPS_URL = "https://example.com/";
@@ -111,6 +114,8 @@ static uint8_t s_update_stream_chunk[UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES];
  * projected copy, received through the bounded EventBus. */
 static offline_data_snapshot_t s_product_snapshot;
 static bool s_product_snapshot_initialized;
+/* Owned exclusively by the HTTPS worker; retain newest data on bus saturation. */
+static bool s_product_delivery_pending;
 static int64_t s_last_product_cache_write_us;
 /* Owned by the sole HTTPS worker; kept out of its 8 KiB task stack. */
 static uint8_t s_product_body[NP2_PROVIDER_MAX_BODY_BYTES];
@@ -278,7 +283,26 @@ static esp_err_t perform_https_request_with_header(
         return ESP_ERR_INVALID_SIZE;
     }
 
+    /* Never log the URL or headers: OTA URLs may contain private query data. */
+    const char *provider = "diagnostic-or-update";
+    if (url == NP2_COINGECKO_BITCOIN_URL) provider = "coingecko";
+    else if (url == NP2_OPEN_METEO_BRASILIA_URL) provider = "open-meteo";
+    else if (url == NP2_BCB_USD_BRL_URL) provider = "bcb";
+    else if (url == NP2_ALTERNATIVE_ME_FEAR_GREED_URL) provider = "alternative-me";
+    else if (url == NP2_HTTPS_URL) provider = "control";
+    else {
+        for (size_t index = 0U; index < sizeof(NP2_BRAPI_MARKET_INDEX_URLS) /
+                                           sizeof(NP2_BRAPI_MARKET_INDEX_URLS[0]); ++index) {
+            if (url == NP2_BRAPI_MARKET_INDEX_URLS[index]) provider = "brapi";
+        }
+    }
     const int64_t start_us = esp_timer_get_time();
+    const size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t internal_largest =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "HTTPS begin provider=%s budget=%lums internal_free=%u largest=%u",
+             provider, (unsigned long)timeout_ms, (unsigned int)internal_free,
+             (unsigned int)internal_largest);
     const esp_http_client_config_t config = {
         .url = url,
         .method = method,
@@ -296,9 +320,11 @@ static esp_err_t perform_https_request_with_header(
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
+        ESP_LOGW(TAG, "HTTPS complete provider=%s phase=init result=ESP_ERR_NO_MEM", provider);
         return ESP_ERR_NO_MEM;
     }
 
+    const char *phase = "configure";
     esp_err_t result = ESP_OK;
     if (header_name != NULL) {
         result = esp_http_client_set_header(client, header_name, header_value);
@@ -307,6 +333,7 @@ static esp_err_t perform_https_request_with_header(
         result = set_client_budget(client, start_us, timeout_ms, NP2_HTTPS_TIMEOUT_MS);
     }
     if (result == ESP_OK) {
+        phase = "connect-tls";
         result = esp_http_client_open(client, 0);
     }
 
@@ -315,6 +342,7 @@ static esp_err_t perform_https_request_with_header(
         result = set_client_budget(client, start_us, timeout_ms, NP2_HTTPS_TIMEOUT_MS);
     }
     if (result == ESP_OK) {
+        phase = "headers";
         content_length = esp_http_client_fetch_headers(client);
         if (content_length < 0) {
             result = content_length == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_TIMEOUT
@@ -335,6 +363,7 @@ static esp_err_t perform_https_request_with_header(
     size_t received_bytes = 0U;
     uint8_t read_buffer[256];
     while (result == ESP_OK && method != HTTP_METHOD_HEAD) {
+        phase = "body";
         result = set_client_budget(client, start_us, timeout_ms,
                                    NP2_HTTPS_READ_TIMEOUT_MS);
         if (result != ESP_OK) {
@@ -376,6 +405,21 @@ static esp_err_t perform_https_request_with_header(
         result = ESP_ERR_HTTP_INCOMPLETE_DATA;
     }
 
+    /* Capture transport details before close/cleanup discards the error handle. */
+    int tls_code = 0;
+    int tls_flags = 0;
+    const esp_err_t tls_result =
+        esp_http_client_get_and_clear_last_tls_error(client, &tls_code, &tls_flags);
+    const int socket_errno = esp_http_client_get_errno(client);
+    const esp_err_t final_result = result != ESP_OK ? result
+                                  : (status_code >= 200 && status_code < 300 ? ESP_OK : ESP_FAIL);
+    ESP_LOGI(TAG, "HTTPS complete provider=%s phase=%s result=%s status=%d bytes=%u "
+                 "tls=0x%x code=%d flags=0x%x errno=%d duration=%lums internal_free=%u largest=%u",
+             provider, phase, esp_err_to_name(final_result), status_code, (unsigned int)received_bytes,
+             (unsigned int)tls_result, tls_code, (unsigned int)tls_flags, socket_errno,
+             (unsigned long)elapsed_ms_since(start_us),
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     (void)esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
@@ -693,8 +737,19 @@ static void ensure_product_snapshot(void)
 
 static void publish_product_snapshot(void)
 {
-    if (!offline_data_snapshot_is_valid(&s_product_snapshot)) return;
+    if (!offline_data_snapshot_is_valid(&s_product_snapshot)) {
+        s_product_delivery_pending = false;
+        ESP_LOGW(TAG, "product-data delivery rejected: invalid snapshot");
+        return;
+    }
     const esp_err_t event_result = app_event_bus_post_product_data(&s_product_snapshot);
+    s_product_delivery_pending = event_result != ESP_OK;
+    ESP_LOGI(TAG, "product-data delivery result=%s market_stale=%u weather_stale=%u "
+                 "exchange_stale=%u index_stale=%u",
+             esp_err_to_name(event_result), (unsigned int)s_product_snapshot.market.stale,
+             (unsigned int)s_product_snapshot.weather.stale,
+             (unsigned int)s_product_snapshot.exchange.stale,
+             (unsigned int)s_product_snapshot.ibovespa.stale);
     if (event_result != ESP_OK) {
         ESP_LOGW(TAG, "product-data event deferred: %s", esp_err_to_name(event_result));
     }
@@ -710,6 +765,15 @@ static void publish_product_snapshot(void)
         s_last_product_cache_write_us = now_us;
     } else if (persist_result != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "product-data cache deferred: %s", esp_err_to_name(persist_result));
+    }
+}
+
+static void retry_pending_product_delivery(void)
+{
+    if (!s_product_delivery_pending) return;
+    if (app_event_bus_post_product_data(&s_product_snapshot) == ESP_OK) {
+        s_product_delivery_pending = false;
+        ESP_LOGI(TAG, "product-data deferred delivery completed");
     }
 }
 
@@ -764,6 +828,20 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
         } else {
             retain_market_as_stale(&s_product_snapshot);
             retain_market_overview_as_stale(&s_product_snapshot);
+            /* A bounded, read-only control separates provider failure from loss
+             * of all external TLS. Keep the original market result and cadence.
+             * The previous client has already been destroyed; no overlap. */
+            static int64_t next_control_probe_us;
+            const int64_t probe_now_us = esp_timer_get_time();
+            const uint32_t probe_budget_ms = remaining_request_budget_ms(request_start_us);
+            if ((result == ESP_ERR_HTTP_CONNECT || result == ESP_ERR_TIMEOUT) &&
+                probe_now_us >= next_control_probe_us && probe_budget_ms >= 2000U) {
+                next_control_probe_us = probe_now_us + NP2_MARKET_CONTROL_PROBE_COOLDOWN_US;
+                const esp_err_t control_result = validate_https(
+                    NP2_HTTPS_URL, probe_budget_ms, HTTP_METHOD_HEAD, 0U);
+                ESP_LOGI(TAG, "market failure control=%s market=%s",
+                         esp_err_to_name(control_result), esp_err_to_name(result));
+            }
         }
         break;
     }
@@ -1029,6 +1107,7 @@ static void network_validation_task(void *arg)
     data_refresh_scheduler_init(&scheduler);
     bool station_was_online = false;
     for (;;) {
+        retry_pending_product_delivery();
         bool request_pending = false;
         bool scheduled_product_refresh = false;
         data_refresh_domain_t scheduled_domain = DATA_REFRESH_DOMAIN_COUNT;
@@ -1100,6 +1179,10 @@ static void network_validation_task(void *arg)
                 https_result = preflight_p4_update(start_us);
             } else if (mode == NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY) {
                 https_result = apply_p4_update(start_us);
+            } else if (mode == NETWORK_VALIDATION_MODE_EWELINK_SYNC) {
+                https_result = np_ewelink_service_process_sync();
+                ESP_LOGI(TAG, "eWeLink sync task stack minimum free=%u bytes",
+                         (unsigned int)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
             } else {
                 https_result = validate_https(mode == NETWORK_VALIDATION_MODE_TLS_REJECT
                                                   ? NP2_TLS_REJECT_URL
@@ -1121,6 +1204,7 @@ static void network_validation_task(void *arg)
 
         const uint32_t duration_ms = elapsed_ms_since(start_us);
         if (mode != NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY &&
+            mode != NETWORK_VALIDATION_MODE_EWELINK_SYNC &&
             duration_ms > NP2_REQUEST_TOTAL_TIMEOUT_MS) {
             https_result = ESP_ERR_TIMEOUT;
         }
@@ -1199,6 +1283,23 @@ esp_err_t network_validation_service_request_check(network_validation_mode_t mod
 esp_err_t network_validation_service_request_offline_data_refresh(void)
 {
     return network_validation_service_request_check(NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH);
+}
+
+esp_err_t network_validation_service_request_ewelink_sync(void)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    if (!s_started || !connectivity.online) return ESP_ERR_INVALID_STATE;
+    taskENTER_CRITICAL(&s_status_lock);
+    if (s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_EWELINK_SYNC;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
 }
 
 esp_err_t network_validation_service_request_p4_update_preflight(

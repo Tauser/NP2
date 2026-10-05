@@ -10,6 +10,7 @@
 #include "update_journal.h"
 #include "device_control_profile.h"
 #include "user_profile.h"
+#include "np_ewelink.h"
 
 #define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES 64U
 #define FLASH_COORDINATOR_BRAPI_API_KEY_BYTES 128U
@@ -89,6 +90,11 @@ typedef struct {
     esp_err_t user_profile_result;
     uint32_t user_profile_completed_sequence;
     esp_err_t user_profile_last_write_result;
+    bool ewelink_inventory_valid;
+    uint32_t ewelink_inventory_generation;
+    esp_err_t ewelink_inventory_result;
+    uint32_t ewelink_inventory_completed_sequence;
+    esp_err_t ewelink_inventory_last_write_result;
     /* Credential-vault presence only. Credential data is never exposed here. */
     bool credential_vault_valid;
     uint32_t credential_vault_generation;
@@ -172,6 +178,14 @@ esp_err_t flash_coordinator_request_device_control_profile_write(
     const device_control_profile_t *profile, uint32_t *out_sequence);
 esp_err_t flash_coordinator_request_user_profile_write(
     const user_profile_t *profile, uint32_t *out_sequence);
+
+/* Device keys and eWeLink metadata are persisted only through this owner.
+ * The status exposes validity/generation only, never inventory contents. */
+esp_err_t flash_coordinator_request_ewelink_inventory_write(
+    const np_ewelink_inventory_t *inventory, uint32_t *out_sequence);
+esp_err_t flash_coordinator_get_ewelink_inventory_write_result(
+    uint32_t sequence, bool *out_completed, esp_err_t *out_result);
+esp_err_t flash_coordinator_copy_ewelink_inventory(np_ewelink_inventory_t *out_inventory);
 
 /*
  * Credential-vault storage. Production requires NVS Encryption and active

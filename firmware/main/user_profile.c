@@ -4,7 +4,15 @@
 
 bool user_profile_is_valid(const user_profile_t *profile)
 {
-    if (profile == NULL || profile->avatar_color >= USER_PROFILE_COLOR_COUNT) return false;
+    if (profile == NULL || profile->avatar_color >= USER_PROFILE_COLOR_COUNT ||
+        profile->initial_screen >= USER_PROFILE_START_SCREEN_COUNT) return false;
+    /* A startup-page preference may be saved before the user enters a name. */
+    if (profile->name[0] == '\0') {
+        for (size_t i = 1U; i < USER_PROFILE_NAME_BYTES; ++i) {
+            if (profile->name[i] != '\0') return false;
+        }
+        return true;
+    }
     bool has_letter = false;
     size_t length = 0U;
     for (; length < USER_PROFILE_NAME_BYTES && profile->name[length] != '\0'; ++length) {

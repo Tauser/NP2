@@ -14,6 +14,7 @@
 #include "onboarding_service.h"
 #include "system_restart_policy.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 
 #include "cache_record.h"
 #include "offline_data_codec.h"
@@ -112,6 +113,9 @@ static const char *const DEVICE_CONTROL_SLOT_ONE_KEY = "ctl1";
 static const char *const USER_PROFILE_NAMESPACE = "np2_profile";
 static const char *const USER_PROFILE_SLOT_ZERO_KEY = "usr0";
 static const char *const USER_PROFILE_SLOT_ONE_KEY = "usr1";
+static const char *const EWELINK_NAMESPACE = "np2_ewelink";
+static const char *const EWELINK_SLOT_ZERO_KEY = "ewl0";
+static const char *const EWELINK_SLOT_ONE_KEY = "ewl1";
 static const char *const CREDENTIAL_VAULT_NAMESPACE = "np2_credentials";
 static const char *const CREDENTIAL_VAULT_SLOT_ZERO_KEY = "cred0";
 static const char *const CREDENTIAL_VAULT_SLOT_ONE_KEY = "cred1";
@@ -130,6 +134,44 @@ typedef struct {
     uint32_t value;
 } config_record_t;
 
+/* Keep NVS limited to the durable LAN inventory. Cloud params are transient
+ * import data and are not needed to control the devices after reboot. */
+typedef struct {
+    char device_id[NP_EWELINK_DEVICE_ID_BYTES];
+    char device_key[NP_EWELINK_DEVICE_KEY_BYTES];
+    char api_key[NP_EWELINK_API_KEY_BYTES];
+    char name[48];
+    char brand_name[32];
+    char product_model[24];
+    char internal_model[32];
+    char sta_mac[24];
+    int32_t uiid;
+    bool online;
+    bool present_last_sync;
+    np_ewelink_model_t model;
+    uint8_t channel_count;
+    char channel_names[NP_EWELINK_MAX_CHANNELS][32];
+    uint8_t local_settings[NP_EWELINK_LOCAL_SETTINGS_BYTES];
+} ewelink_persisted_device_t;
+
+typedef struct {
+    uint8_t count;
+    ewelink_persisted_device_t devices[NP_EWELINK_MAX_DEVICES];
+} ewelink_persisted_inventory_t;
+
+typedef struct {
+    cache_record_header_t header;
+    ewelink_persisted_inventory_t inventory;
+} ewelink_inventory_record_t;
+
+typedef struct {
+    np_ewelink_inventory_t inventory;
+    np_ewelink_inventory_t request;
+    ewelink_inventory_record_t scratch_a;
+    ewelink_inventory_record_t scratch_b;
+    ewelink_inventory_record_t scratch_write;
+} ewelink_inventory_workspace_t;
+
 typedef struct {
     char ssid[FLASH_COORDINATOR_WIFI_SSID_BYTES];
     char password[FLASH_COORDINATOR_WIFI_PASSWORD_BYTES];
@@ -140,6 +182,7 @@ typedef enum {
     FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE,
     FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE,
     FLASH_REQUEST_USER_PROFILE_WRITE,
+    FLASH_REQUEST_EWELINK_INVENTORY_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_WRITE,
     FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR,
     FLASH_REQUEST_NVS_PROBE,
@@ -192,6 +235,13 @@ typedef struct {
 static QueueHandle_t s_request_queue;
 static flash_request_t s_p4_ota_request;
 static SemaphoreHandle_t s_p4_ota_submission_lock;
+static SemaphoreHandle_t s_ewelink_inventory_lock;
+static ewelink_inventory_workspace_t *s_ewelink_workspace;
+#define s_ewelink_inventory (s_ewelink_workspace->inventory)
+#define s_ewelink_inventory_request (s_ewelink_workspace->request)
+#define s_ewelink_record_scratch_a (s_ewelink_workspace->scratch_a)
+#define s_ewelink_record_scratch_b (s_ewelink_workspace->scratch_b)
+#define s_ewelink_record_scratch_write (s_ewelink_workspace->scratch_write)
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static flash_coordinator_status_t s_status;
 static int64_t s_last_success_us;
@@ -205,6 +255,7 @@ static void refresh_update_journal_status(void);
 static void refresh_onboarding_profile_status(void);
 static void refresh_notification_profile_status(void);
 static void refresh_user_profile_status(void);
+static void refresh_ewelink_inventory_status(void);
 static void refresh_credential_vault_status(void);
 
 static void secure_zero(void *buffer, size_t length)
@@ -1269,20 +1320,60 @@ typedef struct {
     user_profile_t profile;
 } user_profile_record_t;
 
+/* Records written before startup-screen selection contained only these two
+ * fields. Keep their decoder so existing names and avatars survive upgrade. */
+typedef struct {
+    char name[USER_PROFILE_NAME_BYTES];
+    uint8_t avatar_color;
+} user_profile_legacy_t;
+
+typedef struct {
+    cache_record_header_t header;
+    user_profile_legacy_t profile;
+} user_profile_legacy_record_t;
+
+_Static_assert(sizeof(user_profile_legacy_t) == 50U,
+               "Legacy profile payload layout changed");
+
 static esp_err_t read_user_profile_slot(const char *key, user_profile_record_t *out_record)
 {
     nvs_handle_t handle;
     esp_err_t result = nvs_open_from_partition(NVS_PARTITION, USER_PROFILE_NAMESPACE,
                                                NVS_READONLY, &handle);
     if (result != ESP_OK) return result;
-    user_profile_record_t record = {0};
-    size_t size = sizeof(record);
-    result = nvs_get_blob(handle, key, &record, &size);
+    uint8_t encoded[sizeof(user_profile_record_t)] = {0};
+    size_t size = sizeof(encoded);
+    result = nvs_get_blob(handle, key, encoded, &size);
     nvs_close(handle);
     if (result != ESP_OK) return result;
-    if (size != sizeof(record) ||
+    if (size != sizeof(user_profile_record_t) &&
+        size != sizeof(user_profile_legacy_record_t)) return ESP_ERR_INVALID_CRC;
+
+    cache_record_header_t header = {0};
+    memcpy(&header, encoded, sizeof(header));
+    if (header.payload_size == sizeof(user_profile_legacy_t)) {
+        user_profile_legacy_record_t legacy = {0};
+        memcpy(&legacy, encoded, sizeof(legacy));
+        if (!cache_record_header_is_valid(&legacy.header,
+                                         sizeof(legacy.profile)) ||
+            legacy.header.payload_crc32 != cache_record_crc32(
+                (const uint8_t *)&legacy.profile, sizeof(legacy.profile))) {
+            return ESP_ERR_INVALID_CRC;
+        }
+        user_profile_record_t migrated = {.header = legacy.header};
+        memcpy(migrated.profile.name, legacy.profile.name,
+               sizeof(legacy.profile.name));
+        migrated.profile.avatar_color = legacy.profile.avatar_color;
+        migrated.profile.initial_screen = USER_PROFILE_START_HOME;
+        if (!user_profile_is_valid(&migrated.profile)) return ESP_ERR_INVALID_CRC;
+        if (out_record != NULL) *out_record = migrated;
+        return ESP_OK;
+    }
+
+    user_profile_record_t record = {0};
+    memcpy(&record, encoded, sizeof(record));
+    if (header.payload_size != sizeof(record.profile) ||
         !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
-        record.header.payload_size != sizeof(record.profile) ||
         record.header.payload_crc32 != cache_record_crc32(
             (const uint8_t *)&record.profile, sizeof(record.profile)) ||
         !user_profile_is_valid(&record.profile)) return ESP_ERR_INVALID_CRC;
@@ -1351,6 +1442,178 @@ static esp_err_t write_user_profile(const user_profile_t *profile)
         result = select_latest_user_profile(&selected);
         if (result == ESP_OK && selected.header.generation != generation) result = ESP_FAIL;
     }
+    return result;
+}
+
+static void ewelink_inventory_to_persisted(const np_ewelink_inventory_t *source,
+                                          ewelink_persisted_inventory_t *target)
+{
+    memset(target, 0, sizeof(*target));
+    target->count = source->count;
+    for (uint8_t i = 0U; i < source->count && i < NP_EWELINK_MAX_DEVICES; ++i) {
+        const np_ewelink_device_t *const from = &source->devices[i];
+        ewelink_persisted_device_t *const to = &target->devices[i];
+        memcpy(to->device_id, from->device_id, sizeof(to->device_id));
+        memcpy(to->device_key, from->device_key, sizeof(to->device_key));
+        memcpy(to->api_key, from->api_key, sizeof(to->api_key));
+        memcpy(to->name, from->name, sizeof(to->name));
+        memcpy(to->brand_name, from->brand_name, sizeof(to->brand_name));
+        memcpy(to->product_model, from->product_model, sizeof(to->product_model));
+        memcpy(to->internal_model, from->internal_model, sizeof(to->internal_model));
+        memcpy(to->sta_mac, from->sta_mac, sizeof(to->sta_mac));
+        to->uiid = from->uiid;
+        to->online = from->online;
+        to->present_last_sync = from->present_last_sync;
+        to->model = from->model;
+        to->channel_count = from->channel_count;
+        memcpy(to->channel_names, from->channel_names, sizeof(to->channel_names));
+        memcpy(to->local_settings, from->local_settings, sizeof(to->local_settings));
+    }
+}
+
+static void ewelink_inventory_from_persisted(const ewelink_persisted_inventory_t *source,
+                                            np_ewelink_inventory_t *target)
+{
+    memset(target, 0, sizeof(*target));
+    target->count = source->count;
+    for (uint8_t i = 0U; i < source->count && i < NP_EWELINK_MAX_DEVICES; ++i) {
+        const ewelink_persisted_device_t *const from = &source->devices[i];
+        np_ewelink_device_t *const to = &target->devices[i];
+        memcpy(to->device_id, from->device_id, sizeof(to->device_id));
+        memcpy(to->device_key, from->device_key, sizeof(to->device_key));
+        memcpy(to->api_key, from->api_key, sizeof(to->api_key));
+        memcpy(to->name, from->name, sizeof(to->name));
+        memcpy(to->brand_name, from->brand_name, sizeof(to->brand_name));
+        memcpy(to->product_model, from->product_model, sizeof(to->product_model));
+        memcpy(to->internal_model, from->internal_model, sizeof(to->internal_model));
+        memcpy(to->sta_mac, from->sta_mac, sizeof(to->sta_mac));
+        to->uiid = from->uiid;
+        to->online = from->online;
+        to->present_last_sync = from->present_last_sync;
+        to->model = from->model;
+        to->channel_count = from->channel_count;
+        memcpy(to->channel_names, from->channel_names, sizeof(to->channel_names));
+        memcpy(to->local_settings, from->local_settings, sizeof(to->local_settings));
+    }
+}
+
+static bool ewelink_persisted_inventory_is_valid(const ewelink_persisted_inventory_t *inventory)
+{
+    if (inventory == NULL || inventory->count > NP_EWELINK_MAX_DEVICES) return false;
+    for (uint8_t index = 0U; index < inventory->count; ++index) {
+        const ewelink_persisted_device_t *const device = &inventory->devices[index];
+        if (device->device_id[0] == '\0' ||
+            bounded_length(device->device_id, sizeof(device->device_id)) >= sizeof(device->device_id) ||
+            bounded_length(device->device_key, sizeof(device->device_key)) >= sizeof(device->device_key) ||
+            bounded_length(device->api_key, sizeof(device->api_key)) >= sizeof(device->api_key) ||
+            device->channel_count > NP_EWELINK_MAX_CHANNELS) return false;
+    }
+    return true;
+}
+
+static esp_err_t read_ewelink_inventory_slot(const char *key,
+                                             ewelink_inventory_record_t *out_record)
+{
+    if (out_record == NULL) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, EWELINK_NAMESPACE,
+                                               NVS_READONLY, &handle);
+    if (result != ESP_OK) return result;
+    memset(out_record, 0, sizeof(*out_record));
+    size_t size = sizeof(*out_record);
+    result = nvs_get_blob(handle, key, out_record, &size);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    if (size != sizeof(*out_record) ||
+        !cache_record_header_is_valid(&out_record->header, sizeof(out_record->inventory)) ||
+        out_record->header.payload_crc32 != cache_record_crc32(
+            (const uint8_t *)&out_record->inventory, sizeof(out_record->inventory)) ||
+        !ewelink_persisted_inventory_is_valid(&out_record->inventory)) {
+        secure_zero(out_record, sizeof(*out_record));
+        return ESP_ERR_INVALID_CRC;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t select_latest_ewelink_inventory(ewelink_inventory_record_t *out_record)
+{
+    ewelink_inventory_record_t *const first = &s_ewelink_record_scratch_a;
+    ewelink_inventory_record_t *const second = &s_ewelink_record_scratch_b;
+    const esp_err_t a = read_ewelink_inventory_slot(EWELINK_SLOT_ZERO_KEY, first);
+    const esp_err_t b = read_ewelink_inventory_slot(EWELINK_SLOT_ONE_KEY, second);
+    if (a != ESP_OK && b != ESP_OK)
+        return a == ESP_ERR_NVS_NOT_FOUND && b == ESP_ERR_NVS_NOT_FOUND
+                   ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_CRC;
+    if (out_record != NULL)
+        *out_record = b == ESP_OK && (a != ESP_OK || second->header.generation > first->header.generation)
+                          ? *second : *first;
+    return ESP_OK;
+}
+
+static void refresh_ewelink_inventory_status(void)
+{
+    ewelink_inventory_record_t *const selected = &s_ewelink_record_scratch_write;
+    memset(selected, 0, sizeof(*selected));
+    const esp_err_t result = select_latest_ewelink_inventory(selected);
+    if (s_ewelink_inventory_lock != NULL && xSemaphoreTake(s_ewelink_inventory_lock,
+                                                             portMAX_DELAY) == pdTRUE) {
+        if (result == ESP_OK)
+            ewelink_inventory_from_persisted(&selected->inventory, &s_ewelink_inventory);
+        else memset(&s_ewelink_inventory, 0, sizeof(s_ewelink_inventory));
+        xSemaphoreGive(s_ewelink_inventory_lock);
+    }
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.ewelink_inventory_result = result;
+    s_status.ewelink_inventory_valid = result == ESP_OK;
+    s_status.ewelink_inventory_generation = result == ESP_OK
+                                                 ? selected->header.generation : 0U;
+    portEXIT_CRITICAL(&s_status_lock);
+    secure_zero(selected, sizeof(*selected));
+}
+
+static esp_err_t write_ewelink_inventory(const np_ewelink_inventory_t *inventory)
+{
+    if (inventory == NULL || inventory->count > NP_EWELINK_MAX_DEVICES) return ESP_ERR_INVALID_ARG;
+    ewelink_inventory_record_t *const latest = &s_ewelink_record_scratch_a;
+    ewelink_inventory_record_t *const record = &s_ewelink_record_scratch_write;
+    memset(latest, 0, sizeof(*latest));
+    memset(record, 0, sizeof(*record));
+    const esp_err_t latest_result = select_latest_ewelink_inventory(latest);
+    if (latest_result == ESP_OK && latest->header.generation == UINT32_MAX)
+        return ESP_ERR_INVALID_STATE;
+    const uint32_t generation = latest_result == ESP_OK ? latest->header.generation + 1U : 1U;
+    *record = (ewelink_inventory_record_t){
+        .header = {.magic = NP2_CACHE_RECORD_MAGIC,
+                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .header_size = sizeof(cache_record_header_t),
+                   .generation = generation,
+                   .payload_size = sizeof(ewelink_persisted_inventory_t)},
+    };
+    ewelink_inventory_to_persisted(inventory, &record->inventory);
+    if (!ewelink_persisted_inventory_is_valid(&record->inventory)) {
+        secure_zero(record, sizeof(*record));
+        return ESP_ERR_INVALID_ARG;
+    }
+    record->header.payload_crc32 = cache_record_crc32((const uint8_t *)&record->inventory,
+                                                      sizeof(record->inventory));
+    record->header.header_crc32 = cache_record_crc32((const uint8_t *)&record->header,
+                                                    offsetof(cache_record_header_t, header_crc32));
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open_from_partition(NVS_PARTITION, EWELINK_NAMESPACE,
+                                                NVS_READWRITE, &handle), TAG,
+                        "eWeLink inventory open failed");
+    const char *const target = (generation & 1U) == 0U
+                                   ? EWELINK_SLOT_ZERO_KEY : EWELINK_SLOT_ONE_KEY;
+    esp_err_t result = nvs_set_blob(handle, target, record, sizeof(*record));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result == ESP_OK) {
+        refresh_ewelink_inventory_status();
+        result = select_latest_ewelink_inventory(latest);
+        if (result == ESP_OK && latest->header.generation != generation) result = ESP_FAIL;
+    }
+    secure_zero(record, sizeof(*record));
+    secure_zero(latest, sizeof(*latest));
     return result;
 }
 
@@ -2016,6 +2279,7 @@ static void flash_worker_task(void *arg)
     refresh_notification_profile_status();
     refresh_device_control_profile_status();
     refresh_user_profile_status();
+    refresh_ewelink_inventory_status();
     refresh_credential_vault_status();
     refresh_update_journal_status();
     if (littlefs_init_result != ESP_OK) {
@@ -2060,6 +2324,9 @@ static void flash_worker_task(void *arg)
             break;
         case FLASH_REQUEST_USER_PROFILE_WRITE:
             result = write_user_profile(&request.user_profile);
+            break;
+        case FLASH_REQUEST_EWELINK_INVENTORY_WRITE:
+            result = write_ewelink_inventory(&s_ewelink_inventory_request);
             break;
         case FLASH_REQUEST_CREDENTIAL_VAULT_WRITE:
             result = write_credential_vault(&request.credential_vault);
@@ -2153,6 +2420,9 @@ static void flash_worker_task(void *arg)
                          (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_USER_PROFILE_WRITE) {
                 ESP_LOGI(TAG, "local profile saved in %lums", (unsigned long)duration_ms);
+            } else if (request.kind == FLASH_REQUEST_EWELINK_INVENTORY_WRITE) {
+                ESP_LOGI(TAG, "eWeLink inventory saved in %lums",
+                         (unsigned long)duration_ms);
             } else if (request.kind == FLASH_REQUEST_CREDENTIAL_VAULT_WRITE) {
                 ESP_LOGI(TAG, "credential vault credentials saved in %lums",
                          (unsigned long)duration_ms);
@@ -2196,6 +2466,7 @@ static void flash_worker_task(void *arg)
                        request.kind != FLASH_REQUEST_NOTIFICATION_PROFILE_WRITE &&
                        request.kind != FLASH_REQUEST_DEVICE_CONTROL_PROFILE_WRITE &&
                        request.kind != FLASH_REQUEST_USER_PROFILE_WRITE &&
+                       request.kind != FLASH_REQUEST_EWELINK_INVENTORY_WRITE &&
                        request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_WRITE &&
                        request.kind != FLASH_REQUEST_CREDENTIAL_VAULT_CLEAR) {
                 ESP_LOGI(TAG,
@@ -2228,6 +2499,13 @@ static void flash_worker_task(void *arg)
             s_status.user_profile_last_write_result = result;
             portEXIT_CRITICAL(&s_status_lock);
         }
+        if (request.kind == FLASH_REQUEST_EWELINK_INVENTORY_WRITE) {
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.ewelink_inventory_completed_sequence = request.sequence;
+            s_status.ewelink_inventory_last_write_result = result;
+            portEXIT_CRITICAL(&s_status_lock);
+            secure_zero(&s_ewelink_inventory_request, sizeof(s_ewelink_inventory_request));
+        }
         complete_request(request.sequence, result, duration_ms, batch_writes,
                          free_entries_before, free_entries_after, littlefs_writes,
                          littlefs_verified_bytes, littlefs_format,
@@ -2241,8 +2519,20 @@ esp_err_t flash_coordinator_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* The device inventory and transactional NVS scratch buffers are small
+     * metadata, not DMA/render data. Keep them in PSRAM so the permanent
+     * eWeLink feature does not consume internal DMA heap at boot. */
+    s_ewelink_workspace = heap_caps_calloc(1U, sizeof(*s_ewelink_workspace),
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_RETURN_ON_FALSE(s_ewelink_workspace != NULL, ESP_ERR_NO_MEM, TAG,
+                        "eWeLink storage workspace allocation failed");
+
     s_request_queue = xQueueCreate(FLASH_COORDINATOR_QUEUE_LENGTH, sizeof(flash_request_t));
-    ESP_RETURN_ON_FALSE(s_request_queue != NULL, ESP_ERR_NO_MEM, TAG, "Flash queue allocation failed");
+    if (s_request_queue == NULL) {
+        heap_caps_free(s_ewelink_workspace);
+        s_ewelink_workspace = NULL;
+        return ESP_ERR_NO_MEM;
+    }
 
     portENTER_CRITICAL(&s_status_lock);
     s_status.init_result = ESP_ERR_INVALID_STATE;
@@ -2252,16 +2542,34 @@ esp_err_t flash_coordinator_start(void)
 
     s_p4_ota_submission_lock = xSemaphoreCreateMutex();
     if (s_p4_ota_submission_lock == NULL) {
+        vQueueDelete(s_request_queue);
+        s_request_queue = NULL;
+        heap_caps_free(s_ewelink_workspace);
+        s_ewelink_workspace = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    s_ewelink_inventory_lock = xSemaphoreCreateMutex();
+    if (s_ewelink_inventory_lock == NULL) {
+        vSemaphoreDelete(s_p4_ota_submission_lock);
+        s_p4_ota_submission_lock = NULL;
+        vQueueDelete(s_request_queue);
+        s_request_queue = NULL;
+        heap_caps_free(s_ewelink_workspace);
+        s_ewelink_workspace = NULL;
         return ESP_ERR_NO_MEM;
     }
     const BaseType_t task_created = xTaskCreate(flash_worker_task, "flash_worker",
                                                  FLASH_COORDINATOR_TASK_STACK_BYTES, NULL,
                                                  FLASH_COORDINATOR_TASK_PRIORITY, NULL);
     if (task_created != pdPASS) {
+        vSemaphoreDelete(s_ewelink_inventory_lock);
+        s_ewelink_inventory_lock = NULL;
         vSemaphoreDelete(s_p4_ota_submission_lock);
         s_p4_ota_submission_lock = NULL;
         vQueueDelete(s_request_queue);
         s_request_queue = NULL;
+        heap_caps_free(s_ewelink_workspace);
+        s_ewelink_workspace = NULL;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -2541,6 +2849,77 @@ esp_err_t flash_coordinator_request_user_profile_write(
     if (out_sequence != NULL) *out_sequence = s_p4_ota_request.sequence;
     set_busy(false, true);
     xSemaphoreGive(s_p4_ota_submission_lock);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_request_ewelink_inventory_write(
+    const np_ewelink_inventory_t *inventory, uint32_t *out_sequence)
+{
+    if (inventory == NULL || inventory->count > NP_EWELINK_MAX_DEVICES ||
+        s_request_queue == NULL ||
+        s_p4_ota_submission_lock == NULL) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    bool ready;
+    bool busy;
+    bool pending;
+    uint32_t sequence;
+    portENTER_CRITICAL(&s_status_lock);
+    ready = s_status.ready;
+    busy = s_status.busy;
+    pending = s_status.pending;
+    sequence = s_status.last_sequence + 1U;
+    portEXIT_CRITICAL(&s_status_lock);
+    if (!ready || busy || pending) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_ewelink_inventory_request = *inventory;
+    /* The request envelope contains the 4 KiB OTA chunk. Keep it in the
+     * serialized shared buffer instead of consuming the caller's task stack. */
+    s_p4_ota_request = (flash_request_t){
+        .kind = FLASH_REQUEST_EWELINK_INVENTORY_WRITE,
+        .sequence = sequence,
+    };
+    if (xQueueSend(s_request_queue, &s_p4_ota_request, 0) != pdPASS) {
+        secure_zero(&s_ewelink_inventory_request, sizeof(s_ewelink_inventory_request));
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    if (out_sequence != NULL) *out_sequence = sequence;
+    set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return ESP_OK;
+}
+
+esp_err_t flash_coordinator_get_ewelink_inventory_write_result(
+    uint32_t sequence, bool *out_completed, esp_err_t *out_result)
+{
+    if (sequence == 0U || out_completed == NULL || out_result == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_completed = false;
+    *out_result = ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_status_lock);
+    if (s_status.ready && s_status.ewelink_inventory_completed_sequence == sequence) {
+        *out_completed = true;
+        *out_result = s_status.ewelink_inventory_last_write_result;
+    }
+    const bool ready = s_status.ready;
+    portEXIT_CRITICAL(&s_status_lock);
+    return ready ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t flash_coordinator_copy_ewelink_inventory(np_ewelink_inventory_t *out_inventory)
+{
+    if (out_inventory == NULL || s_ewelink_inventory_lock == NULL) return ESP_ERR_INVALID_ARG;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready) return ESP_ERR_INVALID_STATE;
+    if (!status.ewelink_inventory_valid) return status.ewelink_inventory_result;
+    if (xSemaphoreTake(s_ewelink_inventory_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    *out_inventory = s_ewelink_inventory;
+    xSemaphoreGive(s_ewelink_inventory_lock);
     return ESP_OK;
 }
 

@@ -24,6 +24,7 @@ typedef enum {
     NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH,
     NETWORK_VALIDATION_MODE_P4_UPDATE_PREFLIGHT,
     NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY,
+    NETWORK_VALIDATION_MODE_EWELINK_SYNC,
 } network_validation_mode_t;
 
 typedef struct {
@@ -52,6 +53,11 @@ esp_err_t network_validation_service_request_check(network_validation_mode_t mod
  * handshake or start a background polling loop.
  */
 esp_err_t network_validation_service_request_offline_data_refresh(void);
+
+/* Queues one explicit eWeLink inventory sync on this same single-flight HTTPS
+ * worker. Credentials remain owned by the eWeLink service and are consumed
+ * once by the worker. */
+esp_err_t network_validation_service_request_ewelink_sync(void);
 
 /* Development-only OTA preflight on the existing one-request HTTPS worker. */
 esp_err_t network_validation_service_request_p4_update_preflight(
