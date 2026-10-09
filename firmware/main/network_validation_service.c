@@ -59,7 +59,7 @@
 #define NP2_VALID_EPOCH_SECONDS 1735689600LL /* 2025-01-01 UTC */
 /* The Home sparkline is a short-term trend. A gap larger than this resets the
  * local series so disconnected periods are never joined by a misleading line. */
-#define NP2_MARKET_HISTORY_MAX_GAP_S UINT32_C(300)
+#define NP2_MARKET_HISTORY_MAX_GAP_S UINT32_C(2400)
 #define NP2_MARKET_CONTROL_PROBE_COOLDOWN_US (10LL * 60LL * 1000LL * 1000LL)
 
 static const char *const TAG = "np2_netcheck";
@@ -119,6 +119,9 @@ static bool s_product_delivery_pending;
 static int64_t s_last_product_cache_write_us;
 /* Owned by the sole HTTPS worker; kept out of its 8 KiB task stack. */
 static uint8_t s_product_body[NP2_PROVIDER_MAX_BODY_BYTES];
+/* Sole HTTPS worker owns both the budget and its monotonic admission timer. */
+static coingecko_quota_t s_coingecko_quota;
+static bool s_coingecko_quota_loaded;
 
 typedef struct {
     SemaphoreHandle_t done;
@@ -445,11 +448,56 @@ static esp_err_t perform_https_request(const char *url, uint32_t timeout_ms,
         out_body, out_body_size, out_body_length);
 }
 
+static esp_err_t admit_coingecko_request(void)
+{
+    time_service_status_t clock = {0};
+    time_service_get_status(&clock);
+    const time_t now = time(NULL);
+    struct tm utc = {0};
+    if (!clock.trusted || now < (time_t)NP2_VALID_EPOCH_SECONDS ||
+        (uint64_t)now > UINT32_MAX || gmtime_r(&now, &utc) == NULL)
+        return ESP_ERR_INVALID_STATE;
+    if (!s_coingecko_quota_loaded) {
+        coingecko_quota_record_t record = {0};
+        const esp_err_t loaded = flash_coordinator_get_coingecko_quota(&record);
+        if (loaded != ESP_OK && loaded != ESP_ERR_NOT_FOUND) return loaded;
+        if (!coingecko_quota_init(&s_coingecko_quota, loaded == ESP_OK ? &record : NULL))
+            return ESP_ERR_INVALID_STATE;
+        s_coingecko_quota_loaded = true;
+    }
+    const uint32_t month = (uint32_t)(utc.tm_year + 1900) * 100U + (uint32_t)utc.tm_mon + 1U;
+    coingecko_quota_record_t proposal = {0};
+    const coingecko_quota_result_t admission = coingecko_quota_prepare(
+        &s_coingecko_quota, month, (uint32_t)now, esp_timer_get_time(), &proposal);
+    if (admission == COINGECKO_QUOTA_WAIT || admission == COINGECKO_QUOTA_EXHAUSTED) {
+        ESP_LOGI(TAG, "CoinGecko deferred reason=%s month=%lu reserved=%lu/%u interval=%lus",
+                 admission == COINGECKO_QUOTA_WAIT ? "cadence" : "monthly-limit",
+                 (unsigned long)s_coingecko_quota.record.month,
+                 (unsigned long)s_coingecko_quota.record.reserved, COINGECKO_QUOTA_LIMIT,
+                 (unsigned long)coingecko_quota_interval_s(&s_coingecko_quota));
+        return ESP_ERR_NOT_FINISHED;
+    }
+    if (admission == COINGECKO_QUOTA_INVALID) return ESP_ERR_INVALID_STATE;
+    if (admission == COINGECKO_QUOTA_RESERVE) {
+        esp_err_t result = flash_coordinator_reserve_coingecko_quota(&proposal);
+        coingecko_quota_record_t verified = {0};
+        if (result == ESP_OK) result = flash_coordinator_get_coingecko_quota(&verified);
+        if (result != ESP_OK || memcmp(&proposal, &verified, sizeof(proposal)) != 0 ||
+            !coingecko_quota_commit(&s_coingecko_quota, &verified)) {
+            /* A timed-out write may still commit; reload and discard its block. */
+            s_coingecko_quota_loaded = false;
+            return result != ESP_OK ? result : ESP_ERR_INVALID_STATE;
+        }
+    }
+    return ESP_OK;
+}
+
 static esp_err_t perform_coingecko_request(const char *url, uint32_t timeout_ms,
                                            size_t maximum_body_bytes,
                                            uint8_t *out_body, size_t out_body_size,
                                            size_t *out_body_length)
 {
+    const int64_t started_us = esp_timer_get_time();
     char api_key[FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES] = {0};
     esp_err_t result =
         flash_coordinator_copy_coingecko_api_key(api_key, sizeof(api_key));
@@ -459,9 +507,20 @@ static esp_err_t perform_coingecko_request(const char *url, uint32_t timeout_ms,
         return result;
     }
 
-    result = perform_https_request_with_header(
-        url, timeout_ms, HTTP_METHOD_GET, "x-cg-demo-api-key", api_key,
-        maximum_body_bytes, out_body, out_body_size, out_body_length);
+    result = admit_coingecko_request();
+    const uint32_t remaining_ms = remaining_phase_budget_ms(started_us, timeout_ms);
+    if (result == ESP_OK && remaining_ms == 0U) result = ESP_ERR_INVALID_STATE;
+    if (result == ESP_OK && !coingecko_quota_note_attempt(&s_coingecko_quota, esp_timer_get_time()))
+        result = ESP_ERR_INVALID_STATE;
+    if (result == ESP_OK) {
+        ESP_LOGI(TAG, "CoinGecko admitted month=%lu reserved=%lu/%u interval=%lus",
+                 (unsigned long)s_coingecko_quota.record.month,
+                 (unsigned long)s_coingecko_quota.record.reserved, COINGECKO_QUOTA_LIMIT,
+                 (unsigned long)coingecko_quota_interval_s(&s_coingecko_quota));
+        result = perform_https_request_with_header(
+            url, remaining_ms, HTTP_METHOD_GET, "x-cg-demo-api-key", api_key,
+            maximum_body_bytes, out_body, out_body_size, out_body_length);
+    }
 
     secure_zero(api_key, sizeof(api_key));
     return result;
@@ -816,6 +875,8 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
             remaining_request_budget_ms(request_start_us),
             OFFLINE_MARKET_MAX_BODY_BYTES, body,
             NP2_PROVIDER_MAX_BODY_BYTES, &body_size);
+        /* A quota/cadence refusal is not a provider failure; keep freshness. */
+        if (result == ESP_ERR_NOT_FINISHED) return ESP_OK;
         offline_altcoin_data_t fresh_altcoins[OFFLINE_MARKET_ALTCOIN_COUNT] = {0};
         if (result == ESP_OK) result = provider_result_to_esp_err(
             offline_coingecko_parse_market_overview(body, body_size, (uint32_t)now,
@@ -1219,6 +1280,13 @@ static void network_validation_task(void *arg)
                 data_refresh_scheduler_note_result(&scheduler, (data_refresh_domain_t)index,
                                                    esp_timer_get_time(), success);
             }
+        }
+        if ((scheduled_product_refresh && scheduled_domain == DATA_REFRESH_DOMAIN_BITCOIN) ||
+            mode == NETWORK_VALIDATION_MODE_OFFLINE_DATA_REFRESH) {
+            const uint32_t interval_s = coingecko_quota_interval_s(
+                s_coingecko_quota_loaded ? &s_coingecko_quota : NULL);
+            scheduler.next_due_us[DATA_REFRESH_DOMAIN_BITCOIN] =
+                esp_timer_get_time() + (int64_t)interval_s * 1000000LL;
         }
         ESP_LOGI(TAG, "network work complete mode=%u domain=%u dns=%s ntp=%s https=%s duration=%lums",
                  (unsigned int)mode,

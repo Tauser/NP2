@@ -8,6 +8,7 @@
 #include "esp_partition.h"
 #include "offline_data_model.h"
 #include "update_journal.h"
+#include "coingecko_quota.h"
 #include "device_control_profile.h"
 #include "user_profile.h"
 #include "np_ewelink.h"
@@ -219,6 +220,10 @@ esp_err_t flash_coordinator_request_update_journal(const update_journal_record_t
 
 /* Reads the newest validated OTA journal through its storage owner. */
 esp_err_t flash_coordinator_get_update_journal(update_journal_record_t *out_record);
+
+/* Small NVS budget, committed and verified by the sole flash writer before HTTPS. */
+esp_err_t flash_coordinator_get_coingecko_quota(coingecko_quota_record_t *out_record);
+esp_err_t flash_coordinator_reserve_coingecko_quota(const coingecko_quota_record_t *record);
 
 /* Blocking only for the dedicated network executor; the coordinator task
  * remains the sole owner of esp_ota begin/write/end/select operations. */

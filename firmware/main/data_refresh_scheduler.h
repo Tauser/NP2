@@ -18,13 +18,13 @@ typedef struct {
     data_refresh_domain_t next_domain;
 } data_refresh_scheduler_t;
 
-/* Product policy: 60 s BTC, 2 h weather, daily PTAX, and daily market sentiment/indexes. */
-#define DATA_REFRESH_BITCOIN_INTERVAL_US (60LL * 1000LL * 1000LL)
+/* Product policy: 5 min BTC, 2 h weather, daily PTAX/sentiment/indexes. */
+#define DATA_REFRESH_BITCOIN_INTERVAL_US (5LL * 60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_WEATHER_INTERVAL_US (2LL * 60LL * 60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_USD_BRL_INTERVAL_US (24LL * 60LL * 60LL * 1000LL * 1000LL)
 
 /* Each domain retries independently; no retry starts a parallel request. */
-#define DATA_REFRESH_BITCOIN_RETRY_US (2LL * 60LL * 1000LL * 1000LL)
+#define DATA_REFRESH_BITCOIN_RETRY_US DATA_REFRESH_BITCOIN_INTERVAL_US
 #define DATA_REFRESH_WEATHER_RETRY_US (15LL * 60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_USD_BRL_RETRY_US (60LL * 60LL * 1000LL * 1000LL)
 #define DATA_REFRESH_FEAR_GREED_INTERVAL_US (24LL * 60LL * 60LL * 1000LL * 1000LL)

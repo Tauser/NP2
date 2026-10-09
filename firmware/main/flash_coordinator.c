@@ -197,6 +197,7 @@ typedef enum {
     FLASH_REQUEST_CONFIG_JOURNAL_WRITE,
     FLASH_REQUEST_CONFIG_CORRUPT_NEWEST,
     FLASH_REQUEST_UPDATE_JOURNAL_WRITE,
+    FLASH_REQUEST_COINGECKO_RESERVE,
     FLASH_REQUEST_P4_OTA_BEGIN,
     FLASH_REQUEST_P4_OTA_APPEND,
     FLASH_REQUEST_P4_OTA_FINISH,
@@ -1904,6 +1905,54 @@ static esp_err_t initialize_nvs(void)
     return nvs_flash_init();
 }
 
+esp_err_t flash_coordinator_get_coingecko_quota(coingecko_quota_record_t *out_record)
+{
+    if (out_record == NULL) return ESP_ERR_INVALID_ARG;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, "cg_quota", NVS_READONLY, &handle);
+    if (result == ESP_ERR_NVS_NOT_FOUND) return ESP_ERR_NOT_FOUND;
+    if (result != ESP_OK) return result;
+    coingecko_quota_record_t record = {0};
+    size_t size = sizeof(record);
+    result = nvs_get_blob(handle, "budget_v1", &record, &size);
+    nvs_close(handle);
+    if (result == ESP_ERR_NVS_NOT_FOUND) return ESP_ERR_NOT_FOUND;
+    if (result != ESP_OK) return result;
+    if (size != sizeof(record) || record.generation == 0U ||
+        !coingecko_quota_record_valid(&record)) return ESP_ERR_INVALID_CRC;
+    *out_record = record;
+    return ESP_OK;
+}
+
+static esp_err_t write_coingecko_quota(const uint8_t *bytes, uint32_t size)
+{
+    if (size != sizeof(coingecko_quota_record_t)) return ESP_ERR_INVALID_SIZE;
+    coingecko_quota_record_t proposed = {0}, latest = {0};
+    memcpy(&proposed, bytes, sizeof(proposed));
+    const esp_err_t read_result = flash_coordinator_get_coingecko_quota(&latest);
+    if (read_result != ESP_OK && read_result != ESP_ERR_NOT_FOUND) return read_result;
+    coingecko_quota_t validation = {0};
+    if (!coingecko_quota_init(&validation, read_result == ESP_OK ? &latest : NULL) ||
+        !coingecko_quota_commit(&validation, &proposed)) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open_from_partition(NVS_PARTITION, "cg_quota", NVS_READWRITE, &handle);
+    if (result != ESP_OK) return result;
+    result = nvs_set_blob(handle, "budget_v1", &proposed, sizeof(proposed));
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    result = flash_coordinator_get_coingecko_quota(&latest);
+    if (result != ESP_OK) return result;
+    if (memcmp(&latest, &proposed, sizeof(latest)) != 0) return ESP_ERR_INVALID_STATE;
+    ESP_LOGI(TAG, "CoinGecko quota committed month=%lu reserved=%lu/%u generation=%lu",
+             (unsigned long)latest.month, (unsigned long)latest.reserved,
+             COINGECKO_QUOTA_LIMIT, (unsigned long)latest.generation);
+    return ESP_OK;
+}
+
 static esp_err_t read_update_journal_slot(const char *key, update_journal_record_t *out_record)
 {
     nvs_handle_t handle;
@@ -2369,6 +2418,9 @@ static void flash_worker_task(void *arg)
             break;
         case FLASH_REQUEST_UPDATE_JOURNAL_WRITE:
             result = write_update_journal(&request.update_journal);
+            break;
+        case FLASH_REQUEST_COINGECKO_RESERVE:
+            result = write_coingecko_quota(request.ota_chunk, request.ota_chunk_bytes);
             break;
         case FLASH_REQUEST_P4_OTA_BEGIN:
             result = begin_p4_ota(request.ota_expected_bytes);
@@ -3168,6 +3220,14 @@ static esp_err_t enqueue_p4_ota_and_wait(flash_request_kind_t kind,
         }
         vTaskDelay(pdMS_TO_TICKS(FLASH_COORDINATOR_OTA_WAIT_POLL_MS));
     }
+}
+
+esp_err_t flash_coordinator_reserve_coingecko_quota(const coingecko_quota_record_t *record)
+{
+    if (!coingecko_quota_record_valid(record)) return ESP_ERR_INVALID_ARG;
+    /* Reuse the bounded submission buffer/ACK; no second 4 KiB stack copy. */
+    return enqueue_p4_ota_and_wait(FLASH_REQUEST_COINGECKO_RESERVE, 0U,
+                                  (const uint8_t *)record, sizeof(*record), NULL, NULL);
 }
 
 esp_err_t flash_coordinator_p4_ota_begin(uint32_t expected_bytes,

@@ -13,7 +13,7 @@ option(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION
 idf_component_register(
     # G5 policies and opt-in physical-maintenance OTA adapter.
     SRCS "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
-         "update_development.c" "cache_record.c" "offline_data_codec.c" "offline_data_provider.c" "offline_value_format.c" "data_refresh_scheduler.c" "weather_condition.c" "weather_asset_service.c"
+         "update_development.c" "cache_record.c" "coingecko_quota.c" "offline_data_codec.c" "offline_data_provider.c" "offline_value_format.c" "data_refresh_scheduler.c" "weather_condition.c" "weather_asset_service.c"
          "ui/core/np_styles.c" "ui/core/np_form.c" "ui/core/np_components.c" "ui/core/np_feedback.c" "ui/core/np_modal.c" "ui/core/np_keyboard.c" "ui/core/np_confirm.c"
          "ui/assets/np_weather_background_assets.c" "ui/assets/np_weather_static_icons.c" "ui/assets/np_btc_tilted_icon.c"
          "ui/screens/np_boot.c" "ui/screens/np_home.c" "ui/screens/np_weather.c" "ui/screens/np_market.c" "ui/screens/np_devices.c"
