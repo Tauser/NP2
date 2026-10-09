@@ -2148,3 +2148,35 @@ reservados à task LVGL.
 reprodução tátil de Tela e som deve confirmar ausência de panic e medir o
 high-water mark sob a carga dessa construção; build e boot isolados não fecham
 essa validação.
+
+## ADR-092 — Orçamento mensal conservador da CoinGecko
+
+**Decisão (2026-10-07):** a pedido do responsável, usar intervalo normal de
+5 min e ampliar para 20 min ao atingir 80% da cota de 10.000 consultas/mês.
+Bloquear novas consultas quando o orçamento local chegar a 10.000. Todos os
+caminhos, inclusive refresh manual e reconexão, passam pela mesma admissão
+antes do HTTP autenticado. Outubro/2026 começa com o piso informado de
+8.010 créditos; meses posteriores começam em zero somente com hora confiável
+e mês UTC posterior. Relógio regressivo não devolve créditos.
+
+Reservar até oito tentativas em um registro NVS pequeno com magic/schema,
+geração e CRC, via FlashCoordinator, com commit e leitura de verificação antes
+do HTTPS. O worker usa os créditos reservados em RAM; erros também consomem
+uma tentativa local, de forma conservadora. Reservas não utilizadas são
+descartadas no reboot, sem devolução. O registro conserva o final da janela
+reservada: depois de um reboot, o painel aguarda essa janela para não antecipar
+consultas/escritas. Isso pode adiar o mercado por até 40 min no uso normal ou
+160 min na política reduzida. Não gravar a cada cotação; em funcionamento
+contínuo, reservas ficam separadas por pelo menos 40 min. Corrupção ou falha
+de persistência bloqueiam CoinGecko e preservam os demais providers.
+
+**Limite:** o contador é um teto conservador local, não uma leitura da conta.
+Outros clientes com a mesma chave e consumo posterior ao screenshot não são
+sincronizados. A transição de 80% pode ocorrer até sete consultas antes por
+causa da reserva. Não refundar falhas evita subcontagem após timeouts.
+O histórico de mercado admite gaps de até 40 min para acomodar as duas
+cadências. Não alterar dependências, Kconfig, partições, C6 ou eFuses.
+
+**Validação:** testes host passaram; build limpo P4, app-flash e boot com
+reserva confirmada/intervalo de 1.200 s e HTTP 200 estão registrados em
+[COINGECKO-QUOTA.md](COINGECKO-QUOTA.md), com limites de bancada explícitos.
