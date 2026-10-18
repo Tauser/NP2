@@ -1,0 +1,124 @@
+{
+  "source": "Waveshare STEP 20251108",
+  "hardware_body_count": 1345,
+  "boolean_checks": 413,
+  "clashes": [],
+  "boolean_failures": [],
+  "non_solid_hardware_checked_as_conservative_boxes": [
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo1",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo2",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo3",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo4",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo5",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+CR1220-BATTERY_HOLDER-SMT:1/Corpo4"
+  ],
+  "timeline_issues": [],
+  "empty_import_group_warnings": [
+    "Grupo1"
+  ],
+  "solid_continuity": {
+    "01 / Moldura fina / microfones frontais/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "02 / Corpo arredondado / traseira vertical compacta/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "03 / Tampa traseira / berco e travas integrados sem parafusos/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Alto-falante TRASEIRO / 100 x 45 x 20 medido pelo usuario/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "06 / Volume + e - / teclas no topo/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "06 / Volume + e - / teclas no topo/Corpo2": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "08 / Cursor ON OFF / lingueta do modelo oficial/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    }
+  },
+  "component_world_bounds_mm": {
+    "01 / Moldura fina / microfones frontais": [
+      [
+        -88.94,
+        0.1300367553350483,
+        -8.881784197001252e-15
+      ],
+      [
+        85.34,
+        36.845038930129675,
+        104.48618003713186
+      ]
+    ],
+    "02 / Corpo arredondado / traseira vertical compacta": [
+      [
+        -88.91,
+        3.1999887485805045,
+        0.029999999999992255
+      ],
+      [
+        85.31,
+        57.80042233310466,
+        103.65136360402192
+      ]
+    ],
+    "03 / Tampa traseira / berco e travas integrados sem parafusos": [
+      [
+        -86.94,
+        30.730422333104688,
+        -8.881784197001252e-15
+      ],
+      [
+        83.34,
+        60.230422333104684,
+        96.87060140871634
+      ]
+    ],
+    "REF / Alto-falante TRASEIRO / 100 x 45 x 20 medido pelo usuario": [
+      [
+        -50.0,
+        32.83042233310471,
+        7.93530070435815
+      ],
+      [
+        50.0,
+        52.83042233310471,
+        52.935300704358156
+      ]
+    ],
+    "06 / Volume + e - / teclas no topo": [
+      [
+        -17.999999999999993,
+        45.057732716706425,
+        91.55256718157126
+      ],
+      [
+        12.0,
+        54.93911827290791,
+        101.46694949684337
+      ]
+    ],
+    "08 / Cursor ON OFF / lingueta do modelo oficial": [
+      [
+        -90.54,
+        34.11273483837109,
+        72.12111319337082
+      ],
+      [
+        -83.10000000000001,
+        44.89293977934648,
+        86.5587293394472
+      ]
+    ]
+  },
+  "elapsed_seconds": 17.081642700000884
+}

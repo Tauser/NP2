@@ -1,0 +1,50 @@
+{
+  "airway_probes": 128,
+  "airway_obstructions": [],
+  "wall_probes": 186,
+  "wall_failures": [],
+  "split_open_airway_probes": 84,
+  "split_open_failures": [],
+  "extraction_lift_y_offset_z_mm": [
+    [
+      0,
+      0.2
+    ],
+    [
+      0,
+      0.5
+    ],
+    [
+      0,
+      1
+    ],
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      5
+    ],
+    [
+      0,
+      10
+    ],
+    [
+      0,
+      20
+    ]
+  ],
+  "extraction_collisions": [],
+  "matched_path_lengths": [
+    {
+      "mic": "esquerdo",
+      "length_mm": 23.024711389009916
+    },
+    {
+      "mic": "direito",
+      "length_mm": 23.024711389009916
+    }
+  ],
+  "scope": "CAD samples, screen/bezel/screws removed for extraction; not acoustic or printer testing"
+}

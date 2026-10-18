@@ -1,0 +1,14 @@
+{
+  "method": "sampled translation along +Z in panel coordinates with bezel removed; major PCB, LCD, mic and standoff solids only",
+  "offsets_mm": [
+    0.5,
+    2,
+    5,
+    10,
+    20
+  ],
+  "hardware_bodies": 9,
+  "checks": 45,
+  "collisions": [],
+  "scope": "not a complete tolerance/hand assembly or continuous-motion test"
+}

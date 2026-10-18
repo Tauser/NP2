@@ -1,0 +1,280 @@
+{
+  "project": "NP2",
+  "project_id": "a.YnVzaW5lc3M6Z21haWwyNjkxOTgjMjAyNjEwMTAxMTUyOTc0OTgx",
+  "hub": "ti3d",
+  "saved": [
+    {
+      "original_document": "NP2 - Mesa V11 / dutos MIC removiveis",
+      "document": "NP2 - Mesa V11 - dutos MIC removiveis v0",
+      "requested_name": "NP2 - Mesa V11 - dutos MIC removiveis",
+      "folder": "NP2",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.isVpILPnQE6kBVxj6Vt-Zg",
+      "file_id": "urn:adsk.wipprod:dm.lineage:KwMRMmOJTmSOkrHx7WTDWA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V11 / pecas para ABS / mesa 350x350",
+      "document": "NP2 - V11 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "NP2 - V11 - pecas para ABS - mesa 350x350",
+      "folder": "NP2",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.isVpILPnQE6kBVxj6Vt-Zg",
+      "file_id": "urn:adsk.wipprod:dm.lineage:LLzg7XYKRwqa0LdGarMv7g",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa / conceito V01 sem bateria",
+      "document": "01 - NP2 - Mesa - conceito V01 sem bateria v0",
+      "requested_name": "01 - NP2 - Mesa - conceito V01 sem bateria",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:YrMqCqORTKKhrq7k3wPefw",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa / conceito V02 sem bateria + controles",
+      "document": "02 - NP2 - Mesa - conceito V02 sem bateria + controles v0",
+      "requested_name": "02 - NP2 - Mesa - conceito V02 sem bateria + controles",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:wEeKfAYMTLOtYCb5e3SiWg",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V03 / sem base / audio traseiro",
+      "document": "03 - NP2 - Mesa V03 - sem base - audio traseiro v0",
+      "requested_name": "03 - NP2 - Mesa V03 - sem base - audio traseiro",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:xOvqVpzJTVKFwIGkg0Wr9Q",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V03 / sem base / audio traseiro",
+      "document": "04 - NP2 - Mesa V03 - sem base - audio traseiro v0",
+      "requested_name": "04 - NP2 - Mesa V03 - sem base - audio traseiro",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:SKgw6UR_R1ClOsBlAigSrw",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V03 / sem base / speaker 100x45x20",
+      "document": "05 - NP2 - Mesa V03 - sem base - speaker 100x45x20 v0",
+      "requested_name": "05 - NP2 - Mesa V03 - sem base - speaker 100x45x20",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:lOdorAFLQCiwUvyU272pig",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V04 / traseira reta / corpo R6",
+      "document": "06 - NP2 - Mesa V04 - traseira reta - corpo R6 v0",
+      "requested_name": "06 - NP2 - Mesa V04 - traseira reta - corpo R6",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:L-f4QMc7Qxi_Wy_5Yl79Bg",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V04 / traseira reta / corpo R6",
+      "document": "07 - NP2 - Mesa V04 - traseira reta - corpo R6 v0",
+      "requested_name": "07 - NP2 - Mesa V04 - traseira reta - corpo R6",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:BoKx0R6oQt-XwKfq7AEtrQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "REF OFICIAL / Waveshare 7B / 3D 20251108",
+      "document": "08 - REF OFICIAL - Waveshare 7B - 3D 20251108 v0",
+      "requested_name": "08 - REF OFICIAL - Waveshare 7B - 3D 20251108",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:qJloEZ_lSvunODcetrmDIw",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V05 / hardware oficial / corpo R6",
+      "document": "09 - NP2 - Mesa V05 - hardware oficial - corpo R6 v0",
+      "requested_name": "09 - NP2 - Mesa V05 - hardware oficial - corpo R6",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:JVim6NIlS4-EWyOcJnttmQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V06 / ABS / impressao simplificada",
+      "document": "10 - NP2 - Mesa V06 - ABS - impressao simplificada v0",
+      "requested_name": "10 - NP2 - Mesa V06 - ABS - impressao simplificada",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:YmKtctZ9STitQKSIBQXyQA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "document": "11 - NP2 - V06 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "11 - NP2 - V06 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:-uIMrQt-QoaCf5wNi8XgJQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "document": "12 - NP2 - V06 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "12 - NP2 - V06 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:LaGB6bYdSuaBSY4FGorlDg",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "document": "13 - NP2 - V06 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "13 - NP2 - V06 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:6YKMYoRkRLmBUjW87q5DrA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V07 / acesso conectores e microSD",
+      "document": "14 - NP2 - Mesa V07 - acesso conectores e microSD v0",
+      "requested_name": "14 - NP2 - Mesa V07 - acesso conectores e microSD",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:pNZ3RT8-SxyDtdqhhvQo_Q",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V07 / pecas para ABS / mesa 350x350",
+      "document": "15 - NP2 - V07 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "15 - NP2 - V07 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:MwtYs1yTRiu-TrZEUT41TQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V08 / folga inferior e acessos completos",
+      "document": "16 - NP2 - Mesa V08 - folga inferior e acessos completos v0",
+      "requested_name": "16 - NP2 - Mesa V08 - folga inferior e acessos completos",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:6ZCM8N6STG6lfjN-5e2SMg",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V08 / pecas para ABS / mesa 350x350",
+      "document": "17 - NP2 - V08 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "17 - NP2 - V08 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:FI87nPp5Spu-Ga53cDssKA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V09 / folga inferior compacta",
+      "document": "18 - NP2 - Mesa V09 - folga inferior compacta v0",
+      "requested_name": "18 - NP2 - Mesa V09 - folga inferior compacta",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:7M3Fw7pEQF2Xsfzdu6kFJQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V09 / pecas para ABS / mesa 350x350",
+      "document": "19 - NP2 - V09 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "19 - NP2 - V09 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:nxZsDB7vS2iKmoE7mN4T7Q",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - Mesa V10 / dutos MIC e fundo liso v1",
+      "document": "20 - NP2 - Mesa V10 - dutos MIC e fundo liso v1 v0",
+      "requested_name": "20 - NP2 - Mesa V10 - dutos MIC e fundo liso v1",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:TKmEM5OHRDiUULpRldGnSg",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V10 / corte de revisao do duto MIC / nao imprimir",
+      "document": "21 - NP2 - V10 - corte de revisao do duto MIC - nao imprimir v0",
+      "requested_name": "21 - NP2 - V10 - corte de revisao do duto MIC - nao imprimir",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:zG1k5msMS0S5GJYTEc75KQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V10 / corte de revisao do duto MIC / nao imprimir",
+      "document": "22 - NP2 - V10 - corte de revisao do duto MIC - nao imprimir v0",
+      "requested_name": "22 - NP2 - V10 - corte de revisao do duto MIC - nao imprimir",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:XsbaL0WpRMSHOE8ltWnRWQ",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 - V10 / pecas para ABS / mesa 350x350",
+      "document": "23 - NP2 - V10 - pecas para ABS - mesa 350x350 v0",
+      "requested_name": "23 - NP2 - V10 - pecas para ABS - mesa 350x350",
+      "folder": "Historico da sessao - 2026-10-10",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.mP9cvcoxQ7-cpEBkMRwuuA",
+      "file_id": "urn:adsk.wipprod:dm.lineage:n6KC8NP9TxWRoxlh1D91fA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 V11 / vista explodida dos cartuchos / nao imprimir",
+      "document": "NP2 V11 - vista explodida dos cartuchos - nao imprimir v0",
+      "requested_name": "NP2 V11 - vista explodida dos cartuchos - nao imprimir",
+      "folder": "Estudos V11",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.t7hX7xSYSNmRV6VxVSd2Lg",
+      "file_id": "urn:adsk.wipprod:dm.lineage:vvGeSRICSCeRbITXnzA7JA",
+      "cloud_complete": true,
+      "version_number": 1
+    },
+    {
+      "original_document": "NP2 V11 / metades com canal para cima / revisao",
+      "document": "NP2 V11 - metades com canal para cima - revisao v0",
+      "requested_name": "NP2 V11 - metades com canal para cima - revisao",
+      "folder": "Estudos V11",
+      "folder_id": "urn:adsk.wipprod:fs.folder:co.t7hX7xSYSNmRV6VxVSd2Lg",
+      "file_id": "urn:adsk.wipprod:dm.lineage:YXacEt3TRJm1iMmxnMrWJA",
+      "cloud_complete": true,
+      "version_number": 1
+    }
+  ],
+  "total_documents": 27,
+  "failure": null,
+  "cloud_verification": "27/27 completed"
+}

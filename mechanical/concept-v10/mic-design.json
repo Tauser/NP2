@@ -1,0 +1,73 @@
+{
+  "front_ports_xy_mm": [
+    [
+      -68,
+      -53.5
+    ],
+    [
+      68,
+      -53.5
+    ]
+  ],
+  "old_right_x_mm": 76,
+  "front_diameter_mm": 1.6,
+  "channel_diameter_mm": 2,
+  "channel_stations_yz_mm": [
+    [
+      -53.5,
+      -3.03
+    ],
+    [
+      -53.15,
+      -10.9
+    ],
+    [
+      -50,
+      -14
+    ]
+  ],
+  "terminal_center_xy_mm": [
+    [
+      -68,
+      -45.399988462187
+    ],
+    [
+      68,
+      -45.399988462187
+    ]
+  ],
+  "mic_envelope_mm": [
+    3.4,
+    2.6,
+    0.998
+  ],
+  "terminal_inner_xy_mm": [
+    4.2,
+    3.4
+  ],
+  "rear_gasket_outer_inner_xy_mm": [
+    [
+      6.6,
+      5.8
+    ],
+    [
+      4.2,
+      3.4
+    ]
+  ],
+  "rear_gasket_free_compressed_mm": [
+    2,
+    1.65
+  ],
+  "front_gasket_outer_inner_diameter_mm": [
+    4,
+    2
+  ],
+  "front_gasket_free_compressed_mm": [
+    0.5,
+    0.43
+  ],
+  "gaskets_required": true,
+  "port_inlet_not_detailed_in_STEP": "chamber encloses full mic; verify actual PCB inlet before fabrication",
+  "acoustic_measurement": "pending; no gain or isolation performance asserted"
+}

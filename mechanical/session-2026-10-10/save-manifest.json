@@ -1,0 +1,142 @@
+{
+  "session_date": "2026-10-10",
+  "local_archives": [
+    {
+      "document": "NP2 - Mesa / conceito V01 sem bateria",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/01-NP2 - Mesa - conceito V01 sem bateria.f3d",
+      "bytes": 1335158
+    },
+    {
+      "document": "NP2 - Mesa / conceito V02 sem bateria + controles",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/02-NP2 - Mesa - conceito V02 sem bateria + controles.f3d",
+      "bytes": 1786501
+    },
+    {
+      "document": "NP2 - Mesa V03 / sem base / audio traseiro",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/03-NP2 - Mesa V03 - sem base - audio traseiro.f3d",
+      "bytes": 685843
+    },
+    {
+      "document": "NP2 - Mesa V03 / sem base / audio traseiro",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/04-NP2 - Mesa V03 - sem base - audio traseiro.f3d",
+      "bytes": 1463535
+    },
+    {
+      "document": "NP2 - Mesa V03 / sem base / speaker 100x45x20",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/05-NP2 - Mesa V03 - sem base - speaker 100x45x20.f3d",
+      "bytes": 1938382
+    },
+    {
+      "document": "NP2 - Mesa V04 / traseira reta / corpo R6",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/06-NP2 - Mesa V04 - traseira reta - corpo R6.f3d",
+      "bytes": 1975455
+    },
+    {
+      "document": "NP2 - Mesa V04 / traseira reta / corpo R6",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/07-NP2 - Mesa V04 - traseira reta - corpo R6.f3d",
+      "bytes": 2332161
+    },
+    {
+      "document": "REF OFICIAL / Waveshare 7B / 3D 20251108",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/08-REF OFICIAL - Waveshare 7B - 3D 20251108.f3d",
+      "bytes": 18604808
+    },
+    {
+      "document": "NP2 - Mesa V05 / hardware oficial / corpo R6",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/09-NP2 - Mesa V05 - hardware oficial - corpo R6.f3d",
+      "bytes": 20846860
+    },
+    {
+      "document": "NP2 - Mesa V06 / ABS / impressao simplificada",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/10-NP2 - Mesa V06 - ABS - impressao simplificada.f3d",
+      "bytes": 21281503
+    },
+    {
+      "document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/11-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1086668
+    },
+    {
+      "document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/12-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1091829
+    },
+    {
+      "document": "NP2 - V06 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/13-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1090378
+    },
+    {
+      "document": "NP2 - Mesa V07 / acesso conectores e microSD",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/14-NP2 - Mesa V07 - acesso conectores e microSD.f3d",
+      "bytes": 21740632
+    },
+    {
+      "document": "NP2 - V07 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/15-NP2 - V07 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1106431
+    },
+    {
+      "document": "NP2 - Mesa V08 / folga inferior e acessos completos",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/16-NP2 - Mesa V08 - folga inferior e acessos completos.f3d",
+      "bytes": 22030578
+    },
+    {
+      "document": "NP2 - V08 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/17-NP2 - V08 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1133550
+    },
+    {
+      "document": "NP2 - Mesa V09 / folga inferior compacta",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/18-NP2 - Mesa V09 - folga inferior compacta.f3d",
+      "bytes": 22172552
+    },
+    {
+      "document": "NP2 - V09 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/19-NP2 - V09 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1133169
+    },
+    {
+      "document": "NP2 - Mesa V10 / dutos MIC e fundo liso v1",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/20-NP2 - Mesa V10 - dutos MIC e fundo liso v1.f3d",
+      "bytes": 22305894
+    },
+    {
+      "document": "NP2 - V10 / corte de revisao do duto MIC / nao imprimir",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/21-NP2 - V10 - corte de revisao do duto MIC - nao imprimir.f3d",
+      "bytes": 520467
+    },
+    {
+      "document": "NP2 - V10 / corte de revisao do duto MIC / nao imprimir",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/22-NP2 - V10 - corte de revisao do duto MIC - nao imprimir.f3d",
+      "bytes": 520712
+    },
+    {
+      "document": "NP2 - V10 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/23-NP2 - V10 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1177950
+    },
+    {
+      "document": "NP2 - Mesa V11 / dutos MIC removiveis",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/24-NP2 - Mesa V11 - dutos MIC removiveis.f3d",
+      "bytes": 23135929
+    },
+    {
+      "document": "NP2 V11 / vista explodida dos cartuchos / nao imprimir",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/25-NP2 V11 - vista explodida dos cartuchos - nao imprimir.f3d",
+      "bytes": 885277
+    },
+    {
+      "document": "NP2 V11 / metades com canal para cima / revisao",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/26-NP2 V11 - metades com canal para cima - revisao.f3d",
+      "bytes": 397089
+    },
+    {
+      "document": "NP2 - V11 / pecas para ABS / mesa 350x350",
+      "archive": "D:/Projetos/NP2/mechanical/session-2026-10-10/27-NP2 - V11 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1334029
+    }
+  ],
+  "failures": [],
+  "total_documents": 27
+}

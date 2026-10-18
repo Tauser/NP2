@@ -1,0 +1,280 @@
+{
+  "method": "mesh topology, bounds, flat contact and downward surface screening; not a printer-specific slice",
+  "nozzle_assumed_mm": 0.4,
+  "layer_height_reference_mm": 0.2,
+  "parts": [
+    {
+      "filename": "01-moldura.stl",
+      "triangles": 6400,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 9592.109484247243,
+      "size_mm": [
+        113.14585,
+        174.22,
+        3.0
+      ],
+      "bed_contact_area_mm2": 2946.227293595502,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    },
+    {
+      "filename": "02-corpo.stl",
+      "triangles": 21074,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 56030.435632716166,
+      "size_mm": [
+        174.22,
+        107.62136,
+        55.90011
+      ],
+      "bed_contact_area_mm2": 1492.3438894142046,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 770.1591026995675
+    },
+    {
+      "filename": "03-tampa-berco.stl",
+      "triangles": 62836,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 55716.797345805324,
+      "size_mm": [
+        170.28,
+        100.8706,
+        29.65
+      ],
+      "bed_contact_area_mm2": 15672.885997407851,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 12.79809397745521
+    },
+    {
+      "filename": "04-volume-menos.stl",
+      "triangles": 14264,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 352.2388262560048,
+      "size_mm": [
+        11.4,
+        9.4,
+        8.8
+      ],
+      "bed_contact_area_mm2": 51.019078029032755,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 2.045542739970756
+    },
+    {
+      "filename": "05-volume-mais.stl",
+      "triangles": 14456,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 351.81744053844,
+      "size_mm": [
+        11.4,
+        9.4,
+        8.8
+      ],
+      "bed_contact_area_mm2": 49.33353515877292,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 3.7310856102305934
+    },
+    {
+      "filename": "06-cursor-onoff.stl",
+      "triangles": 17040,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 204.04617809827172,
+      "size_mm": [
+        7.0,
+        8.0,
+        7.44
+      ],
+      "bed_contact_area_mm2": 34.01411061287119,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    },
+    {
+      "filename": "07-duto-mic-esquerdo-a.stl",
+      "triangles": 5048,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 226.23817426665582,
+      "size_mm": [
+        12.97,
+        17.2,
+        3.3
+      ],
+      "bed_contact_area_mm2": 81.58674082387122,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    },
+    {
+      "filename": "08-duto-mic-esquerdo-b.stl",
+      "triangles": 3284,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 226.211203183704,
+      "size_mm": [
+        12.97,
+        17.2,
+        3.3
+      ],
+      "bed_contact_area_mm2": 81.58792109596736,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    },
+    {
+      "filename": "09-duto-mic-direito-a.stl",
+      "triangles": 5048,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 226.23817426665605,
+      "size_mm": [
+        12.97,
+        17.2,
+        3.3
+      ],
+      "bed_contact_area_mm2": 81.58674082387122,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    },
+    {
+      "filename": "10-duto-mic-direito-b.stl",
+      "triangles": 3284,
+      "watertight_edge_incidence": true,
+      "nonmanifold_or_open_edges": 0,
+      "volume_mm3": 226.21120318370387,
+      "size_mm": [
+        12.97,
+        17.2,
+        3.3
+      ],
+      "bed_contact_area_mm2": 81.58792109596736,
+      "downward_surfaces_beyond_approx_45_deg_mm2": 0.0
+    }
+  ],
+  "native_3mf_plate_check": [
+    {
+      "name": "01-moldura",
+      "min_mm": [
+        202.0,
+        8.0,
+        0.0
+      ],
+      "max_mm": [
+        315.145856,
+        182.22,
+        3.0
+      ]
+    },
+    {
+      "name": "02-corpo",
+      "min_mm": [
+        8.0,
+        8.0,
+        0.0
+      ],
+      "max_mm": [
+        182.22,
+        115.62136,
+        55.900112
+      ]
+    },
+    {
+      "name": "03-tampa-berco",
+      "min_mm": [
+        8.0,
+        150.0,
+        0.0
+      ],
+      "max_mm": [
+        178.28,
+        250.870608,
+        29.65
+      ]
+    },
+    {
+      "name": "04-volume-menos",
+      "min_mm": [
+        220.0,
+        222.0,
+        0.0
+      ],
+      "max_mm": [
+        231.4,
+        231.4,
+        8.8
+      ]
+    },
+    {
+      "name": "05-volume-mais",
+      "min_mm": [
+        248.0,
+        222.0,
+        0.0
+      ],
+      "max_mm": [
+        259.4,
+        231.4,
+        8.8
+      ]
+    },
+    {
+      "name": "06-cursor-onoff",
+      "min_mm": [
+        276.0,
+        222.0,
+        0.0
+      ],
+      "max_mm": [
+        283.0,
+        230.0,
+        7.44
+      ]
+    },
+    {
+      "name": "07-duto-mic-esquerdo-a",
+      "min_mm": [
+        202.0,
+        270.0,
+        0.0
+      ],
+      "max_mm": [
+        214.97,
+        287.2,
+        3.3
+      ]
+    },
+    {
+      "name": "08-duto-mic-esquerdo-b",
+      "min_mm": [
+        238.0,
+        270.0,
+        0.0
+      ],
+      "max_mm": [
+        250.97,
+        287.2,
+        3.3
+      ]
+    },
+    {
+      "name": "09-duto-mic-direito-a",
+      "min_mm": [
+        274.0,
+        270.0,
+        0.0
+      ],
+      "max_mm": [
+        286.970016,
+        287.2,
+        3.3
+      ]
+    },
+    {
+      "name": "10-duto-mic-direito-b",
+      "min_mm": [
+        310.0,
+        270.0,
+        0.0
+      ],
+      "max_mm": [
+        322.970016,
+        287.2,
+        3.3
+      ]
+    }
+  ],
+  "plate_bbox_clearance_including_brim_mm": 8
+}

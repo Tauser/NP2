@@ -1,0 +1,4 @@
+__pycache__/
+*-result*.json
+api-docs.json
+build-result*.json

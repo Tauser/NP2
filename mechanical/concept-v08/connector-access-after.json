@@ -1,0 +1,200 @@
+[
+  {
+    "name": "USB A / housing 22 x 13",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -11.4,
+        -19.1
+      ],
+      [
+        -84,
+        10.6,
+        -6.1
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 43.563839517907184,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "USB C / housing 14 x 10",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -26.1501,
+        -15.6195
+      ],
+      [
+        -84.1818,
+        -12.1501,
+        -5.6195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 30.611194445824044,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "USB UART / housing 14 x 10",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -41.415,
+        -15.6195
+      ],
+      [
+        -84.1818,
+        -27.415,
+        -5.6195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 16.09341183023016,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "USB A / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84,
+        -7.15,
+        -15.85
+      ],
+      [
+        -82,
+        6.35,
+        -9.35
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 48.61013494388017,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "USB C / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84.1818,
+        -23.6501,
+        -12.1195
+      ],
+      [
+        -81.6818,
+        -14.6501,
+        -9.1195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 34.070395216874246,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "USB UART / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84.1818,
+        -38.915,
+        -12.1195
+      ],
+      [
+        -81.6818,
+        -29.915,
+        -9.1195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 19.55261260128036,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "IO right / internal plug reference 32 x 7 x 6.2",
+    "reference_bounds_mm": [
+      [
+        23,
+        -53,
+        -14.65
+      ],
+      [
+        55,
+        -46.8,
+        -7.65
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 5.375014064997314,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "IO left / internal plug reference 32 x 7 x 6.2",
+    "reference_bounds_mm": [
+      [
+        -55,
+        -53,
+        -14.65
+      ],
+      [
+        -23,
+        -46.8,
+        -7.65
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 5.375014064997314,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "microSD / card corridor",
+    "reference_bounds_mm": [
+      [
+        -8.8,
+        -76,
+        -11.4
+      ],
+      [
+        4.5,
+        -34,
+        -9.55
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": -15.494980578072646,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "IO right / wire bend reference",
+    "reference_bounds_mm": [
+      [
+        23,
+        -53,
+        -22.65
+      ],
+      [
+        55,
+        -50,
+        -14.55
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 2.902878109997733,
+    "validation_status": "required service access"
+  },
+  {
+    "name": "IO left / wire bend reference",
+    "reference_bounds_mm": [
+      [
+        -55,
+        -53,
+        -22.65
+      ],
+      [
+        -23,
+        -50,
+        -14.55
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 2.902878109997733,
+    "validation_status": "required service access"
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "method": "0.35 mm radius airway probes every <=0.4 mm; 0.1 mm wall probes outside deliberately intersecting passage junctions; case and compressed gasket references only",
+  "airway_probes": 132,
+  "wall_probes": 270,
+  "designed_junction_openings_skipped": 12,
+  "airway_obstructions": [],
+  "wall_probe_failures": [],
+  "matched_path_lengths": [
+    {
+      "duct": "left",
+      "length_mm": 23.427349214106933
+    },
+    {
+      "duct": "right",
+      "length_mm": 23.427349214106933
+    }
+  ],
+  "old_front_ports_closed": true,
+  "scope": "Geometric continuity, not acoustic response or exact MEMS port validation"
+}

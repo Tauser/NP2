@@ -1,0 +1,200 @@
+{
+  "source": "Waveshare STEP 20251108",
+  "hardware_body_count": 1345,
+  "boolean_checks": 455,
+  "clashes": [],
+  "boolean_failures": [],
+  "non_solid_hardware_checked_as_conservative_boxes": [
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo1",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo2",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo3",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo4",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+SD1_ASM:1+MICRO_SD_SOCKET_ASM:1+COMPOUND:1/Corpo5",
+    "REF OFICIAL / Waveshare 7B / STEP 20251108:1+ESP32-P4-WIFI6-TOUCH-LCD-7B_ASM:1+PCB_ASM:1+CR1220-BATTERY_HOLDER-SMT:1/Corpo4"
+  ],
+  "timeline_issues": [],
+  "empty_import_group_warnings": [
+    "Grupo1"
+  ],
+  "solid_continuity": {
+    "01 / Moldura fina / microfones frontais/Corpo2": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "02 / Corpo arredondado / traseira vertical compacta/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Alto-falante TRASEIRO / 100 x 45 x 20 medido pelo usuario/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "03 / Tampa ABS / berco e travas integrados/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "06 / Volume + e - / flange em rampa/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "06 / Volume + e - / flange em rampa/Corpo2": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "08 / Cursor ON OFF / flange gradual/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "09 / Dutos MIC removiveis / 4 metades para ABS/MIC esquerdo A / canal aberto": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "09 / Dutos MIC removiveis / 4 metades para ABS/MIC esquerdo B / canal aberto": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "09 / Dutos MIC removiveis / 4 metades para ABS/MIC direito A / canal aberto": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "09 / Dutos MIC removiveis / 4 metades para ABS/MIC direito B / canal aberto": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Juntas acusticas / espuma macia / nao imprimir ABS/Junta traseira esquerdo": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Juntas acusticas / espuma macia / nao imprimir ABS/Junta frontal esquerdo": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Juntas acusticas / espuma macia / nao imprimir ABS/Junta traseira direito": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Juntas acusticas / espuma macia / nao imprimir ABS/Junta frontal direito": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Parafusos dutos / 2 x diam 2 x 8 / nao imprimir/Corpo1": {
+      "solid": true,
+      "connected_lumps": 1
+    },
+    "REF / Parafusos dutos / 2 x diam 2 x 8 / nao imprimir/Corpo2": {
+      "solid": true,
+      "connected_lumps": 1
+    }
+  },
+  "component_world_bounds_mm": {
+    "01 / Moldura fina / microfones frontais": [
+      [
+        -88.91,
+        -0.8513545253903816,
+        0.052537228659126356
+      ],
+      [
+        85.31,
+        36.83576842029843,
+        108.45764834164297
+      ]
+    ],
+    "02 / Corpo arredondado / traseira vertical compacta": [
+      [
+        -88.91,
+        1.9003099636488807,
+        0.02999999999997449
+      ],
+      [
+        85.31,
+        57.80042233310466,
+        107.65136360402192
+      ]
+    ],
+    "REF / Alto-falante TRASEIRO / 100 x 45 x 20 medido pelo usuario": [
+      [
+        -50.0,
+        32.83042233310471,
+        11.935300704358136
+      ],
+      [
+        50.0,
+        52.83042233310471,
+        56.93530070435814
+      ]
+    ],
+    "03 / Tampa ABS / berco e travas integrados": [
+      [
+        -86.94,
+        30.5804223331047,
+        -2.6645352591003757e-14
+      ],
+      [
+        83.34,
+        60.23042233310471,
+        100.87060140871631
+      ]
+    ],
+    "06 / Volume + e - / flange em rampa": [
+      [
+        -17.7,
+        45.34304967159498,
+        95.55256718157126
+      ],
+      [
+        11.7,
+        54.872208273714946,
+        105.46694949684337
+      ]
+    ],
+    "08 / Cursor ON OFF / flange gradual": [
+      [
+        -90.54,
+        33.153518476285974,
+        80.03137048071615
+      ],
+      [
+        -83.10000000000001,
+        40.98268249200112,
+        88.50257401835151
+      ]
+    ],
+    "09 / Dutos MIC removiveis / 4 metades para ABS": [
+      [
+        -71.3,
+        3.0458119548299156,
+        1.5352184517934298
+      ],
+      [
+        71.3,
+        20.696107274427153,
+        15.644309892558192
+      ]
+    ],
+    "REF / Juntas acusticas / espuma macia / nao imprimir ABS": [
+      [
+        -71.3,
+        2.698661051697988,
+        2.4645434511463193
+      ],
+      [
+        71.3,
+        14.419443325943341,
+        12.96800682995837
+      ]
+    ],
+    "REF / Parafusos dutos / 2 x diam 2 x 8 / nao imprimir": [
+      [
+        -70.0,
+        14.48124315943804,
+        12.030295130636608
+      ],
+      [
+        70.0,
+        17.619424169528138,
+        16.452555184567117
+      ]
+    ]
+  },
+  "elapsed_seconds": 23.927913899999112
+}

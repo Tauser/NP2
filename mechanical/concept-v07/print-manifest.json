@@ -1,0 +1,101 @@
+{
+  "units": "mm",
+  "material_requested": "ABS",
+  "bed_mm": [
+    350,
+    350
+  ],
+  "nozzle_assumed_mm": 0.4,
+  "parts": [
+    {
+      "filename": "01-moldura.stl",
+      "size_mm": [
+        108.93999999999997,
+        174.21999999999997,
+        3.0000000000000018
+      ],
+      "plate_xy_mm": [
+        202,
+        8
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    },
+    {
+      "filename": "02-corpo.stl",
+      "size_mm": [
+        174.22,
+        103.62136360402195,
+        54.60043358452442
+      ],
+      "plate_xy_mm": [
+        8,
+        8
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    },
+    {
+      "filename": "03-tampa-berco.stl",
+      "size_mm": [
+        170.27999999999997,
+        96.87060140871634,
+        29.650000000000027
+      ],
+      "plate_xy_mm": [
+        8,
+        150
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    },
+    {
+      "filename": "04-volume-menos.stl",
+      "size_mm": [
+        11.400000000000002,
+        9.400000000000002,
+        8.800000000000008
+      ],
+      "plate_xy_mm": [
+        220,
+        222
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    },
+    {
+      "filename": "05-volume-mais.stl",
+      "size_mm": [
+        11.399999999999999,
+        9.399999999999997,
+        8.800000000000008
+      ],
+      "plate_xy_mm": [
+        248,
+        222
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    },
+    {
+      "filename": "06-cursor-onoff.stl",
+      "size_mm": [
+        7.000000000000002,
+        7.999999999999998,
+        7.439999999999998
+      ],
+      "plate_xy_mm": [
+        276,
+        222
+      ],
+      "min_z_mm": 0.0,
+      "solid": true,
+      "connected_lumps": 1
+    }
+  ]
+}

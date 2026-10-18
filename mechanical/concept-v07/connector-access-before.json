@@ -1,0 +1,185 @@
+[
+  {
+    "name": "USB A / housing 22 x 13",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -11.4,
+        -19.1
+      ],
+      [
+        -84,
+        10.6,
+        -6.1
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 6.71956685200341
+      }
+    ],
+    "world_min_z_mm": 35.563839517907184
+  },
+  {
+    "name": "USB C / housing 14 x 10",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -26.1501,
+        -15.6195
+      ],
+      [
+        -84.1818,
+        -12.1501,
+        -5.6195
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 34.114890728630016
+      }
+    ],
+    "world_min_z_mm": 22.61119444582405
+  },
+  {
+    "name": "USB UART / housing 14 x 10",
+    "reference_bounds_mm": [
+      [
+        -120,
+        -41.415,
+        -15.6195
+      ],
+      [
+        -84.1818,
+        -27.415,
+        -5.6195
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 34.20435752182431
+      }
+    ],
+    "world_min_z_mm": 8.093411830230162
+  },
+  {
+    "name": "USB A / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84,
+        -7.15,
+        -15.85
+      ],
+      [
+        -82,
+        6.35,
+        -9.35
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 40.61013494388017
+  },
+  {
+    "name": "USB C / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84.1818,
+        -23.6501,
+        -12.1195
+      ],
+      [
+        -81.6818,
+        -14.6501,
+        -9.1195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 26.070395216874253
+  },
+  {
+    "name": "USB UART / metal neck",
+    "reference_bounds_mm": [
+      [
+        -84.1818,
+        -38.915,
+        -12.1195
+      ],
+      [
+        -81.6818,
+        -29.915,
+        -9.1195
+      ]
+    ],
+    "case_intersections": [],
+    "world_min_z_mm": 11.552612601280359
+  },
+  {
+    "name": "IO right / mating reference 18 x 7",
+    "reference_bounds_mm": [
+      [
+        36.825,
+        -64,
+        -14.65
+      ],
+      [
+        54.825,
+        -46.8,
+        -7.65
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 315.1414042152706
+      }
+    ],
+    "world_min_z_mm": -13.08660761424937
+  },
+  {
+    "name": "IO left / mating reference 18 x 7",
+    "reference_bounds_mm": [
+      [
+        -40.175,
+        -64,
+        -14.65
+      ],
+      [
+        -22.175,
+        -46.8,
+        -7.65
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 315.1414042085399
+      }
+    ],
+    "world_min_z_mm": -13.08660761424937
+  },
+  {
+    "name": "microSD / card and push clearance",
+    "reference_bounds_mm": [
+      [
+        -8.8,
+        -65,
+        -11.4
+      ],
+      [
+        4.5,
+        -34,
+        -9.55
+      ]
+    ],
+    "case_intersections": [
+      {
+        "part": "02 / Corpo arredondado / traseira vertical compacta",
+        "volume_mm3": 61.54371368168141
+      }
+    ],
+    "world_min_z_mm": -13.033358898825949
+  }
+]

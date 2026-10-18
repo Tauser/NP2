@@ -1,0 +1,1004 @@
+{
+  "session_date": "2026-10-10",
+  "saved_fusion_documents": 27,
+  "latest_stl_parts": 10,
+  "final_f3d_fusion_readback": "passed",
+  "print_3mf_zip_crc": "passed",
+  "files": [
+    {
+      "file": "mechanical/concept-v11/connector-access-after.json",
+      "bytes": 3502,
+      "sha256": "160a1ebab5c52d56c7e27098e72686342af79e6c09092d95d10847050cff39dd"
+    },
+    {
+      "file": "mechanical/concept-v11/fit-check.json",
+      "bytes": 5771,
+      "sha256": "4c1ab2d43ccfd8c3cdeed63e00a93669240f2d66ad02407301175d40ebc1e915"
+    },
+    {
+      "file": "mechanical/concept-v11/GUIA-IMPRESSAO.md",
+      "bytes": 2666,
+      "sha256": "e8fbe509ba9d2af1e93997608393d89ed559c4ca46c7b094a2d7622d77d1310d"
+    },
+    {
+      "file": "mechanical/concept-v11/mesh-check.json",
+      "bytes": 6235,
+      "sha256": "b5a9dccc3180115c539d4b8cf9dca7a48bc44d2901acc60b39a15affacb9c680"
+    },
+    {
+      "file": "mechanical/concept-v11/mic-channel-check.json",
+      "bytes": 786,
+      "sha256": "ba6347981ba62dfe9fba0916a33ee7d83e19737a34d4e99205fa87fc02b75990"
+    },
+    {
+      "file": "mechanical/concept-v11/mic-design.json",
+      "bytes": 1515,
+      "sha256": "8ad12f3316f319ce72bf88afe0529f1683ba93ad0215be519bd50cfe98de7778"
+    },
+    {
+      "file": "mechanical/concept-v11/NP2-case-v11.f3d",
+      "bytes": 23134787,
+      "sha256": "3abd1a3fd2a1e3038e4d52968563e8dc2801a40f14fcb01f8c1bd5bf83a61db8"
+    },
+    {
+      "file": "mechanical/concept-v11/NP2-case-v11.step",
+      "bytes": 34849370,
+      "sha256": "f1b549b5fa6fb831a6073ebff71dfdef0d31bf460e83f2aab335624552ccf2d5"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-cover-cradle.png",
+      "bytes": 226895,
+      "sha256": "6d69ce8cfa353446ae722cc46b469f246910ed716c3193f6254e53b686a49a63"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-duct-halves.png",
+      "bytes": 130797,
+      "sha256": "81e726b2caebffd2cd03108ab67fe45ca84d6286582654cbf6baa4946b33973f"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-front.png",
+      "bytes": 125313,
+      "sha256": "af83b5acb741453dc67896e2e62fe66219cb10b4f037748ae187117e40977dbe"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-inside.png",
+      "bytes": 304435,
+      "sha256": "5dfe1a2ebfee3d05064feb0791033e352ce96713a3635ff01425b34d26d12e2a"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-mic-removable.png",
+      "bytes": 120805,
+      "sha256": "67d722c5eaaa44c890eca0d0da970462ee480a2f3ed29b36e03b85137989ee2c"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-print-layout.png",
+      "bytes": 169017,
+      "sha256": "5793aa583738d9d3f56b690473c342b18056bf8ef43646c95326d4d0adbabf8c"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-rear.png",
+      "bytes": 203014,
+      "sha256": "6cfaa3aa0bc95b1d52364df3245e8bf7b9b2a4dec20db198d784cc21cf176f39"
+    },
+    {
+      "file": "mechanical/concept-v11/np2-usb-side.png",
+      "bytes": 99904,
+      "sha256": "5ec56a7289d8413e133007838d1e076c411d430cbc66b3b701e637ca63c213f4"
+    },
+    {
+      "file": "mechanical/concept-v11/NP2-v11-ABS-350x350.3mf",
+      "bytes": 1789186,
+      "sha256": "247b9267a63252c97577b808ebe2f4f41a8745247961a8aad3c5e379ebaffbfe"
+    },
+    {
+      "file": "mechanical/concept-v11/NP2-v11-ABS-impressao.zip",
+      "bytes": 4096767,
+      "sha256": "348fc9a3774bbe5879ae03fc516d74ccbd40c4d4236f702fa7b552f74b1526ab"
+    },
+    {
+      "file": "mechanical/concept-v11/NP2-v11-pecas-impressao.f3d",
+      "bytes": 1334263,
+      "sha256": "a8a3e7d3e1f1350f3c30d56ed2a56b9e73ffada837c23558359ecc648ac19335"
+    },
+    {
+      "file": "mechanical/concept-v11/print-manifest.json",
+      "bytes": 3202,
+      "sha256": "00525c2b3434d572e8699d742174bf3f241237182aa216649de3751d83044b36"
+    },
+    {
+      "file": "mechanical/concept-v11/README.md",
+      "bytes": 4163,
+      "sha256": "552b292838d1cd2c23b4a6e9a27df358092f96822c445e6ebf6d844c32f7ad0c"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/01-moldura.stl",
+      "bytes": 320084,
+      "sha256": "2467b64d41d34039c79de1c9b28bbe40f78ebb8df6ae653c226d521a3a6c042a"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/02-corpo.stl",
+      "bytes": 1053784,
+      "sha256": "5785ceef89cd2ead77e1748a91ed30a5fdc16cb349dbe70c55c9c4188a9b36ef"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/03-tampa-berco.stl",
+      "bytes": 3141884,
+      "sha256": "935968cc8c8d6d15c876db085b0326662cedb7a3385ca1f2cdd6bdd99dc5970b"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/04-volume-menos.stl",
+      "bytes": 713284,
+      "sha256": "6b05c4f27a9f09efbaaca62ed3261940432485fe2cd1e7c57fd9ef7d6179f805"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/05-volume-mais.stl",
+      "bytes": 722884,
+      "sha256": "189c4642c7a40b4f336e09f29bf9bac03e0ccb11c70289270b4a9540382f7f19"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/06-cursor-onoff.stl",
+      "bytes": 852084,
+      "sha256": "1daf78c7ad0a586ab94b9ce9cfa5de2d7a26a7c8e7d9185115f10f5bfa4ea744"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/07-duto-mic-esquerdo-a.stl",
+      "bytes": 252484,
+      "sha256": "70d40e567ab7396473a4133583814d1d0610a063f8b7b12d66b4d52ed6d55ee8"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/08-duto-mic-esquerdo-b.stl",
+      "bytes": 164284,
+      "sha256": "ad42a37cde40259e16692b9f419ecd7a7af053de990aba8f5013384c76a7ca29"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/09-duto-mic-direito-a.stl",
+      "bytes": 252484,
+      "sha256": "36767d21f6e8322fe7d4070bf78cbf5579c444cefccaab1fdec5fdf81d714d7c"
+    },
+    {
+      "file": "mechanical/concept-v11/STL/10-duto-mic-direito-b.stl",
+      "bytes": 164284,
+      "sha256": "1f3d0b37c3cb49a985bd22cc97f445329e4d87bdfe8dab8c83ba7aa57b8d3439"
+    },
+    {
+      "file": "mechanical/RETOMAR-CASE.md",
+      "bytes": 3310,
+      "sha256": "06de5934425dea037cce4d14ea3440478380d204cbec7a7ff3683168bcb2d1cb"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/01-NP2 - Mesa - conceito V01 sem bateria.f3d",
+      "bytes": 1335158,
+      "sha256": "fa8ba6b28a2f7ea951077217d1b4abe591bbf6dc849222f1006e2b27fdd8ac37"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/02-NP2 - Mesa - conceito V02 sem bateria + controles.f3d",
+      "bytes": 1786501,
+      "sha256": "6aa65365d51510e0d92205cdd4df379dc22d8f914634a9299dca3d3ae488529c"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/03-NP2 - Mesa V03 - sem base - audio traseiro.f3d",
+      "bytes": 685843,
+      "sha256": "55f8fc172e67e780aa7db3536388d996d61cad62c86206cbf9434f8fa465d7d6"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/04-NP2 - Mesa V03 - sem base - audio traseiro.f3d",
+      "bytes": 1463535,
+      "sha256": "f944bfbd5b24c3dda3e2a765db779dc830dc6225e7edc7e45abbbc7d865725d8"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/05-NP2 - Mesa V03 - sem base - speaker 100x45x20.f3d",
+      "bytes": 1938382,
+      "sha256": "77ad715e18bdb5b5a6e652793a8225dfa1a37b306cce980558f97e3ab6cd43d0"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/06-NP2 - Mesa V04 - traseira reta - corpo R6.f3d",
+      "bytes": 1975455,
+      "sha256": "c70700c5aab360555d33fc6f457ec646885953b3396dcd31061d8b20801eb8c0"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/07-NP2 - Mesa V04 - traseira reta - corpo R6.f3d",
+      "bytes": 2332161,
+      "sha256": "67c49fceab1d98829437d5812436382dfee97177dbadab895f4eef870e114785"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/08-REF OFICIAL - Waveshare 7B - 3D 20251108.f3d",
+      "bytes": 18604808,
+      "sha256": "c7e62685fe35eab95f9605d1d7ef422d72d38e8cba85aacb571a3ae8c0fad402"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/09-NP2 - Mesa V05 - hardware oficial - corpo R6.f3d",
+      "bytes": 20846860,
+      "sha256": "9d2799aedefbb66d22033de2787f57d8a8df4c9832bee3844a9d3dfa7685f67b"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/10-NP2 - Mesa V06 - ABS - impressao simplificada.f3d",
+      "bytes": 21281503,
+      "sha256": "5f79ab30c8f8428e2ebcfd08dd039b6eb049a0b5df95f1f5e7b3106406c6d73c"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/11-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1086668,
+      "sha256": "8e48710d62af74323170249aa3bef58cba3c5b3c043b9ab97159b8ecea56dc80"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/12-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1091829,
+      "sha256": "91b8b5123c04efeccede145b538eaf3db4dd3d22348eca662cc15bfca9e9b9bf"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/13-NP2 - V06 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1090378,
+      "sha256": "46cc02cdfce8ba009c936ac63762a6466cd187705d8f40bf4df43110ed7ff831"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/14-NP2 - Mesa V07 - acesso conectores e microSD.f3d",
+      "bytes": 21740632,
+      "sha256": "7751a81daa53d2d6edfa8b8903931ecaa5b7243f520b752013084b121249a329"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/15-NP2 - V07 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1106431,
+      "sha256": "2ea16952c32e246ba1d5f00375e61f6f3d469c6ece42965c6f290b306ac95b31"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/16-NP2 - Mesa V08 - folga inferior e acessos completos.f3d",
+      "bytes": 22030578,
+      "sha256": "0b5907a566d233c4f69ca2a0f02b16c9cc5bf168ecffb1da4e4aa7b75c768986"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/17-NP2 - V08 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1133550,
+      "sha256": "50e606e981e5c7170eb40c7e01d5196d2f34a26ee70f991c4f3c4b6e63ead4f6"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/18-NP2 - Mesa V09 - folga inferior compacta.f3d",
+      "bytes": 22172552,
+      "sha256": "c5685a3540467e57c09b86b3d3baecb7dd2577fe7edf2c4ba6b054d58d3a3337"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/19-NP2 - V09 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1133169,
+      "sha256": "1f2334e0cf025a366d60b063804c65fec9efb1ac2c6cf2503efcb311e84b0a61"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/20-NP2 - Mesa V10 - dutos MIC e fundo liso v1.f3d",
+      "bytes": 22305894,
+      "sha256": "d476fc526f059e1088017e06972bbf04d1a638db6c17dfadf120b68bb9a9fa64"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/21-NP2 - V10 - corte de revisao do duto MIC - nao imprimir.f3d",
+      "bytes": 520467,
+      "sha256": "341f0252fbb3f75c91904dd43a9970a1e39b63d9279d02c13423183ee72b1365"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/22-NP2 - V10 - corte de revisao do duto MIC - nao imprimir.f3d",
+      "bytes": 520712,
+      "sha256": "7fcae94f8903719f6dd558078e6ed4567cbf8aacb1bc3dc327e2212cf2dea35c"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/23-NP2 - V10 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1177950,
+      "sha256": "10fbd6d6b1c4054c99c61582280f8c01fcfbbff9d905699576aaaf756ddf719f"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/24-NP2 - Mesa V11 - dutos MIC removiveis.f3d",
+      "bytes": 23135929,
+      "sha256": "824b0284efcafb237ff6a7b3ceb7d43fc0471a14d15458c8b923943994aa88b9"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/25-NP2 V11 - vista explodida dos cartuchos - nao imprimir.f3d",
+      "bytes": 885277,
+      "sha256": "4649260479e082ad04a34898204860db311ee83f6d872997476ca86340cb49ba"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/26-NP2 V11 - metades com canal para cima - revisao.f3d",
+      "bytes": 397089,
+      "sha256": "be4004666a0611f592f5760dba7ee8b93ca716b439b9ee2bc9d60863a25b0bad"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/27-NP2 - V11 - pecas para ABS - mesa 350x350.f3d",
+      "bytes": 1334029,
+      "sha256": "8926846fb5a14a86110cfc440a01cc56d2cd226c0bdd4720ded94cbdca190d9b"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/fusion-readback.json",
+      "bytes": 228,
+      "sha256": "eed087242c39b5ed241249d86aa35c3da3d6709abe37e6978deb936193c76e88"
+    },
+    {
+      "file": "mechanical/session-2026-10-10/save-manifest.json",
+      "bytes": 6169,
+      "sha256": "15b99a0a396c36edafa89f518b9f14cdcb0e118be94a3430d934126c2d212aa1"
+    },
+    {
+      "file": "tools/cad/add-controls.py",
+      "bytes": 5545,
+      "sha256": "79acc440e3753ae5576df64f0b884a720439dcb078de5b85fc423e29c52e0d4d"
+    },
+    {
+      "file": "tools/cad/align-power-v05.py",
+      "bytes": 604,
+      "sha256": "658b3b65ca0c0271f87b4a4e5522c2b30dec9853b2ad24e4fb818d4efbc7e99a"
+    },
+    {
+      "file": "tools/cad/align-volume-v05.py",
+      "bytes": 769,
+      "sha256": "2849611956be2da328a7a6ec2b5bc355fa0855594b24f6a74ffda545e3792d9e"
+    },
+    {
+      "file": "tools/cad/build-case.py",
+      "bytes": 12699,
+      "sha256": "89fbd1997723118909dccf6b6df8c7404dca5bd4cd17d7adf0daca5b06e1fae6"
+    },
+    {
+      "file": "tools/cad/build-v03.py",
+      "bytes": 12770,
+      "sha256": "1c2466f7f334c23182ccbca0bc2c6f10a7a714d0d21e178e1c3d0a06e4cf9b24"
+    },
+    {
+      "file": "tools/cad/build-v04.py",
+      "bytes": 15887,
+      "sha256": "ced78d0647ec20ec8665801ed0b3a8924a9078e55181603cafb430249e469c62"
+    },
+    {
+      "file": "tools/cad/build-v05.py",
+      "bytes": 16724,
+      "sha256": "5167b40473814f1f2220e52c1754e89484425b5227b5001e0fa90bedcb56b721"
+    },
+    {
+      "file": "tools/cad/check-access-v07.py",
+      "bytes": 3742,
+      "sha256": "3927db71035a3a9ffee4df84c419847383a01dc6aa9a1201a0d234c2a398be2c"
+    },
+    {
+      "file": "tools/cad/check-access-v08.py",
+      "bytes": 1262,
+      "sha256": "0f64543c855af58e4b6fc0976c5b617c45450457fd0d62bcd2fbc5462828d9ca"
+    },
+    {
+      "file": "tools/cad/check-access-v09.py",
+      "bytes": 1017,
+      "sha256": "cd0c52dc9e6c280064ab9b30c95849f9d9396be9b202226dbd375866b18697ef"
+    },
+    {
+      "file": "tools/cad/check-access-v10.py",
+      "bytes": 1021,
+      "sha256": "8d59d68300ee48462e7d8649eb2f534ea587917a4af9cb5fd09e666f58ceaec7"
+    },
+    {
+      "file": "tools/cad/check-access-v11.py",
+      "bytes": 279,
+      "sha256": "acfee7292532c45278f9bbf26141ba8f11680609a14e9cedbd5a90b6ba73107e"
+    },
+    {
+      "file": "tools/cad/check-cloud-np2.py",
+      "bytes": 1456,
+      "sha256": "ded1e69500dc8aea3c743a727a9c3cf8178414da02eda0d413b253760d8845ab"
+    },
+    {
+      "file": "tools/cad/check-final-archives-v11.py",
+      "bytes": 1227,
+      "sha256": "7104e4c0bb1ca0c29cd4039b153018a0e91cfb68dd725e4960342d138ec5a665"
+    },
+    {
+      "file": "tools/cad/check-front-assembly-v10.py",
+      "bytes": 2001,
+      "sha256": "3bb2f44810a61f10193fd6635ed3b7e88069f5a536071140366b2b761fdf69dc"
+    },
+    {
+      "file": "tools/cad/check-mic-channels-v10.py",
+      "bytes": 3904,
+      "sha256": "8ae684de817f3bd9e584730cfe2a9251aa14e5627970814e64264cd526ddf3fc"
+    },
+    {
+      "file": "tools/cad/check-mics-v11.py",
+      "bytes": 4084,
+      "sha256": "2557a09d072756742a271930e63eeea161674a1620aa3a57785267c2fcb6e473"
+    },
+    {
+      "file": "tools/cad/check-outline-current-v08.py",
+      "bytes": 630,
+      "sha256": "1f15b4e5500c4c65c2b67a9b931c145b61ab242576d0d389737d76622fa3ae61"
+    },
+    {
+      "file": "tools/cad/check-saved-session.py",
+      "bytes": 1932,
+      "sha256": "a3ac72e12c188080a33d175c0b95f036782ed6ca311b9c975855a523d919b6f8"
+    },
+    {
+      "file": "tools/cad/check-visible.py",
+      "bytes": 345,
+      "sha256": "15c3b2d492ac5a67c35ae8d42311cc55c4afa9a4b03e0d50cbd87851d6c02ef5"
+    },
+    {
+      "file": "tools/cad/clear-controls-v04.py",
+      "bytes": 926,
+      "sha256": "860f93871b811b4ba530a4fb6e8dd5369bbfd0264fd2b68d57743a22b937ab92"
+    },
+    {
+      "file": "tools/cad/clear-removal-v11.py",
+      "bytes": 2742,
+      "sha256": "331d5d68a06e418ecba2ff26302ecffa8a159bcdde44a78d922a450bf5e93299"
+    },
+    {
+      "file": "tools/cad/clear-volume-v06.py",
+      "bytes": 668,
+      "sha256": "1ba25acc8e2b5df4637919b484065490e806dd65bd53afce9b2e8e80c4d00d6f"
+    },
+    {
+      "file": "tools/cad/compact-floor-v09.py",
+      "bytes": 1665,
+      "sha256": "133873cb0e96bd8bb0b4fe42a731e503c4e6ba1c8b940435851dc59bbe07e88f"
+    },
+    {
+      "file": "tools/cad/complete-floor-v08.py",
+      "bytes": 976,
+      "sha256": "e65f7f6cc09762d3794182edb7711b3480325ae8f11cbca569c511d960bb2b95"
+    },
+    {
+      "file": "tools/cad/complete-v04.py",
+      "bytes": 3144,
+      "sha256": "0e1785197592b4bc42b75e3bf4f14092c0f6b0f144a7f907372dd3ebb724b31d"
+    },
+    {
+      "file": "tools/cad/create-case-v03.py",
+      "bytes": 406,
+      "sha256": "da63152a9160cd739ba2f43193a7526cf63cf49d8201bfba744fa4b80d751695"
+    },
+    {
+      "file": "tools/cad/create-case-v05.py",
+      "bytes": 523,
+      "sha256": "edcc52f5a4ede6067af2c6064e77ddd747e5d58ad7c42371124cfb65c000c3b8"
+    },
+    {
+      "file": "tools/cad/create-case-v06.py",
+      "bytes": 610,
+      "sha256": "47f28622f0b614daa4ba88029308d7510bfd6c6cf07ab73c00b382292d857f6e"
+    },
+    {
+      "file": "tools/cad/create-case-v07.py",
+      "bytes": 679,
+      "sha256": "b93e4cf8aa08e8fd5a259bd7f15eccedfe52cbf133e5cca7624217459159a413"
+    },
+    {
+      "file": "tools/cad/create-case-v08.py",
+      "bytes": 552,
+      "sha256": "f445f823a7f15e476e40f69ebf698bb8f432ce889da71508818d6cea10f0f312"
+    },
+    {
+      "file": "tools/cad/create-document.py",
+      "bytes": 723,
+      "sha256": "5f39efc95ae34560024b5871ed8eeda926abdea50c08a2658c1fa9bfc774e4fd"
+    },
+    {
+      "file": "tools/cad/export-print-v06.py",
+      "bytes": 5167,
+      "sha256": "38577594153302a999365b5869bcc874d9d40b873d18eacf69ce91aabb03c61b"
+    },
+    {
+      "file": "tools/cad/export-print-v07.py",
+      "bytes": 476,
+      "sha256": "716412a9df3d0994e8e615d9cb4c2a10d96ee01624896392c726d8a3586655d7"
+    },
+    {
+      "file": "tools/cad/export-print-v08.py",
+      "bytes": 393,
+      "sha256": "208d3fa8d54ddab81ccc0a27a1ba132a5cafaf2848330415dc7bb319d584644b"
+    },
+    {
+      "file": "tools/cad/export-print-v09.py",
+      "bytes": 253,
+      "sha256": "d212273e3746e7bccb271e6e3c54787282e27461a8371592c4ef57cbfe54f53f"
+    },
+    {
+      "file": "tools/cad/export-print-v10.py",
+      "bytes": 357,
+      "sha256": "ab1af84e5e2661fe3bcb394076ba39d28e1cbb3e33381490d99f0e9de33c2a90"
+    },
+    {
+      "file": "tools/cad/export-print-v11.py",
+      "bytes": 1098,
+      "sha256": "7a2433243893ccf4e368b143f948bf37578d12ba47b8a0a7ad1087705b2cb846"
+    },
+    {
+      "file": "tools/cad/finish-export.py",
+      "bytes": 4952,
+      "sha256": "bfa0536219bc0ce708fe8f58cc77927a603d18251ae2d0e7ca1a53bea442a77b"
+    },
+    {
+      "file": "tools/cad/finish-v04.py",
+      "bytes": 4978,
+      "sha256": "d3107af55dffae00f6f3624b9a2f253798a2c0163d6501f35703548ac79db9c0"
+    },
+    {
+      "file": "tools/cad/finish-v05.py",
+      "bytes": 5223,
+      "sha256": "a3b5ffa0cdc6a5a97f3b435a7c4c0f19e8dc896c23c183879d13222661cd1f36"
+    },
+    {
+      "file": "tools/cad/finish-v06.py",
+      "bytes": 784,
+      "sha256": "fc88112427c33c3334beb31dcff3f41fc0e412a53b4037f6a9210396fbe31a10"
+    },
+    {
+      "file": "tools/cad/finish-v07.py",
+      "bytes": 982,
+      "sha256": "81fef2ec6410970381830462fb309a1ebb5601bf6f77986be1c10a156302dad9"
+    },
+    {
+      "file": "tools/cad/finish-v08.py",
+      "bytes": 948,
+      "sha256": "3e1442b9b2628ac0b124585cee746e8f3f08e384ea03a600cf88d5cb83b49750"
+    },
+    {
+      "file": "tools/cad/finish-v09.py",
+      "bytes": 354,
+      "sha256": "da7d60ee936a1fc7cee45577cb1f70e314c4890245ff2cee90e6432368e76606"
+    },
+    {
+      "file": "tools/cad/finish-v10.py",
+      "bytes": 1083,
+      "sha256": "140249e74f8d282dc0582cd2fab27bd2e9876e11e59c1dfc876475a49b1940ea"
+    },
+    {
+      "file": "tools/cad/finish-v11.py",
+      "bytes": 933,
+      "sha256": "f2ddf5fc19469d0bf1155206f1dbf15d30a981e88f7e9175038c4f5845bb75d5"
+    },
+    {
+      "file": "tools/cad/fit-controls-v05.py",
+      "bytes": 3357,
+      "sha256": "1151d7e03c6f5fa91053e47a0e400fe721a5010c21dc2e649d1dbaec1911c8f2"
+    },
+    {
+      "file": "tools/cad/fix-mesh-contact-v06.py",
+      "bytes": 733,
+      "sha256": "3d1da0c8c85ea7117778f8d26f4fc9ffb5681e2e974e81f1a8696683098a7ab0"
+    },
+    {
+      "file": "tools/cad/fix-orientation.py",
+      "bytes": 915,
+      "sha256": "f6df76c500242d194d35b7e077e04aebc625ff2a01183a9571b5651c4cf2d5dd"
+    },
+    {
+      "file": "tools/cad/flush-bezel-v06.py",
+      "bytes": 2283,
+      "sha256": "a05d5c5fef1f268848022f62714714e297ad29b5fb72e6dd355bfc7e18d94f5a"
+    },
+    {
+      "file": "tools/cad/import-official-7b.py",
+      "bytes": 733,
+      "sha256": "55baeb6f140dddf0622d10e1603585e395ba734806363fad3d87df8808093dbe"
+    },
+    {
+      "file": "tools/cad/inspect-active.py",
+      "bytes": 395,
+      "sha256": "574fb3138075752a32dcc26d79ea169a8b2f99d45b87ad6c97977cb2c3bd6b93"
+    },
+    {
+      "file": "tools/cad/inspect-bezel-features.py",
+      "bytes": 325,
+      "sha256": "aacf7578c1f108e74e6745463873a10e023049a10c443452ec173107d35b0452"
+    },
+    {
+      "file": "tools/cad/inspect-bezel-seam.py",
+      "bytes": 2343,
+      "sha256": "1f1b7c38c4c356ed2160ae8b5daf092c260733bb319c212575f57ee8e1733179"
+    },
+    {
+      "file": "tools/cad/inspect-cloud-np2.py",
+      "bytes": 705,
+      "sha256": "66c4ebbb472f0d6cc214079bf270d239356cf059c00aaf32fa60cf5c5389977e"
+    },
+    {
+      "file": "tools/cad/inspect-cloud-save-api.py",
+      "bytes": 585,
+      "sha256": "d716d19d502219683f76493e56667b6a9b1ffcd4991694b0bcf97425257772b8"
+    },
+    {
+      "file": "tools/cad/inspect-combine-v08.py",
+      "bytes": 614,
+      "sha256": "d4470f933cc243976b62caca737aa5f33319a444342533b4e97dcf2da32d8320"
+    },
+    {
+      "file": "tools/cad/inspect-cover-v05.py",
+      "bytes": 689,
+      "sha256": "f3f3a8d07db07f59f8849e66f916bc96cee3d01cb006902e7ab6ebb434c8b6f8"
+    },
+    {
+      "file": "tools/cad/inspect-floor-stages-v08.py",
+      "bytes": 795,
+      "sha256": "2c03ff4daade9267a380cd6e6c56ce0967d53065561ad8b5a3b87b79f262dc4d"
+    },
+    {
+      "file": "tools/cad/inspect-fusion.py",
+      "bytes": 731,
+      "sha256": "554e158843d7af9267500fdd5d2ae353ba2c45d413bcf9e59bfc8cd9d0e51f5e"
+    },
+    {
+      "file": "tools/cad/inspect-mic-assembly.py",
+      "bytes": 373,
+      "sha256": "4fd1410b66bd4a4c56f17e814a14bf314269c587a71bd31d44a984c9cc23d664"
+    },
+    {
+      "file": "tools/cad/inspect-mic-neighbors.py",
+      "bytes": 819,
+      "sha256": "d0f3deca5b451c68601364558978cdb4d28e2583d86c031a7c0c00d965b0d7f1"
+    },
+    {
+      "file": "tools/cad/inspect-microphones.py",
+      "bytes": 1473,
+      "sha256": "41e952e35785a344824ffa0d3e995ef992643c3a9c5d6ffe0e02514e40f373cc"
+    },
+    {
+      "file": "tools/cad/inspect-model.py",
+      "bytes": 835,
+      "sha256": "5133bf5e29d7db115643662024c90af0500515c64af7dbfe08bb571e18f14509"
+    },
+    {
+      "file": "tools/cad/inspect-official-faces.py",
+      "bytes": 930,
+      "sha256": "68c922392a063934fdf331ad119a6cfc8699cd4ab0adfd561dfbfe9bf520e26a"
+    },
+    {
+      "file": "tools/cad/inspect-outlines-v08.py",
+      "bytes": 716,
+      "sha256": "2786a7b43d2a1f169208b4827e44d35d56c153136c8ca8729cc6f69dbd7721b3"
+    },
+    {
+      "file": "tools/cad/inspect-print-mesh.py",
+      "bytes": 1379,
+      "sha256": "173847a8d7a882fd477516039dfe7853306439cd1f2ecb218e295297cec840d0"
+    },
+    {
+      "file": "tools/cad/inspect-ramp-history-v06.py",
+      "bytes": 960,
+      "sha256": "b55a219a9adbf7f51af6044db36f83f3349182bab6c4e6176a040d334b5d6d09"
+    },
+    {
+      "file": "tools/cad/inspect-solid-v08.py",
+      "bytes": 835,
+      "sha256": "9f358a0e17b70f7c445b5fdf9a5766077202fb17fcc92b3d89cf6ceeabaff3c3"
+    },
+    {
+      "file": "tools/cad/inspect-v03-geometry.py",
+      "bytes": 827,
+      "sha256": "b521a1c08b90f160d405249a19bd104d6f1b1067db39d1f531e76c2c3684e47e"
+    },
+    {
+      "file": "tools/cad/inspect-v04-tail.py",
+      "bytes": 536,
+      "sha256": "cca26ee7800293fd92c2fbb249d337443f5da3c95f668461097c79dc43db732f"
+    },
+    {
+      "file": "tools/cad/inspect-world.py",
+      "bytes": 892,
+      "sha256": "c6aafc3e505e866d69bde1150d4c41896a2f440a8a494e9068da3affe74a64f1"
+    },
+    {
+      "file": "tools/cad/integrate-speaker-v05.py",
+      "bytes": 4685,
+      "sha256": "36c9d54368e6aa56faf3e9d46ab46ef6a33bf61bb2822a74fa9c59a9304c7a6b"
+    },
+    {
+      "file": "tools/cad/internal-io-v07.py",
+      "bytes": 1712,
+      "sha256": "ca3d53b3281a67d3048d9745068b1516a195e97cef24880a7ca3e1446d3ff32d"
+    },
+    {
+      "file": "tools/cad/invoke-fusion.ps1",
+      "bytes": 1617,
+      "sha256": "e2f2a674a0e2d7b11d377d15be41bcf00f42b5326fcfda416e6a4143213c72c3"
+    },
+    {
+      "file": "tools/cad/join-cover-v05.py",
+      "bytes": 729,
+      "sha256": "03df7276ba9a2256fd9e07a96cdb8897584746ab430d8068a71aa6428b9b0b8f"
+    },
+    {
+      "file": "tools/cad/level-front.py",
+      "bytes": 1357,
+      "sha256": "103d11d1996d0ba4ab805c115b3076bb20838a829d2c812e18e002e8cfad5940"
+    },
+    {
+      "file": "tools/cad/lower-floor-v08.py",
+      "bytes": 5360,
+      "sha256": "244216517d267d1fbf607350f3238a6a53b92f278a274bd80f7d1461a641466c"
+    },
+    {
+      "file": "tools/cad/measure-official-7b.py",
+      "bytes": 1459,
+      "sha256": "de148c79945bec38e03e899aaadc64965bf68dd73f7cf7bc1287cc01a4ab2241"
+    },
+    {
+      "file": "tools/cad/mic-ducts-v10.py",
+      "bytes": 6557,
+      "sha256": "41a9a728c59ab8e8063f0e91d18b302ca29ebd494b2bdff124685f55e040d86d"
+    },
+    {
+      "file": "tools/cad/new-v02.py",
+      "bytes": 248,
+      "sha256": "37be1283c42f0e8ac8309fa29b5e4811991508291fcb7e0cb0e9db6599749eef"
+    },
+    {
+      "file": "tools/cad/new-v06.py",
+      "bytes": 463,
+      "sha256": "c06b787cbbe7505e73a60dfb002ff20617c20bb8b8e5f1600ddfa78d121b9e66"
+    },
+    {
+      "file": "tools/cad/new-v07.py",
+      "bytes": 743,
+      "sha256": "41d665bd30ea894de63d9f4eef7f342b3b8bbfe546ce64dbcb646a4fd8f8eea1"
+    },
+    {
+      "file": "tools/cad/new-v08.py",
+      "bytes": 609,
+      "sha256": "7dfe09f5e91d7ad9ab46ef565768931f014afbf6a426652c3f48ca6f0525581e"
+    },
+    {
+      "file": "tools/cad/new-v09.py",
+      "bytes": 435,
+      "sha256": "ba2bf778fa9e2099a5a7307e29fe853211a0d9c7501fcc61c661337331e6ee5e"
+    },
+    {
+      "file": "tools/cad/new-v10.py",
+      "bytes": 444,
+      "sha256": "5e51c03b4344a38023c118b9593ad4c48afbdc7b3a9c9afa96fdecec91e30406"
+    },
+    {
+      "file": "tools/cad/new-v11.py",
+      "bytes": 438,
+      "sha256": "1757ac4164fee6440df1f37696d49240dd5c5ba36e36e4031e6645508e1842a4"
+    },
+    {
+      "file": "tools/cad/open-connectors-v07.py",
+      "bytes": 1838,
+      "sha256": "20d03edb4614001953f5f228e1715c3e9a8674b8e6a9fbabee0b2bf2d14cf859"
+    },
+    {
+      "file": "tools/cad/open-mic-mouths-v11.py",
+      "bytes": 1195,
+      "sha256": "bebd330a52f0fdddcccdfec76105980bba5d08998160add437ff24a13a7f36f3"
+    },
+    {
+      "file": "tools/cad/package-print-v06.py",
+      "bytes": 5070,
+      "sha256": "541cb8875d6ea57ee274950466a748b806f730ef14f8d7742ac16c318931f453"
+    },
+    {
+      "file": "tools/cad/package-print-v07.py",
+      "bytes": 386,
+      "sha256": "62a6b983259e81e7c40a4f9f352f40674259d94f85a43df1e772880008716b6a"
+    },
+    {
+      "file": "tools/cad/package-print-v08.py",
+      "bytes": 306,
+      "sha256": "4946fb44f2a8b860734802cb9cde6c4972f79d984478328beb94e8f159f97aa3"
+    },
+    {
+      "file": "tools/cad/package-print-v09.py",
+      "bytes": 205,
+      "sha256": "fd8f3503d79a89474b9e66de02ae918ce026d1893084d1269024849a90c6d473"
+    },
+    {
+      "file": "tools/cad/package-print-v10.py",
+      "bytes": 419,
+      "sha256": "ed4d2f28b1fb8eefe25a83f33b542ed6c240f267ff3902dba1827cc81319353f"
+    },
+    {
+      "file": "tools/cad/package-print-v11.py",
+      "bytes": 433,
+      "sha256": "97e620ed56678c013c1daa07de100925f4bd56617bb8607067ff4687e013a4d5"
+    },
+    {
+      "file": "tools/cad/place-mic-gaskets-v10.py",
+      "bytes": 469,
+      "sha256": "8363046d64801d5dbecdd71aa587db76577e2db0f6c82068862054d297a9310b"
+    },
+    {
+      "file": "tools/cad/polish-v04.py",
+      "bytes": 1429,
+      "sha256": "6718e9e934e074ede4bd78690902efb9daffc73a10087b58fc8fdcea2080cf76"
+    },
+    {
+      "file": "tools/cad/present-v03.py",
+      "bytes": 2620,
+      "sha256": "b25f4e46b195d233f76208c44c75e0b6800f4f25091515dccd8dbd0c6182300b"
+    },
+    {
+      "file": "tools/cad/preview-case.py",
+      "bytes": 997,
+      "sha256": "77379dbcf38e3eef63ade570b223fc94d23786ffdf02080b31e1cf181b1f9108"
+    },
+    {
+      "file": "tools/cad/probe-temp-v05.py",
+      "bytes": 1080,
+      "sha256": "bec090fc18e96d6451d982c2c40a54c71f080f28feabd8d5e7fa9d24f8f6d34e"
+    },
+    {
+      "file": "tools/cad/raise-clearance-v07.py",
+      "bytes": 3085,
+      "sha256": "69e2a2b730f7856cc45694df9fb11a451427b5b9fb6d1d136f4bcd6b097d2202"
+    },
+    {
+      "file": "tools/cad/recess-usb-v05.py",
+      "bytes": 3596,
+      "sha256": "76149edd9b286b579d3baf39b7c06889d3ba0157a76cd1a2384fbbcaa2babd49"
+    },
+    {
+      "file": "tools/cad/relieve-internal-io-v09.py",
+      "bytes": 1697,
+      "sha256": "64de6c99145a727eaf1716e1c2700186fc870ebbdc237f79a04a14778b16a2c1"
+    },
+    {
+      "file": "tools/cad/removable-mics-v11.py",
+      "bytes": 11021,
+      "sha256": "1366f937b5c652898f9d9a108fa8034e449c0fc9ef6e92f2d17ddd8904eed978"
+    },
+    {
+      "file": "tools/cad/remove-clearances-v04.py",
+      "bytes": 665,
+      "sha256": "f185fee788b3f17fc776d1d1ae1654b5e03663bddf4e59492d437d74049a6903"
+    },
+    {
+      "file": "tools/cad/remove-empty-v04.py",
+      "bytes": 497,
+      "sha256": "e65e0c25a629ffcae7c544dfd3df941b2e73126577de90ad32a9932df64c3fc3"
+    },
+    {
+      "file": "tools/cad/remove-reliefs-v10.py",
+      "bytes": 1033,
+      "sha256": "9edcf768d2c48c4a24377994d90f18ba1a6fa6facf71b9d15c060f39690ec220"
+    },
+    {
+      "file": "tools/cad/render-access-v07.py",
+      "bytes": 1283,
+      "sha256": "a4bf4b31464a51f1a7f17f3111bc01f2287ae0f29c6cedade0902beef97c4383"
+    },
+    {
+      "file": "tools/cad/render-access-v08.py",
+      "bytes": 287,
+      "sha256": "46d9379130279a2368036b3909a9d95ed881ca405e3867261f140e102ad68971"
+    },
+    {
+      "file": "tools/cad/render-access-v09.py",
+      "bytes": 254,
+      "sha256": "67f39d80eafb1abb85c199490c37bf2c9513c75b4b6b25a95fc1398dea19c9ac"
+    },
+    {
+      "file": "tools/cad/render-access-v10.py",
+      "bytes": 254,
+      "sha256": "3734e58e5981aeea04c35275d1de730cf98b2421eb1cfbcfb55e9b6e3cb5fcf1"
+    },
+    {
+      "file": "tools/cad/render-mic-detail-v10.py",
+      "bytes": 3998,
+      "sha256": "b9e723e7a2e0314714801ab7e3a1f3e6591a050a51d11a7400496bdb79f17dee"
+    },
+    {
+      "file": "tools/cad/render-mics-v11.py",
+      "bytes": 3215,
+      "sha256": "98a134ed8d3bbf2fc5d7ad445ab82c75715c6252f5a9d1ae2326d356ef3615de"
+    },
+    {
+      "file": "tools/cad/repair-access-v08.py",
+      "bytes": 2391,
+      "sha256": "69b8e599ca257c1fa5f3d4fe14c70f00405016e8ec273856d9d1d13fde042920"
+    },
+    {
+      "file": "tools/cad/repair-combine-v08.py",
+      "bytes": 1049,
+      "sha256": "3d3dab904cc4361995260e8e250d106d7ef1dd11d50724254d888421b5d4946d"
+    },
+    {
+      "file": "tools/cad/repair-feet-v07.py",
+      "bytes": 802,
+      "sha256": "2646e3efe51cbf56a46104572d8c3c5d0f5a0ac5dab460951c94e64fcf511a14"
+    },
+    {
+      "file": "tools/cad/repair-outline-v08.py",
+      "bytes": 1372,
+      "sha256": "309f388d37eafc8ba113f5950e8d25d16237e5596d69d0ab8d9aa5324dea7f7a"
+    },
+    {
+      "file": "tools/cad/repair-ramp-union-v06.py",
+      "bytes": 1043,
+      "sha256": "0b8cb2504a35e792d1816c674aaf6d1dbf3002c3c7013a59dc703315b110923d"
+    },
+    {
+      "file": "tools/cad/repair-v04-envelope.py",
+      "bytes": 2300,
+      "sha256": "3f247f636b2bfb901373b4d7dfa9e8499237619b06ed8efe8aa9cf0f325df6e6"
+    },
+    {
+      "file": "tools/cad/replace-power-v04.py",
+      "bytes": 1428,
+      "sha256": "eb7154b9ad15e5032804b570b3c033ee5fee27a5aaa74de7f903c3b18e2c281d"
+    },
+    {
+      "file": "tools/cad/resize-speaker.py",
+      "bytes": 3630,
+      "sha256": "f61ad3472d1b7cc3ac275c21e36040a840a5e96ed089eacac7f363de608341b4"
+    },
+    {
+      "file": "tools/cad/save-cloud-np2.py",
+      "bytes": 3173,
+      "sha256": "8a188be1e529e9bb00555d5f9c5e8dd5f7685f256953431cb6c315609a02a07d"
+    },
+    {
+      "file": "tools/cad/save-session-v11.py",
+      "bytes": 2031,
+      "sha256": "516da384f7f3caa9f69a3e6f36b9113306e153a3e282c5c90fa796745f8bc2e9"
+    },
+    {
+      "file": "tools/cad/save-status-v05.py",
+      "bytes": 699,
+      "sha256": "cfe707ba6428b01528b76e9ab3527abbacab74961752a7273134ddd77dfc0d75"
+    },
+    {
+      "file": "tools/cad/simplify-v06.py",
+      "bytes": 12119,
+      "sha256": "6a17a579749b7c51a7ac226ff0a81d8f12ad61dd0c4cf7f67ee905bab9d1896e"
+    },
+    {
+      "file": "tools/cad/trim-profile-tails-v08.py",
+      "bytes": 777,
+      "sha256": "113d71a33d48a1bcff290eefb0a824d7bfc51de7cf6a05c32820afccf426e8f1"
+    },
+    {
+      "file": "tools/cad/verify-temp-v05.py",
+      "bytes": 5131,
+      "sha256": "a7d90aeaa10a57c1103e60252dd36c803bc64ea7286ddd8405d589886e88b183"
+    },
+    {
+      "file": "tools/cad/verify-v04.py",
+      "bytes": 1617,
+      "sha256": "6f621acfc2ea808bedf1484eaf828cbfabbe05240c604fd06fefe98c4a02613d"
+    },
+    {
+      "file": "tools/cad/verify-v05.py",
+      "bytes": 2003,
+      "sha256": "f2da92a6120dd05dd5a31b348775f3c8d15e67f10c55b2444983a219b011ead7"
+    },
+    {
+      "file": "tools/cad/verify-v06.py",
+      "bytes": 1882,
+      "sha256": "79c7d2acea7a59075c53b14f440cde557eebb1258805e47d8ba8cb8fa96ebaeb"
+    },
+    {
+      "file": "tools/cad/verify-v07.py",
+      "bytes": 456,
+      "sha256": "50331b2d4996e7b94065ccf4e6f7a956467b1fdea5a79641710a62e8780461b9"
+    },
+    {
+      "file": "tools/cad/verify-v08.py",
+      "bytes": 300,
+      "sha256": "07107b79d8db7a9b8a5b3aaec95965ce16d264771f0d2e5aee145fdb1519c320"
+    },
+    {
+      "file": "tools/cad/verify-v09.py",
+      "bytes": 263,
+      "sha256": "f812e4134374159d16dbeded8f5930cb5676468ea6c7831b83927359dd788efd"
+    },
+    {
+      "file": "tools/cad/verify-v10.py",
+      "bytes": 263,
+      "sha256": "8e468a6aaf2d8a7eb0c63a3019db8ef1a629244f42b6e826a658e7b3e4ad821a"
+    },
+    {
+      "file": "tools/cad/verify-v11.py",
+      "bytes": 272,
+      "sha256": "90878547587d99e1fd5723510c2d5291053efdc18d7457662dae7028ea65fe2e"
+    },
+    {
+      "file": "tools/cad/write-guide-v09.py",
+      "bytes": 1249,
+      "sha256": "3815d6b98fb7872170e3e9d719948efcb07bc325d81ccba0de5ea364bd7d51f5"
+    },
+    {
+      "file": "tools/cad/write-guide-v10.py",
+      "bytes": 2144,
+      "sha256": "13d11f0f0c3afe745240cb74090ebb71d1c185da187155a091d09f60916a2e0a"
+    }
+  ]
+}

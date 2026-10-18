@@ -1,0 +1,55 @@
+{
+  "removable": true,
+  "printed_duct_parts": 4,
+  "modules": 2,
+  "split_axis": "native X at -68 and +68 mm",
+  "print_orientation": "constant-X outer face down; split face and airway up",
+  "mounting": "one screw per cartridge, approximately diameter 2 x 8 mm; pilot 1.7 mm, clearance 2.4 mm; select physical screw and prototype thread",
+  "halves_joint": "no extra pins; align screw half-bores and perimeter, bond and seal away from PCB; cartridge not glued to case",
+  "case_clearance_mm": 0.2,
+  "body_airway_integrated": false,
+  "floor_nominal_mm": 2.4,
+  "header_reliefs_removed": true,
+  "bottom_extension_mm": 4,
+  "channel_stations_yz_mm": [
+    [
+      -53.5,
+      -3.43
+    ],
+    [
+      -52.45,
+      -10.9
+    ],
+    [
+      -50,
+      -14
+    ]
+  ],
+  "front_ports_xy_mm": [
+    [
+      -68,
+      -53.5
+    ],
+    [
+      68,
+      -53.5
+    ]
+  ],
+  "front_diameter_mm": 1.6,
+  "channel_diameter_mm": 2,
+  "gaskets_required": true,
+  "rear_gasket_free_compressed_mm": [
+    2,
+    1.65
+  ],
+  "front_gasket_free_compressed_mm": [
+    0.5,
+    0.43
+  ],
+  "local_wall_at_glass_bypass_mm": 0.6,
+  "terminal_wall_minimum_mm": 1.2,
+  "hardware_inlet": "official STEP has only capsule envelope; physically verify inlet",
+  "acoustic_performance": "not measured",
+  "extraction": "screen/bezel/screw removed; pull forward +native Z; tested at 0.2,0.5,1,2,5,10,20 mm",
+  "seats": "open U at inlet; planar positive screw stop on inclined support"
+}
