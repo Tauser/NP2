@@ -5524,3 +5524,26 @@ inspecionado visualmente após o flash.
   `%TEMP%/np2-display-sound-stack-fix-20261005.log`. A captura não reproduziu
   o toque em Tela e som; essa confirmação e o high-water mark sob navegação
   continuam pendentes.
+
+### Quota CoinGecko e recursos do sistema — índice consolidado em 18/10/2026
+
+- A campanha da quota CoinGecko, iniciada em 07/10 e versionada em `a56cf3b`
+  e `a92a6eb`, está em [COINGECKO-QUOTA.md](COINGECKO-QUOTA.md): build limpo
+  P4, app-flash em COM8 e HTTP 200 após ACK durável do orçamento. O registro
+  contém hashes, configuração, comandos, amostras de memória e limites; não
+  comprova intervalo completo de 20 min, virada de mês ou cortes reais.
+- A campanha Sistema de 10/10, versionada em `3ed6276`, está em
+  [SYSTEM-RESOURCES-VALIDATION.md](SYSTEM-RESOURCES-VALIDATION.md): P4 v1.3,
+  flash/PSRAM 32 MiB, build limpo inicial e incrementais finais, app-flash em
+  COM8 e captura sanitizada de 100 s. App SHA-256
+  `167250E95557FF924FB5AED5A5089A0A7454504ACD29A90238A43F19F3CA551F`;
+  o registro reúne os demais hashes e comandos. Não houve nova inspeção
+  completa de BOM nem obtenção do hash C6 instalado; C6 não foi gravado.
+- Em 18/10 foram repetidos o teste host da tela Sistema, com 100 ciclos de
+  navegação, e a conferência dos cinco hashes de artefatos listados no registro;
+  todos passaram. Não houve novo build, flash ou ensaio físico nessa data.
+- Heap interno livre de 54.187 B e maior bloco de 27.648 B na captura de
+  Sistema mantêm a margem de memória aberta para a carga atual. A amostra
+  fica abaixo do piso de 80 KiB do plano; não mede o pico TLS. Interação na
+  placa, flush com animações, SD concomitante/remoção e soak ainda exigem prova.
+  Nenhum gate adicional é encerrado por esta consolidação documental.

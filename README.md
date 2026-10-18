@@ -11,12 +11,34 @@ laboratório para manifesto assinado, hash incremental, journal, slot inativo e
 saúde local de boot; o ciclo HTTPS físico e a recuperação conjunta P4/C6 ainda
 estão em validação.
 
+## Estado consolidado — 18/10/2026
+
+- Preferências > Sistema exibe CPU por core, histórico limitado, heap interno,
+  PSRAM, temperatura, uptime e ocupação de LittleFS/SD. Implementação em
+  `3ed6276`; build, flash e boot de 10/10 estão registrados em
+  [SYSTEM-RESOURCES-VALIDATION.md](docs/SYSTEM-RESOURCES-VALIDATION.md).
+- CoinGecko usa quota mensal persistente e consulta a cada 5 min, ou 20 min
+  a partir de 80% do orçamento. Política, recuperação e limites em
+  [COINGECKO-QUOTA.md](docs/COINGECKO-QUOTA.md).
+- Gabinete atual: V11, com dutos de microfone removíveis. Modelos, histórico,
+  pacotes de impressão e scripts CAD foram versionados em `57b3433`.
+  Consulte o [índice mecânico](mechanical/README.md).
+
+A nova tela ainda requer interação e medições físicas de render/SD. As
+amostras recentes de heap interno ficaram abaixo do piso de 80 KiB do plano;
+a margem de memória precisa ser recuperada e medida sob carga. O gabinete
+aguarda fatiamento, impressão e ensaio de montagem/áudio. Essas entregas não
+encerram G5, G6 ou G7 nem qualificam uma release.
+
 ## Referências do projeto
 
 - [Bring-up e restrições de hardware](docs/RESTART-HARDWARE-BRINGUP.md)
 - [Plano de arquitetura e gates](docs/PLANO-FIRMWARE-PREMIUM.md)
 - [Roadmap e estado das fases](docs/ROADMAP.md)
 - [Execução e validação G5](docs/G5-VALIDATION.md)
+- [Recursos do sistema e evidências](docs/SYSTEM-RESOURCES-VALIDATION.md)
+- [Quota e cadência CoinGecko](docs/COINGECKO-QUOTA.md)
+- [Gabinete e arquivos de impressão](mechanical/README.md)
 - [Configuração de desenvolvimento](docs/DEVELOPMENT.md)
 - [Instruções para colaboradores e agentes](AGENTS.md)
 
@@ -26,7 +48,9 @@ estão em validação.
 - `coprocessor/`: configuração e receita da imagem C6; o fonte do C6 vem do
   exemplo oficial fixado de ESP-Hosted, não de uma cópia local não rastreada.
 - `docs/`: decisões, procedimentos e evidências de bancada.
+- `mechanical/`: gabinete, referências, modelos editáveis e pacotes de impressão.
 - `tools/`: verificações reproduzíveis sem segredos.
+  `tools/cad/` contém os scripts de construção e inspeção mecânica no Fusion.
 
 O baseline é ESP-IDF 5.5.4, BSP Waveshare 3.0.1, LVGL 9.5.0,
 `esp_lvgl_adapter` 0.6.4, ESP-Hosted 3.0.6 e `esp_wifi_remote` 1.6.4. A

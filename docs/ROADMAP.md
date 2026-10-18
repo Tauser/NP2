@@ -38,6 +38,29 @@ Regras de execução em todas as fases:
 | 6 | G6 — qualificação | Blocked by G0–G5 | Soak, térmica, energia, falhas e desempenho em unidades de amostra. |
 | 7 | G7 — produção | Blocked by G6 | Segurança de produção, fábrica, assistência e rollout operacional. |
 
+## Entregas recentes e pendências — 18/10/2026
+
+Os fechamentos históricos acima conservam seu escopo. A implementação atual
+acrescenta entregas que exigem validação específica:
+
+| Entrega | Evidência disponível | Próximo aceite |
+|---|---|---|
+| Quota CoinGecko (`a56cf3b`, documentação `a92a6eb`) | Testes host, build limpo, flash P4 e HTTP 200 com reserva durável. [Registro](COINGECKO-QUOTA.md). | Intervalo físico completo de 20 min, virada de mês, cortes reais e soak. |
+| Recursos em Preferências > Sistema (`3ed6276`, ADR-093) | Build/flash/boot de 10/10; teste host repetido em 18/10 com 100 ciclos de navegação. [Registro](SYSTEM-RESOURCES-VALIDATION.md). | Interação na placa, flush/latência com animações, SD concomitante e remoção do cartão. |
+| Gabinete V11 (`57b3433`) | Modelos, dez STL, 3MF, histórico e verificações CAD; 199 hashes do manifesto conferidos em 18/10. [Índice](../mechanical/README.md). | Fatiamento para a impressora, protótipo ABS, montagem, retenção, vedação e áudio; térmica/energia em gabinete no G6. |
+
+**Memória continua sendo pendência de qualificação:** a captura de Sistema
+registrou 54.187 B internos livres e maior bloco de 27.648 B; a campanha
+CoinGecko também registrou valores abaixo de 80 KiB. Essas amostras não medem
+o pior pico de TLS nem satisfazem o piso do plano. Recuperar margem e medir
+heap, maior bloco e pilhas com navegação, HTTPS e armazenamento concorrentes.
+Os gates históricos não garantem essa margem para a carga atual.
+
+G5 permanece em andamento, com ciclos assinados, rollback/cortes e recovery
+C6 pendentes; G6/G7 continuam bloqueados. O hash da imagem C6 instalada não
+foi obtido nas campanhas recentes e sua recipe/patch reproduzível segue como
+exclusão de G0 a resolver antes da transação conjunta.
+
 ## Fase 0 — Reprodução da base
 
 **Estado:** Complete — scoped close para o P4.

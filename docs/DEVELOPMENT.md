@@ -39,15 +39,50 @@ idf.py partition-table
 idf.py build
 ```
 
-O gerenciador de componentes deve gerar `firmware/dependencies.lock` na
-primeira resolução. Revise-o e o adicione ao Git: ele é parte do baseline.
+O arquivo `firmware/dependencies.lock` já está versionado e faz parte do
+baseline. Preserve os pins e hashes; qualquer nova resolução que altere o lock
+precisa de revisão e da decisão correspondente antes de ser incorporada.
 `sdkconfig` e `managed_components` são saídas locais ignoradas. Confirme que o
 `sdkconfig` efetivo preserva os valores de `sdkconfig.defaults` antes de
 prosseguir para a placa.
 
-O firmware atual já ultrapassou o scaffold e possui gates físicos G0–G3 com
-escopo documentado. Antes de qualquer nova gravação, confira a fase afetada,
+O firmware atual possui fechamentos G0–G4 com escopo documentado; G5 continua
+em andamento. O [roadmap](ROADMAP.md) reúne as entregas e pendências atuais.
+Antes de qualquer nova gravação, confira a fase afetada,
 o hash da imagem e as evidências pendentes; build verde não substitui bancada.
+
+## Verificações das entregas recentes
+
+Na raiz do repositório, em PowerShell:
+
+```powershell
+./tools/run_settings_system_ui_host_test.ps1
+./tools/run_coingecko_quota_host_test.ps1
+python tools/coingecko_admission_host_test.py
+python tools/coingecko_storage_host_test.py
+./tools/run_app_event_bus_host_test.ps1
+```
+
+O teste de Sistema compila a tela real, as fontes e LVGL 9.5.0, incluindo
+rollover de CPU, dados ausentes, histórico limitado, manutenção e 100 ciclos
+de navegação. Requer LVGL resolvido em `firmware/managed_components/`.
+O script de Sistema usa caminhos locais de CMake, Ninja e GCC; os demais
+testes exigem GCC disponível conforme seus scripts. Confira a instalação e o
+PATH antes de executá-los em outra máquina. As saídas ficam em
+`firmware/build/` ou no diretório temporário indicado pelo script, fora do Git.
+Critérios físicos,
+comandos e hashes do P4 estão em [Sistema](SYSTEM-RESOURCES-VALIDATION.md) e
+[CoinGecko](COINGECKO-QUOTA.md).
+
+Um `sdkconfig` gerado anteriormente deve ser conferido explicitamente:
+`sdkconfig.defaults` contém agora as estatísticas FreeRTOS com ESP Timer
+exigidas pela coleta de CPU (ADR-093). A receita com diretório de build e
+SDKCONFIG separados está no registro de Sistema. Preserve target `esp32p4`,
+três framebuffers e auto-suspend desabilitado.
+
+Para o gabinete, comece pelo [índice mecânico](../mechanical/README.md) e pelo
+guia de impressão V11. Scripts em `tools/cad/` que importam `adsk` executam no
+Fusion; as verificações geométricas registradas não substituem o protótipo.
 
 ## C6
 

@@ -97,3 +97,21 @@ Não foi capturado um ensaio físico de interação nesta versão final.
 Logs locais finais: `system-resources-20261010-spacing-build.log`,
 `system-resources-20261010/flash-final.log` e
 `system-resources-20261010/boot-final-sanitized.log` dentro de `firmware/build/`.
+
+## Rastreabilidade e conferência — 18/10/2026
+
+As alterações desta entrega foram versionadas no commit `3ed6276`. O descritor
+`a92a6eb-dirty` identifica o build histórico gravado em 10/10 e foi preservado
+neste registro; não houve recompilação ou nova gravação nesta conferência.
+
+O comando `./tools/run_settings_system_ui_host_test.ps1` foi repetido com
+sucesso em 18/10, incluindo 100 ciclos de navegação. SHA-256 de app, ELF,
+SDKCONFIG efetivo, tabela binária e lock locais conferem com a tabela acima.
+Isso confirma a integridade dos artefatos arquivados e o resultado host; não
+constitui novo ensaio na placa.
+
+A amostra de 54.187 B de heap interno livre está abaixo do piso de 80 KiB do
+plano. O maior bloco de 27.648 B também deve entrar na análise de admissão
+HTTPS e fragmentação. A entrega não aprova a margem de memória da carga atual:
+é necessário recuperar margem e medir os picos de TLS, navegação e I/O, além
+das pilhas. Interação física, animações, SD e soak continuam pendentes.

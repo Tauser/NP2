@@ -2,6 +2,14 @@
 
 Data: 2026-09-28. Branch: `codex/settings-migration`. Decisão: ADR-043.
 
+**Registro histórico da migração.** A entrega de 10/10/2026, versionada em
+`3ed6276`, acrescentou uptime, CPU, memória e armazenamento à projeção e à
+tela. O estado atual, os testes e a gravação estão em
+[SYSTEM-RESOURCES-VALIDATION.md](SYSTEM-RESOURCES-VALIDATION.md). As descrições
+abaixo sobre ausência de uptime, modal legado e flash manual pertencem à
+etapa de 28/09; não descrevem o produto atual. A política vigente de build e
+flash está em [AGENTS.md](../AGENTS.md).
+
 ## Arquivos completos e reutilização
 
 Os arquivos solicitados `firmware/main/ui/screens/settings/np_settings_system.c/.h`
