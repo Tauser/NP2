@@ -14,6 +14,9 @@ extern "C" {
 typedef struct {
     bool ready;
     bool mounted;
+    bool usage_available;
+    uint64_t total_bytes;
+    uint64_t free_bytes;
     bool pending;
     const void *icon_source;
     bool icon_available;

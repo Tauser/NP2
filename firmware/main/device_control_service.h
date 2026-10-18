@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "system_resource_model.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,7 @@ typedef struct {
     char firmware_version[32];
     bool temperature_available;
     int16_t chip_temperature_deci_c;
+    system_resource_snapshot_t resources;
     bool audio_ready;
     esp_err_t brightness_result;
     esp_err_t volume_result;

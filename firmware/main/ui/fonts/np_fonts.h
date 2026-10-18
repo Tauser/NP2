@@ -18,6 +18,7 @@ LV_FONT_DECLARE(ui_font_np_monserrat_16_ptbr)
 LV_FONT_DECLARE(ui_font_np_keyboard_20)
 LV_FONT_DECLARE(ui_font_np_material_18)
 LV_FONT_DECLARE(ui_font_np_material_24)
+LV_FONT_DECLARE(ui_font_np_material_system_24)
 LV_FONT_DECLARE(ui_font_np_material_48)
 
 #ifdef __cplusplus

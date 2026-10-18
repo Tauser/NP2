@@ -2302,6 +2302,19 @@ esp_err_t flash_coordinator_request_restart(void)
     return ESP_OK;
 }
 
+static void refresh_storage_usage(void)
+{
+    size_t total = 0U, used = 0U;
+    const bool available = esp_littlefs_mounted(LITTLEFS_PARTITION) &&
+        esp_littlefs_info(LITTLEFS_PARTITION, &total, &used) == ESP_OK &&
+        total != 0U && total <= UINT32_MAX && used <= total;
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.usage_available = available;
+    s_status.total_bytes = available ? (uint32_t)total : 0U;
+    s_status.used_bytes = available ? (uint32_t)used : 0U;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
 static void flash_worker_task(void *arg)
 {
     (void)arg;
@@ -2338,8 +2351,15 @@ static void flash_worker_task(void *arg)
         refresh_cache_status();
     }
 
+    refresh_storage_usage();
+    TickType_t last_usage_tick = xTaskGetTickCount();
     flash_request_t request;
-    while (xQueueReceive(s_request_queue, &request, portMAX_DELAY) == pdTRUE) {
+    for (;;) {
+        if (xTaskGetTickCount() - last_usage_tick >= pdMS_TO_TICKS(30000U)) {
+            refresh_storage_usage();
+            last_usage_tick = xTaskGetTickCount();
+        }
+        if (xQueueReceive(s_request_queue, &request, pdMS_TO_TICKS(1000U)) != pdTRUE) continue;
         set_busy(true, false);
         if (request.kind == FLASH_REQUEST_RESTART) {
             /* Restart is serialized after earlier writes, with a final check

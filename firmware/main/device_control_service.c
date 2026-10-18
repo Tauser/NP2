@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "driver/temperature_sensor.h"
 
 #include "bsp/display.h"
@@ -387,6 +389,11 @@ static void device_control_task(void *arg)
         s_temperature_sensor = NULL;
     }
     TickType_t last_temperature_tick = xTaskGetTickCount() - pdMS_TO_TICKS(5000U);
+    TickType_t last_resources_tick = xTaskGetTickCount() - pdMS_TO_TICKS(2000U);
+    uint32_t prior_cpu_time = 0U;
+    uint32_t prior_idle[2] = {0};
+    bool cpu_baseline = false;
+    TickType_t last_resources_log = xTaskGetTickCount();
     bool restored = false;
     for (;;) {
         if (!restored) {
@@ -415,6 +422,44 @@ static void device_control_task(void *arg)
             s_status.chip_temperature_deci_c = available
                 ? (int16_t)(celsius * 10.0f + (celsius >= 0 ? 0.5f : -0.5f)) : 0;
             portEXIT_CRITICAL(&s_lock);
+        }
+        if (xTaskGetTickCount() - last_resources_tick >= pdMS_TO_TICKS(2000U)) {
+            last_resources_tick = xTaskGetTickCount();
+            system_resource_snapshot_t metrics = {0};
+            const uint64_t now_us = (uint64_t)esp_timer_get_time();
+            const uint32_t cpu_time = (uint32_t)now_us;
+            metrics.uptime_s = (uint32_t)(now_us / 1000000U);
+            metrics.internal_total_bytes = heap_caps_get_total_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            metrics.internal_free_bytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            metrics.internal_largest_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            metrics.psram_total_bytes = heap_caps_get_total_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            metrics.psram_free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            metrics.available = metrics.internal_total_bytes != 0U;
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS && !CONFIG_FREERTOS_SMP
+            metrics.cpu_available = cpu_baseline;
+            for (uint8_t core = 0U; core < 2U; ++core) {
+                const uint32_t idle = (uint32_t)ulTaskGetIdleRunTimeCounterForCore(core);
+                if (!system_cpu_window(cpu_time, prior_cpu_time, idle, prior_idle[core],
+                                       &metrics.cpu_core_percent[core])) metrics.cpu_available = false;
+                prior_idle[core] = idle;
+            }
+            metrics.cpu_percent = (uint8_t)((metrics.cpu_core_percent[0] +
+                                            metrics.cpu_core_percent[1] + 1U) / 2U);
+#endif
+            prior_cpu_time = cpu_time;
+            cpu_baseline = true;
+            portENTER_CRITICAL(&s_lock);
+            metrics.sequence = s_status.resources.sequence + 1U;
+            s_status.resources = metrics;
+            portEXIT_CRITICAL(&s_lock);
+            if (xTaskGetTickCount() - last_resources_log >= pdMS_TO_TICKS(30000U)) {
+                last_resources_log = xTaskGetTickCount();
+                ESP_LOGI(TAG, "resources cpu=%u%% cores=%u/%u internal_free=%lu largest=%lu psram_free=%lu uptime=%lus",
+                    (unsigned)metrics.cpu_percent, (unsigned)metrics.cpu_core_percent[0],
+                    (unsigned)metrics.cpu_core_percent[1], (unsigned long)metrics.internal_free_bytes,
+                    (unsigned long)metrics.internal_largest_bytes, (unsigned long)metrics.psram_free_bytes,
+                    (unsigned long)metrics.uptime_s);
+            }
         }
         (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DEVICE_CONTROL_POLL_MS));
     }

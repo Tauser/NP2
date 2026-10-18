@@ -495,6 +495,11 @@ static void refresh_projection(void)
            sizeof(candidate.system.firmware_version));
     candidate.system.temperature_available = controls.temperature_available;
     candidate.system.chip_temperature_deci_c = controls.chip_temperature_deci_c;
+    candidate.system.resources = controls.resources;
+    candidate.system.resources.maintenance = storage.busy || storage.pending || storage.p4_ota_active;
+    candidate.system.resources.storage_available = storage.usage_available;
+    candidate.system.resources.storage_total_bytes = storage.total_bytes;
+    candidate.system.resources.storage_used_bytes = storage.used_bytes;
     candidate.system.restart_pending = storage.restart_pending;
     candidate.system.restart_completion_id = storage.restart_completion_id;
     candidate.system.restart_result = storage.restart_result;
@@ -568,6 +573,10 @@ static void refresh_projection(void)
                                             candidate.offline_data.weather.weather_code);
     }
     weather_asset_service_get_status(&weather_assets);
+    candidate.system.resources.sd_mounted = weather_assets.mounted;
+    candidate.system.resources.sd_available = weather_assets.usage_available;
+    candidate.system.resources.sd_total_bytes = weather_assets.total_bytes;
+    candidate.system.resources.sd_free_bytes = weather_assets.free_bytes;
     candidate.weather_assets = (app_weather_asset_projection_t){
         .ready = weather_assets.ready,
         .mounted = weather_assets.mounted,

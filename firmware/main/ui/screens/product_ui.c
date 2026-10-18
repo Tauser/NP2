@@ -1487,13 +1487,14 @@ static void update_display_sound_controls(const app_ui_projection_t *projection)
 static void update_system_information(np_settings_system_t *system,
                                        const app_ui_projection_t *projection)
 {
-    char chip_temperature[24] = "Nao disponivel";
+    char chip_temperature[24] = "--";
     if (projection->system.temperature_available) {
         format_temperature_deci(projection->system.chip_temperature_deci_c,
                                   chip_temperature, sizeof(chip_temperature));
     }
     np_settings_system_sync(system, projection->system.firmware_version,
                              chip_temperature, projection->system.restart_pending);
+    np_settings_system_sync_resources(system, &projection->system.resources);
 }
 
 static void update_notification_controls(np_settings_notifications_t *notifications,
@@ -2102,6 +2103,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
 
 static void release_current_scene(void)
 {
+    np_settings_system_pause(&s_ui.system_scene.system);
     /* All scene destruction runs after the touch callback, on the LVGL
      * owner. Cancel deferred work before freeing its target tree. */
     (void)lv_async_call_cancel(wifi_add_open_async, NULL);

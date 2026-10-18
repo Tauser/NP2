@@ -159,6 +159,11 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CLOSE         "\xEE\x97\x8D"
 #define NP_ICON_SEARCH        "\xEE\xA2\xB6"
 #define NP_ICON_REFRESH       "\xEE\x97\x95" /* refresh U+E5D5 */
+#define NP_ICON_CPU           "\xEE\x8C\xA2" /* memory U+E322 */
+#define NP_ICON_MEMORY        "\xEF\x9E\xA3" /* memory_alt U+F7A3 */
+#define NP_ICON_STORAGE       "\xEE\x87\x9B" /* storage U+E1DB */
+#define NP_ICON_SD_CARD       "\xEE\x98\xA3" /* sd_card U+E623 */
+#define NP_ICON_POWER         "\xEF\xA3\x87" /* power_settings_new U+F8C7 */
 #define NP_ICON_ARROW_DOWN    "\xEE\x8C\x93"
 #define NP_ICON_ARROW_LEFT    "\xEE\x8C\x94"
 #define NP_ICON_ARROW_RIGHT   "\xEE\x8C\x95"
@@ -228,6 +233,11 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_CLOSE         "x"
 #define NP_ICON_SEARCH        "?"
 #define NP_ICON_REFRESH       "R"
+#define NP_ICON_CPU           "C"
+#define NP_ICON_MEMORY        "M"
+#define NP_ICON_STORAGE       "S"
+#define NP_ICON_SD_CARD       "S"
+#define NP_ICON_POWER         "P"
 #define NP_ICON_ARROW_DOWN    "v"
 #define NP_ICON_ARROW_LEFT    "<"
 #define NP_ICON_ARROW_RIGHT   ">"

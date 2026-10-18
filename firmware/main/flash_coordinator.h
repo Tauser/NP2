@@ -51,6 +51,9 @@ typedef struct {
     uint32_t last_littlefs_writes;
     uint32_t last_littlefs_verified_bytes;
     bool littlefs_ready;
+    bool usage_available;
+    uint32_t total_bytes;
+    uint32_t used_bytes;
     bool last_littlefs_format;
     bool full_probe_active;
     bool full_probe_syncing;

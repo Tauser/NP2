@@ -2180,3 +2180,32 @@ cadências. Não alterar dependências, Kconfig, partições, C6 ou eFuses.
 **Validação:** testes host passaram; build limpo P4, app-flash e boot com
 reserva confirmada/intervalo de 1.200 s e HTTP 200 estão registrados em
 [COINGECKO-QUOTA.md](COINGECKO-QUOTA.md), com limites de bancada explícitos.
+
+## ADR-093 — Diagnóstico de recursos em Preferências > Sistema
+
+**Decisão (2026-10-10):** substituir especificações estáticas por CPU, heap
+interno, PSRAM, temperatura, uptime e ocupação de LittleFS/SD. Coletar memória
+e deltas dos contadores idle de ambos os cores a cada 2 s no worker de controles;
+app_loop publica uma projeção limitada, sem I/O na task LVGL. Habilitar somente
+as estatísticas FreeRTOS necessárias com relógio ESP Timer; não alterar clocks,
+dependências, partições, C6, segurança ou pipeline TRIPLE_PARTIAL.
+
+LittleFS é consultado pelo FlashCoordinator a cada 30 s; FAT pelo worker já
+dono do SD a cada 60 s, sem montar/formatar a partir da UI. Falhas invalidam a
+medida em vez de mostrar zeros. Heap significa memória gerenciada pelo alocador,
+não toda a SRAM anunciada. CPU é média dos dois cores por janela, não consumo
+elétrico. Histórico limitado a 30 amostras (60 s), sem persistência.
+
+Animações de arcos/barras duram 160 ms, em regiões pequenas e só para mudanças;
+sem animação decorativa contínua. Suspender/cancelar em cena oculta ou manutenção.
+Atualizar permanece desabilitado até a rota de produto estar qualificada;
+Reiniciar conserva a confirmação e coordenação existentes. Build, boot e render
+host não encerram os gates físicos de desempenho gráfico/SD concomitante.
+
+Material Symbols Rounded: acrescentar somente cinco glyphs ausentes em 24 px,
+4 bpp, com eixos estáticos opsz=24/wght=400/FILL=0/GRAD=0. O subset complementar
+entra como fallback da fonte Material 24 existente, preservando seus bitmaps;
+refresh já existia. CPU, RAM, armazenamento, SD e ações usam ícones Material,
+sem fontes dinâmicas. Fonte oficial fixada por revisão/hash e receita em
+`tools/generate_system_material_icons.py`. Evidências e limites em
+[SYSTEM-RESOURCES-VALIDATION.md](SYSTEM-RESOURCES-VALIDATION.md).

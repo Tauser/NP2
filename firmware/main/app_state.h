@@ -8,6 +8,7 @@
 #include "connectivity_diagnostic.h"
 #include "user_profile.h"
 #include "pomodoro_service.h"
+#include "system_resource_model.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -143,6 +144,7 @@ typedef struct {
 
 typedef struct {
     char firmware_version[32];
+    system_resource_snapshot_t resources;
     bool temperature_available;
     int16_t chip_temperature_deci_c;
     bool restart_pending;

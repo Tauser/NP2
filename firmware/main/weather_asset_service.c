@@ -282,7 +282,19 @@ static void weather_asset_task(void *arg)
     const TaskHandle_t boot_waiter = s_boot_waiter;
     if (boot_waiter != NULL) xTaskNotifyGive(boot_waiter);
 
+    TickType_t last_usage_tick = xTaskGetTickCount() - pdMS_TO_TICKS(60000U);
     for (;;) {
+        if (mounted && xTaskGetTickCount() - last_usage_tick >= pdMS_TO_TICKS(60000U)) {
+            last_usage_tick = xTaskGetTickCount();
+            uint64_t total = 0U, free_bytes = 0U;
+            const bool available = esp_vfs_fat_info(BSP_SD_MOUNT_POINT, &total, &free_bytes) == ESP_OK &&
+                                   total != 0U && free_bytes <= total;
+            taskENTER_CRITICAL(&s_lock);
+            s_status.usage_available = available;
+            s_status.total_bytes = available ? total : 0U;
+            s_status.free_bytes = available ? free_bytes : 0U;
+            taskEXIT_CRITICAL(&s_lock);
+        }
         bool pending = false;
         bool is_day = false;
         weather_condition_t condition = WEATHER_CONDITION_VARIABLE;

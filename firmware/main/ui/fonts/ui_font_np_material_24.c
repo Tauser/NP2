@@ -16,6 +16,9 @@
 
 #if UI_FONT_NP_MATERIAL_24
 
+/* Preserve the existing glyphs; additional system icons are a small subset. */
+LV_FONT_DECLARE(ui_font_np_material_system_24)
+
 /*-----------------
  *    BITMAPS
  *----------------*/
@@ -2672,7 +2675,7 @@ lv_font_t ui_font_np_material_24 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = NULL,
+    .fallback = &ui_font_np_material_system_24,
 #endif
     .user_data = NULL,
 };
