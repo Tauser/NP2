@@ -1,4 +1,5 @@
 #include "app_event_bus.h"
+#include "np_memory.h"
 
 #include <string.h>
 
@@ -22,6 +23,9 @@ typedef struct {
         user_profile_t user_profile;
         struct { pomodoro_command_t command; uint16_t value; } pomodoro;
         uint32_t notification_id;
+        agenda_command_t agenda;
+        spotify_remote_command_t spotify;
+        uint8_t home_widget;
         char onvif_address[16];
         struct { char device_id[32]; uint8_t channel; bool enabled; } sonoff;
     } payload;
@@ -38,7 +42,7 @@ _Static_assert(sizeof(app_queued_event_t) <= 128U, "event queue payload grew une
 static QueueHandle_t s_queue;
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static app_event_bus_status_t s_status;
-static app_snapshot_slot_t s_snapshot_slots[APP_EVENT_BUS_SNAPSHOT_SLOTS];
+static NP2_PSRAM_BSS app_snapshot_slot_t s_snapshot_slots[APP_EVENT_BUS_SNAPSHOT_SLOTS];
 
 esp_err_t app_event_bus_start(void)
 {
@@ -102,9 +106,19 @@ esp_err_t app_event_bus_post(const app_event_t *event)
     case APP_EVENT_NOTIFICATION_MARK_READ:
         queued.payload.notification_id = event->notification_id;
         break;
+    case APP_EVENT_HOME_WIDGET:
+        if (event->home_widget > 1U) return ESP_ERR_INVALID_ARG;
+        queued.payload.home_widget = event->home_widget; break;
+    case APP_EVENT_SPOTIFY_REMOTE:
+        queued.payload.spotify = event->spotify_command;
+        break;
+    case APP_EVENT_AGENDA_COMMAND:
+        queued.payload.agenda = event->agenda_command;
+        break;
     case APP_EVENT_REFRESH_PLATFORM:
     case APP_EVENT_ONVIF_SCAN_REQUEST:
     case APP_EVENT_NOTIFICATION_MARK_ALL_READ:
+    case APP_EVENT_AGENDA_SYNC:
         break;
     default:
         return ESP_ERR_INVALID_ARG;
@@ -275,14 +289,37 @@ esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms)
     case APP_EVENT_NOTIFICATION_MARK_READ:
         out_event->notification_id = queued.payload.notification_id;
         break;
+    case APP_EVENT_HOME_WIDGET:
+        out_event->home_widget = queued.payload.home_widget; break;
+    case APP_EVENT_SPOTIFY_REMOTE:
+        out_event->spotify_command = queued.payload.spotify;
+        break;
+    case APP_EVENT_AGENDA_COMMAND:
+        out_event->agenda_command = queued.payload.agenda;
+        break;
     case APP_EVENT_REFRESH_PLATFORM:
     case APP_EVENT_ONVIF_SCAN_REQUEST:
     case APP_EVENT_NOTIFICATION_MARK_ALL_READ:
+    case APP_EVENT_AGENDA_SYNC:
         break;
     default:
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;
+}
+
+esp_err_t app_event_bus_post_agenda(const agenda_command_t *command)
+{
+    if (command == NULL || command->request_id == 0U || command->action > AGENDA_KEEP_LOCAL)
+        return ESP_ERR_INVALID_ARG;
+    const app_event_t event = {.type = APP_EVENT_AGENDA_COMMAND, .agenda_command = *command};
+    return app_event_bus_post(&event);
+}
+
+esp_err_t app_event_bus_post_agenda_sync(void)
+{
+    const app_event_t event = {.type = APP_EVENT_AGENDA_SYNC};
+    return app_event_bus_post(&event);
 }
 
 void app_event_bus_get_status(app_event_bus_status_t *out_status)
@@ -293,4 +330,19 @@ void app_event_bus_get_status(app_event_bus_status_t *out_status)
     portENTER_CRITICAL(&s_status_lock);
     *out_status = s_status;
     portEXIT_CRITICAL(&s_status_lock);
+}
+
+esp_err_t app_event_bus_post_spotify(const spotify_remote_command_t *command)
+{
+    if (command == NULL || command->action > SPOTIFY_REMOTE_HIDDEN || s_queue == NULL) return ESP_ERR_INVALID_ARG;
+    app_queued_event_t event = {.type = APP_EVENT_SPOTIFY_REMOTE};
+    event.payload.spotify = *command;
+    return enqueue_event(&event);
+}
+
+esp_err_t app_event_bus_post_home_widget(uint8_t widget)
+{
+    if (widget > 1U || s_queue == NULL) return ESP_ERR_INVALID_ARG;
+    app_queued_event_t e = {.type=APP_EVENT_HOME_WIDGET}; e.payload.home_widget=widget;
+    return enqueue_event(&e);
 }

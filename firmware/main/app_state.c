@@ -1,10 +1,15 @@
 #include "app_state.h"
+#include "np_memory.h"
 
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
 
 #include "app_event_bus.h"
+#include "agenda_storage.h"
+#include "google_agenda_sync.h"
+#include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "connectivity_diagnostic.h"
 #include "device_control_service.h"
 #include "esp_log.h"
@@ -20,6 +25,7 @@
 #include "freertos/task.h"
 #include "time_service.h"
 #include "weather_asset_service.h"
+#include "photo_frame_service.h"
 
 #define APP_LOOP_STACK_BYTES 8192U
 #define APP_LOOP_PRIORITY 3U
@@ -36,11 +42,11 @@
 static const char *const TAG = "app_state";
 
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
-static app_ui_projection_t s_projection;
+static NP2_PSRAM_BSS app_ui_projection_t s_projection;
 static app_state_health_t s_health;
 static bool s_started;
 /* Written only by app_loop after receiving a validated provider result. */
-static offline_data_snapshot_t s_live_offline_data;
+static NP2_PSRAM_BSS offline_data_snapshot_t s_live_offline_data;
 static bool s_live_offline_data_valid;
 /* The app_loop alone mutates identity. FlashCoordinator owns its NVS records. */
 static user_profile_t s_user_profile;
@@ -54,8 +60,8 @@ static bool s_profile_inflight;
 static uint32_t s_profile_sequence;
 static uint32_t s_profile_persisted_generation;
 static esp_err_t s_profile_result = ESP_OK;
-static app_notification_center_projection_t s_notification_center;
-static np_ewelink_public_inventory_t s_ewelink_public_inventory;
+static NP2_PSRAM_BSS app_notification_center_projection_t s_notification_center;
+static NP2_PSRAM_BSS np_ewelink_public_inventory_t s_ewelink_public_inventory;
 static bool s_notification_sources_initialized;
 static bool s_previous_network_online;
 static bool s_previous_network_credentials;
@@ -63,6 +69,113 @@ static bool s_previous_storage_ready;
 static esp_err_t s_previous_storage_result = ESP_OK;
 static uint32_t s_previous_restart_completion_id;
 static uint32_t s_next_notification_id = 1U;
+static NP2_PSRAM_BSS spotify_remote_projection_t s_spotify, s_spotify_published;
+static uint8_t s_home_widget, s_home_submitted;
+static bool s_home_restored, s_home_dirty, s_home_saving;
+static uint32_t s_home_completion;
+static uint64_t s_home_changed, s_home_last_write;
+static agenda_data_t *s_agenda;
+static NP2_PSRAM_BSS agenda_projection_t s_agenda_projection;
+static agenda_projection_t *s_agenda_published;
+static app_event_t *s_loop_event;
+static void notification_center_push(app_notification_kind_t kind, uint32_t timestamp_unix_s);
+static bool s_agenda_restored;
+static bool s_agenda_dirty;
+static bool s_agenda_inflight;
+static uint32_t s_agenda_sequence;
+static uint32_t s_agenda_generation;
+static uint32_t s_agenda_submitted_generation;
+static uint64_t s_agenda_changed_ms;
+static uint64_t s_agenda_last_write_ms;
+static uint64_t s_agenda_next_sync_ms;
+
+static void agenda_changed(void)
+{
+    s_agenda_dirty = true;
+    ++s_agenda_generation;
+    s_agenda_changed_ms = (uint64_t)esp_timer_get_time() / 1000U;
+    flash_coordinator_set_agenda_unsaved(true);
+}
+
+static void refresh_agenda(const flash_coordinator_status_t *storage,
+                            const app_ui_projection_t *candidate)
+{
+    if (!s_agenda_restored && storage->agenda_loaded) {
+        s_agenda_projection.storage_result = storage->agenda_load_result;
+        if (storage->agenda_load_result == ESP_OK)
+            s_agenda_projection.storage_result = agenda_storage_copy(s_agenda);
+        s_agenda_projection.ready = storage->agenda_load_result == ESP_OK ||
+            storage->agenda_load_result == ESP_ERR_NOT_FOUND;
+        s_agenda_restored = true;
+    }
+    esp_err_t sync_result = ESP_OK;
+    bool sync_changed = false;
+    if (s_agenda_projection.sync_busy && google_agenda_take_result(s_agenda, &sync_result, &sync_changed)) {
+        s_agenda_projection.sync_busy = false;
+        s_agenda_projection.sync_result = sync_result;
+        if (sync_result == AGENDA_SYNC_AUTH_REQUIRED) s_agenda_projection.google_auth_required = true;
+        else if (sync_result == ESP_OK) s_agenda_projection.google_auth_required = false;
+        if (sync_result == ESP_OK) s_agenda_projection.last_sync_unix_s = candidate->current_unix_s;
+        /* Partial successes are also durable; never repeat an acknowledged POST. */
+        if (sync_changed) agenda_changed();
+    }
+    if (s_agenda_inflight && storage->agenda_completed_sequence == s_agenda_sequence) {
+        s_agenda_inflight = false;
+        s_agenda_projection.storage_result = storage->agenda_write_result;
+        if (storage->agenda_write_result != ESP_OK) s_agenda_dirty = true;
+        else if (s_agenda_submitted_generation == s_agenda_generation) s_agenda_dirty = false;
+    }
+    if (s_agenda_projection.ready && !s_agenda_projection.sync_busy) {
+        bool changed = false;
+        agenda_item_t reminder = {0};
+        const bool delivered = agenda_take_reminder(s_agenda, candidate->time_trusted,
+            candidate->current_unix_s, &reminder, &changed);
+        if (changed) agenda_changed();
+        if (delivered && candidate->notifications.ready && candidate->notifications.general_enabled) {
+            notification_center_push(reminder.kind == AGENDA_TASK
+                ? APP_NOTIFICATION_KIND_AGENDA_TASK : APP_NOTIFICATION_KIND_AGENDA_EVENT,
+                candidate->current_unix_s);
+            app_notification_item_t *item = &s_notification_center.items[s_notification_center.count - 1U];
+            memcpy(item->title, reminder.title, sizeof(item->title));
+            (void)notification_service_request_alarm_sound();
+        }
+    }
+    const uint64_t now_ms = (uint64_t)esp_timer_get_time() / 1000U;
+    if (s_agenda_projection.ready && s_agenda_dirty && !s_agenda_inflight &&
+        !s_agenda_projection.sync_busy && now_ms - s_agenda_changed_ms >= 5000U &&
+        (s_agenda_last_write_ms == 0U || now_ms - s_agenda_last_write_ms >= 60000U)) {
+        if (flash_coordinator_request_agenda_write(s_agenda, &s_agenda_sequence) == ESP_OK) {
+            s_agenda_inflight = true;
+            s_agenda_submitted_generation = s_agenda_generation;
+            s_agenda_last_write_ms = now_ms;
+        }
+    }
+    s_agenda_projection.google_linked = google_agenda_linked();
+    if (s_agenda_projection.ready && s_agenda_projection.google_linked &&
+        !s_agenda_projection.sync_busy && !s_agenda_dirty && !s_agenda_inflight &&
+        candidate->network.online && candidate->time_trusted && now_ms >= s_agenda_next_sync_ms) {
+        const esp_err_t result = google_agenda_request_sync(s_agenda);
+        if (result == ESP_OK) {
+            s_agenda_projection.sync_busy = true;
+            s_agenda_projection.sync_result = ESP_OK;
+        }
+        s_agenda_next_sync_ms = now_ms + (result == ESP_OK ? 300000U : 15000U);
+    }
+    s_agenda_projection.persistence_pending = s_agenda_dirty || s_agenda_inflight;
+    s_agenda_projection.generation = s_agenda_generation;
+    flash_coordinator_set_agenda_unsaved(s_agenda_projection.persistence_pending ||
+                                        s_agenda_projection.sync_busy);
+    static uint64_t next_diagnostic_ms;
+    if (now_ms >= next_diagnostic_ms) {
+        next_diagnostic_ms = now_ms + 30000U;
+        /* IDF 5.5.4 reports this API in bytes, unlike vanilla FreeRTOS. */
+        ESP_LOGI("np2_agenda", "ready=%u items=%u pending=%u linked=%u sync_busy=%u sync_result=%ld app_stack_min_bytes=%u",
+            (unsigned)s_agenda_projection.ready, (unsigned)s_agenda->count,
+            (unsigned)s_agenda_projection.persistence_pending, (unsigned)s_agenda_projection.google_linked,
+            (unsigned)s_agenda_projection.sync_busy, (long)s_agenda_projection.sync_result,
+            (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    }
+}
 
 static bool user_profiles_equal(const user_profile_t *a, const user_profile_t *b)
 {
@@ -185,6 +298,8 @@ static void notification_center_push(app_notification_kind_t kind,
     };
     if (s_notification_center.unread_count < APP_NOTIFICATION_HISTORY_MAX)
         ++s_notification_center.unread_count;
+    if (kind != APP_NOTIFICATION_KIND_AGENDA_EVENT && kind != APP_NOTIFICATION_KIND_AGENDA_TASK)
+        (void)notification_service_request_alert_sound();
 }
 
 static void notification_center_mark_read(uint32_t id, bool all)
@@ -339,7 +454,7 @@ static void refresh_projection(void)
     /* Projection snapshots contain the cached market payload and exceed the
      * spare stack budget of app_loop. This routine is only called by app_loop,
      * so keep its single-writer candidate in static storage. */
-    static app_ui_projection_t candidate;
+    static NP2_PSRAM_BSS app_ui_projection_t candidate;
     memset(&candidate, 0, sizeof(candidate));
 
     flash_coordinator_get_status(&storage);
@@ -428,6 +543,7 @@ static void refresh_projection(void)
         .persisted_generation = notifications.persisted_generation,
         .last_result = notifications.last_result,
     };
+    memcpy(candidate.notifications.melodies,notifications.melodies,sizeof(candidate.notifications.melodies));
     candidate.device_controls = (app_device_control_projection_t){
         .ready = controls.ready,
         .brightness_percent = controls.brightness_percent,
@@ -435,6 +551,13 @@ static void refresh_projection(void)
         .effective_brightness_percent = controls.effective_brightness_percent,
         .night_mode_enabled = controls.night_mode_enabled,
         .night_mode_active = controls.night_mode_active,
+        .photo_config = controls.photo_config,
+        .photo_bitcoin_widget = controls.photo_bitcoin_widget,
+        .photo_clock_widget = controls.photo_clock_widget,
+        .photo_idle_choice = controls.photo_idle_choice,
+        .photo_interval_choice = controls.photo_interval_choice,
+        .photo_exit_choice = controls.photo_exit_choice,
+        .photo_enabled_mask = controls.photo_enabled_mask,
         .persistence_pending = controls.persistence_pending,
         .save_completion_id = controls.save_completion_id,
         .save_completion_mask = controls.save_completion_mask,
@@ -519,7 +642,7 @@ static void refresh_projection(void)
                           candidate.time_trusted, candidate.current_unix_s);
     if (s_pomodoro.projection.completed &&
         !s_pomodoro_completion_sound_latched) {
-        (void)device_control_play_pomodoro_alarm();
+        (void)notification_service_request_alarm_sound();
         s_pomodoro_completion_sound_latched = true;
     } else if (!s_pomodoro.projection.completed) {
         s_pomodoro_completion_sound_latched = false;
@@ -549,6 +672,24 @@ static void refresh_projection(void)
                  (unsigned long)candidate.exchange_age_s);
         previous_data_flags = data_flags;
     }
+    if (!s_home_restored && storage.home_widget_loaded) {
+        if (!s_home_dirty) s_home_widget = storage.home_widget;
+        s_home_restored = true;
+    }
+    uint64_t home_now = (uint64_t)esp_timer_get_time()/1000U;
+    if (s_home_saving && storage.home_widget_completion != s_home_completion) {
+        s_home_saving = false;
+        if (storage.home_widget_result == ESP_OK && s_home_widget == s_home_submitted) s_home_dirty = false;
+    }
+    if (s_home_restored && s_home_dirty && !s_home_saving && home_now-s_home_changed>=5000U &&
+        (!s_home_last_write || home_now-s_home_last_write>=60000U) &&
+        flash_coordinator_request_home_widget_write(s_home_widget)==ESP_OK) {
+        s_home_saving=true; s_home_submitted=s_home_widget;
+        s_home_completion=storage.home_widget_completion; s_home_last_write=home_now;
+    }
+    candidate.device_controls.home_widget = s_home_widget;
+    refresh_agenda(&storage, &candidate);
+    spotify_remote_tick(&s_spotify, candidate.network.online, candidate.time_trusted, (uint64_t)esp_timer_get_time()/1000U);
     collect_notifications(&candidate);
 
     /* app_loop only posts a desired visual to the SD worker. It never reads a
@@ -573,6 +714,11 @@ static void refresh_projection(void)
                                             candidate.offline_data.weather.weather_code);
     }
     weather_asset_service_get_status(&weather_assets);
+    if (controls.ready) {
+        photo_frame_service_configure(controls.photo_config);
+        photo_frame_service_set_options(controls.photo_interval_choice, controls.photo_enabled_mask);
+    }
+    photo_frame_service_get_status(&candidate.photos);
     candidate.system.resources.sd_mounted = weather_assets.mounted;
     candidate.system.resources.sd_available = weather_assets.usage_available;
     candidate.system.resources.sd_total_bytes = weather_assets.total_bytes;
@@ -602,6 +748,18 @@ static void refresh_projection(void)
     portEXIT_CRITICAL(&s_state_lock);
 
     portENTER_CRITICAL(&s_state_lock);
+    s_agenda_projection.count = 0U;
+    memset(s_agenda_projection.items, 0, sizeof(s_agenda_projection.items));
+    for (uint8_t i = 0U; i < s_agenda->count; ++i) {
+        if (!s_agenda->remote[i].deleted || s_agenda->remote[i].reserved[0]) {
+            agenda_item_t *item = &s_agenda_projection.items[s_agenda_projection.count++];
+            *item = s_agenda->items[i];
+            item->reserved[1] = s_agenda->remote[i].reserved[0]
+                ? (s_agenda->remote[i].reserved[1] ? 2U : 1U) : 0U;
+        }
+    }
+    *s_agenda_published = s_agenda_projection;
+    s_spotify_published = s_spotify;
     s_health.ready = true;
     s_health.last_progress_ms = (uint64_t)esp_timer_get_time() / 1000U;
     portEXIT_CRITICAL(&s_state_lock);
@@ -612,56 +770,91 @@ static void app_loop_task(void *arg)
     (void)arg;
     refresh_projection();
     for (;;) {
-        app_event_t event = {0};
+        /* The bounded event snapshot is normalized, non-secret data. Keep it
+         * in explicitly allocated PSRAM instead of consuming the 8 KiB stack. */
+        app_event_t *const event = s_loop_event;
         const esp_err_t result =
-            app_event_bus_receive(&event, APP_STATE_REFRESH_PERIOD_MS);
-        if (result == ESP_OK && event.type == APP_EVENT_PRODUCT_DATA_UPDATED) {
-            s_live_offline_data = event.offline_data;
+            app_event_bus_receive(event, APP_STATE_REFRESH_PERIOD_MS);
+        if (result == ESP_OK && event->type == APP_EVENT_PRODUCT_DATA_UPDATED) {
+            s_live_offline_data = event->offline_data;
             s_live_offline_data_valid = true;
-        } else if (result == ESP_OK && event.type == APP_EVENT_USER_PROFILE_UPDATED) {
+        } else if (result == ESP_OK && event->type == APP_EVENT_USER_PROFILE_UPDATED) {
             if (!s_user_profile_configured ||
-                !user_profiles_equal(&s_user_profile, &event.user_profile) ||
+                !user_profiles_equal(&s_user_profile, &event->user_profile) ||
                 s_profile_result != ESP_OK || s_profile_persisted_generation == 0U) {
-                s_user_profile = event.user_profile;
+                s_user_profile = event->user_profile;
                 s_user_profile_configured = true;
                 s_profile_dirty = true;
                 s_profile_result = ESP_OK;
             }
-        } else if (result == ESP_OK && event.type == APP_EVENT_POMODORO_COMMAND) {
-            pomodoro_service_apply(&s_pomodoro, event.pomodoro_command,
-                event.pomodoro_value,
+        } else if (result == ESP_OK && event->type == APP_EVENT_HOME_WIDGET) {
+            if (event->home_widget <= 1U && event->home_widget != s_home_widget) {
+                s_home_widget = event->home_widget; s_home_dirty = true;
+                s_home_changed = (uint64_t)esp_timer_get_time()/1000U;
+            }
+        } else if (result == ESP_OK && event->type == APP_EVENT_SPOTIFY_REMOTE) {
+            spotify_remote_command(&s_spotify, &event->spotify_command);
+        } else if (result == ESP_OK && event->type == APP_EVENT_AGENDA_COMMAND) {
+            s_agenda_projection.completion_id = event->agenda_command.request_id;
+            s_agenda_projection.command_result = !s_agenda_projection.ready ||
+                s_agenda_projection.sync_busy ? AGENDA_NOT_READY :
+                agenda_apply(s_agenda, &event->agenda_command);
+            if (s_agenda_projection.command_result == AGENDA_OK) {
+                if (!google_agenda_linked()) {
+                    for (uint8_t i = 0U; i < s_agenda->count;) {
+                        if (!s_agenda->remote[i].deleted || s_agenda->remote[i].id[0] != 0) { ++i; continue; }
+                        --s_agenda->count;
+                        memmove(&s_agenda->items[i], &s_agenda->items[i+1U], (s_agenda->count-i)*sizeof(s_agenda->items[0]));
+                        memmove(&s_agenda->remote[i], &s_agenda->remote[i+1U], (s_agenda->count-i)*sizeof(s_agenda->remote[0]));
+                        memset(&s_agenda->items[s_agenda->count],0,sizeof(s_agenda->items[0]));
+                        memset(&s_agenda->remote[s_agenda->count],0,sizeof(s_agenda->remote[0]));
+                    }
+                }
+                agenda_changed();
+            }
+        } else if (result == ESP_OK && event->type == APP_EVENT_AGENDA_SYNC) {
+            esp_err_t sync = ESP_ERR_INVALID_STATE;
+            if (s_agenda_projection.ready && !s_agenda_projection.sync_busy &&
+                !s_agenda_dirty && !s_agenda_inflight)
+                sync = google_agenda_request_sync(s_agenda);
+            if (sync == ESP_OK) s_agenda_projection.sync_busy = true;
+            s_agenda_next_sync_ms = (uint64_t)esp_timer_get_time()/1000U + 300000U;
+            s_agenda_projection.sync_result = sync;
+        } else if (result == ESP_OK && event->type == APP_EVENT_POMODORO_COMMAND) {
+            pomodoro_service_apply(&s_pomodoro, event->pomodoro_command,
+                event->pomodoro_value,
                 (uint64_t)esp_timer_get_time() / UINT64_C(1000));
-        } else if (result == ESP_OK && event.type == APP_EVENT_ONVIF_SCAN_REQUEST) {
+        } else if (result == ESP_OK && event->type == APP_EVENT_ONVIF_SCAN_REQUEST) {
             const esp_err_t scan_result = onvif_discovery_service_request_scan();
             if (scan_result != ESP_OK) {
                 ESP_LOGW(TAG, "ONVIF scan request unavailable: %s",
                          esp_err_to_name(scan_result));
             }
         } else if (result == ESP_OK &&
-                   event.type == APP_EVENT_ONVIF_ADDRESS_REQUEST) {
+                   event->type == APP_EVENT_ONVIF_ADDRESS_REQUEST) {
             const esp_err_t scan_result = onvif_discovery_service_request_address(
-                event.onvif_address);
+                event->onvif_address);
             if (scan_result != ESP_OK) {
                 ESP_LOGW(TAG, "ONVIF address check unavailable: %s",
                          esp_err_to_name(scan_result));
             }
         } else if (result == ESP_OK &&
-                   event.type == APP_EVENT_SONOFF_SWITCH_REQUEST) {
+                   event->type == APP_EVENT_SONOFF_SWITCH_REQUEST) {
             const esp_err_t command_result = sonoff_lan_service_request_switch(
-                event.sonoff_device_id, event.sonoff_channel,
-                event.sonoff_enabled);
+                event->sonoff_device_id, event->sonoff_channel,
+                event->sonoff_enabled);
             if (command_result != ESP_OK) {
                 ESP_LOGW(TAG, "Sonoff LAN switch request rejected: %s",
                          esp_err_to_name(command_result));
             }
         } else if (result == ESP_OK &&
-                   event.type == APP_EVENT_NOTIFICATION_MARK_READ) {
-            notification_center_mark_read(event.notification_id, false);
+                   event->type == APP_EVENT_NOTIFICATION_MARK_READ) {
+            notification_center_mark_read(event->notification_id, false);
         } else if (result == ESP_OK &&
-                   event.type == APP_EVENT_NOTIFICATION_MARK_ALL_READ) {
+                   event->type == APP_EVENT_NOTIFICATION_MARK_ALL_READ) {
             notification_center_mark_read(0U, true);
-        } else if (result == ESP_OK && event.type != APP_EVENT_REFRESH_PLATFORM) {
-            ESP_LOGW(TAG, "discarded unknown app event %u", (unsigned int)event.type);
+        } else if (result == ESP_OK && event->type != APP_EVENT_REFRESH_PLATFORM) {
+            ESP_LOGW(TAG, "discarded unknown app event %u", (unsigned int)event->type);
         }
         refresh_projection();
     }
@@ -684,6 +877,19 @@ esp_err_t app_state_start(void)
         portEXIT_CRITICAL(&s_state_lock);
         return result;
     }
+    s_agenda = heap_caps_calloc(1U, sizeof(*s_agenda), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_agenda_published = heap_caps_calloc(1U, sizeof(*s_agenda_published), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_loop_event = heap_caps_calloc(1U, sizeof(*s_loop_event), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_agenda == NULL || s_agenda_published == NULL || s_loop_event == NULL) {
+        heap_caps_free(s_agenda); heap_caps_free(s_agenda_published);
+        heap_caps_free(s_loop_event); s_loop_event = NULL;
+        s_agenda = NULL; s_agenda_published = NULL;
+        portENTER_CRITICAL(&s_state_lock); s_started = false; portEXIT_CRITICAL(&s_state_lock);
+        return ESP_ERR_NO_MEM;
+    }
+    agenda_init(s_agenda);
+    s_agenda->instance_id = esp_random();
+    if (s_agenda->instance_id == 0U) s_agenda->instance_id = 1U;
     pomodoro_service_init(&s_pomodoro);
     if (xTaskCreate(app_loop_task, "app_loop", APP_LOOP_STACK_BYTES, NULL,
                     APP_LOOP_PRIORITY, NULL) != pdPASS) {
@@ -693,6 +899,15 @@ esp_err_t app_state_start(void)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+void app_state_get_agenda_projection(agenda_projection_t *out_projection)
+{
+    if (out_projection == NULL) return;
+    portENTER_CRITICAL(&s_state_lock);
+    if (s_agenda_published != NULL) *out_projection = *s_agenda_published;
+    else memset(out_projection, 0, sizeof(*out_projection));
+    portEXIT_CRITICAL(&s_state_lock);
 }
 
 esp_err_t app_state_request_refresh(void)
@@ -748,4 +963,10 @@ void app_state_get_health(app_state_health_t *out_health)
     portENTER_CRITICAL(&s_state_lock);
     *out_health = s_health;
     portEXIT_CRITICAL(&s_state_lock);
+}
+
+void app_state_get_spotify_projection(spotify_remote_projection_t *out)
+{
+    if (out == NULL) return;
+    portENTER_CRITICAL(&s_state_lock); *out = s_spotify_published; portEXIT_CRITICAL(&s_state_lock);
 }

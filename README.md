@@ -24,13 +24,39 @@ estão em validação.
   pacotes de impressão e scripts CAD foram versionados em `57b3433`.
   Consulte o [índice mecânico](mechanical/README.md).
 
-A nova tela ainda requer interação e medições físicas de render/SD. As
-amostras recentes de heap interno ficaram abaixo do piso de 80 KiB do plano;
-a margem de memória precisa ser recuperada e medida sob carga. O gabinete
+A nova tela ainda requer interação e medições físicas de render/SD. A margem
+interna foi recuperada para a leitura Google em 20/10; a carga máxima e o
+soak continuam em validação. O gabinete
 aguarda fatiamento, impressão e ensaio de montagem/áudio. Essas entregas não
 encerram G5, G6 ou G7 nem qualificam uma release.
 
+## Agenda — 20/10/2026
+
+A tela Agenda tem eventos e tarefas locais, edição, conclusão, exclusão
+confirmada e lembretes no centro de notificações, com som. Limite inicial de
+64 itens e eventos do mês corrente inteiro. A integração Google Calendar/Tasks tem autorização inicial por
+computador e procedimento em [AGENDA-GOOGLE.md](docs/AGENDA-GOOGLE.md).
+Conta vinculada, leitura real e ida/volta de evento criado na UI confirmadas
+na placa; exclusão do teste retornou HTTP 204. Piso interno preservado e
+pilha de rede corrigida. Medidas e limites em
+[AGENDA-MEMORY-VALIDATION.md](docs/AGENDA-MEMORY-VALIDATION.md).
+A admissão continua bloqueando Google quando a memória é insuficiente.
+
+## Quadro de fotos — 22/10/2026
+
+Preferências → Quadro de fotos oferece galeria de miniaturas e seleção das
+fotos do cartão SD, prévia, entrada por inatividade de 30 s a 1 h e troca
+de 10 s a 1 h. Voltar após permite retornar à página anterior em 30 s a 1 h,
+ou manter Não sair. Bitcoin e data/hora usam widgets com fonte de 48/64 px.
+As fotos ficam restritas ao quadro e à prévia manual.
+Preparação do cartão, ajustes e evidência em
+[PHOTO-FRAME-VALIDATION.md](docs/PHOTO-FRAME-VALIDATION.md).
+
 ## Referências do projeto
+
+Configurações → Notificações oferece três melodias originais para cada
+categoria (notificação, alarme e inicialização), prévias e silêncio individual.
+Implementação e bancada em [SOUNDS-VALIDATION.md](docs/SOUNDS-VALIDATION.md).
 
 - [Bring-up e restrições de hardware](docs/RESTART-HARDWARE-BRINGUP.md)
 - [Plano de arquitetura e gates](docs/PLANO-FIRMWARE-PREMIUM.md)
@@ -38,6 +64,8 @@ encerram G5, G6 ou G7 nem qualificam uma release.
 - [Execução e validação G5](docs/G5-VALIDATION.md)
 - [Recursos do sistema e evidências](docs/SYSTEM-RESOURCES-VALIDATION.md)
 - [Quota e cadência CoinGecko](docs/COINGECKO-QUOTA.md)
+- [Agenda, tarefas, lembretes e configuração Google](docs/AGENDA-GOOGLE.md)
+- [Margem de memória e TLS Google em bancada](docs/AGENDA-MEMORY-VALIDATION.md)
 - [Gabinete e arquivos de impressão](mechanical/README.md)
 - [Configuração de desenvolvimento](docs/DEVELOPMENT.md)
 - [Instruções para colaboradores e agentes](AGENTS.md)

@@ -6,6 +6,8 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_OFFSET=0x10000
 CONFIG_SPIRAM=y
+# ADR-095: explicit non-secret BSS placement; TLS/JSON and stacks stay internal.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # Phase 2 experimental image: run flash .text/.rodata from PSRAM so an SPI1
 # write/erase does not disable the cache. This remains gated by physical
 # validation of display, NVS erase/GC and OTA; it is not a product baseline.

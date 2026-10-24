@@ -1,0 +1,10 @@
+{
+  "target": "esp32p4",
+  "esp_idf": "5.5.4",
+  "repositories": [
+    {"path": "cspot", "url": "https://github.com/philippe44/cspot.git", "commit": "99e5c95ad6d862a1b7845dda81fd9c8233b45b9f"},
+    {"path": "cspot/cspot/bell", "url": "https://github.com/philippe44/bell.git", "commit": "46a4a8f21f3b0bc0ccefd01915b24d74f0ab9bef"},
+    {"path": "cspot/cspot/bell/external/mdnssvc", "url": "https://github.com/philippe44/mdnssvc.git", "commit": "44e78c149d3e595dea8ce6bede7371744ff8b40d"},
+    {"path": "cspot/cspot/bell/external/nlohmann_json", "url": "https://github.com/nlohmann/json.git", "commit": "07182ebc1d4d8204cd51635fbd62116c6b50da59"}
+  ]
+}

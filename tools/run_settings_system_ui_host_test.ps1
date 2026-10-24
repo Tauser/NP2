@@ -1,4 +1,5 @@
-param([string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'firmware/build/system-ui-host-20261010'))
+param([string]$OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'firmware/build/system-ui-host-20261010'),
+      [switch]$SpotifyPairingBench)
 $ErrorActionPreference = 'Stop'
 $env:PATH = 'C:/msys64/ucrt64/bin;' + $env:PATH
 $repo = (Split-Path $PSScriptRoot -Parent).Replace('\','/')
@@ -37,12 +38,17 @@ add_executable(system_ui_test "@REPO@/tools/settings_system_ui_host_test.c"
 target_include_directories(system_ui_test PRIVATE "@DIR@" "@REPO@/firmware/main"
     "@REPO@/firmware/main/ui/core")
 target_compile_definitions(system_ui_test PRIVATE NP2_PRODUCT_FONTS)
+if(NP2_SPOTIFY_PAIRING_BENCH)
+    target_compile_definitions(system_ui_test PRIVATE NP2_SPOTIFY_PAIRING_BENCH=1)
+endif()
 target_compile_options(system_ui_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(system_ui_test PRIVATE lvgl m)
 '@
 Write-ChangedText (Join-Path $OutputDirectory 'CMakeLists.txt') ($project.Replace('@REPO@',$repo).Replace('@DIR@',$dir))
 $cmake = 'C:/Espressif/tools/cmake/4.0.3/bin/cmake.exe'
+$pairing = if($SpotifyPairingBench){'ON'}else{'OFF'}
 & $cmake -S $OutputDirectory -B (Join-Path $OutputDirectory 'build') -G Ninja `
+    "-DNP2_SPOTIFY_PAIRING_BENCH=$pairing" `
     -DCMAKE_MAKE_PROGRAM=C:/Espressif/tools/ninja/1.12.1/ninja.exe `
     -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/gcc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe
 if ($LASTEXITCODE -ne 0) { throw 'System UI host configuration failed' }

@@ -5,15 +5,15 @@ np_preferences_view_t np_preferences_build_with_header(lv_obj_t *parent,
                                                        lv_obj_t *navigation_parent)
 {
     static const char *const titles[NP_PREFERENCES_ITEM_COUNT] = {
-        "Tela e som", "Wi-Fi", "Fuso horário", "Notificações", "Sistema",
+        "Tela e som", "Quadro de fotos", "Wi-Fi", "Fuso horário", "Notificações", "Sistema",
     };
     static const char *const details[NP_PREFERENCES_ITEM_COUNT] = {
-        "Ajuste brilho, volume e visualização", "Conecte ou gerencie redes",
+        "Ajuste brilho e volume", "Escolha fotos, tempos e widgets", "Conecte ou gerencie redes",
         "Defina sua região e horário", "Gerencie alertas e avisos",
         "Informações e manutenção",
     };
     static const char *const icons[NP_PREFERENCES_ITEM_COUNT] = {
-        NP_ICON_DISPLAY, NP_ICON_WIFI, NP_ICON_CLOCK,
+        NP_ICON_DISPLAY, NP_ICON_IMAGE, NP_ICON_WIFI, NP_ICON_CLOCK,
         NP_ICON_NOTIFICATIONS, NP_ICON_SETTINGS,
     };
     np_preferences_view_t view = {0};
@@ -35,7 +35,7 @@ np_preferences_view_t np_preferences_build_with_header(lv_obj_t *parent,
     np_label(panel, "Personalize sua experiência no NovaPanel", NP_FONT_SM,
               np_c_text_2(), 112, 60, 800, LV_TEXT_ALIGN_LEFT);
     for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
-        lv_obj_t *row = np_fill(panel, NP_SP_24, 104 + i * 74, 928, 68,
+        lv_obj_t *row = np_fill(panel, NP_SP_24, 104 + i * 62, 928, 58,
                                  np_c_surface_subtle(), LV_OPA_COVER,
                                  NP_RADIUS_CONTROL);
         view.rows[i] = row;
@@ -46,23 +46,23 @@ np_preferences_view_t np_preferences_build_with_header(lv_obj_t *parent,
                                   LV_PART_MAIN | LV_STATE_PRESSED);
         lv_obj_set_style_border_color(row, np_c_accent(),
                                       LV_PART_MAIN | LV_STATE_PRESSED);
-        lv_obj_t *tile = np_fill(row, NP_SP_16, 10, 48, 48,
+        lv_obj_t *tile = np_fill(row, NP_SP_16, 7, 44, 44,
                                   np_c_surface_raised(), LV_OPA_COVER,
                                   NP_RADIUS_CONTROL);
         /* Decorative objects must let the entire row receive the touch. */
         lv_obj_remove_flag(tile, LV_OBJ_FLAG_CLICKABLE);
-        const lv_color_t color = i == 3U ? np_c_negative()
+        const lv_color_t color = i == 4U ? np_c_negative()
                                    : (i == 1U || i == 2U) ? np_c_accent()
                                                          : np_c_text_2();
         np_label(tile, icons[i], NP_FONT_ICON, color,
-                  0, (48 - NP_FONT_ICON->line_height) / 2,
-                  48, LV_TEXT_ALIGN_CENTER);
+                  0, (44 - NP_FONT_ICON->line_height) / 2,
+                  44, LV_TEXT_ALIGN_CENTER);
         np_label(row, titles[i], NP_FONT_MD, np_c_text(),
-                  88, 8, 744, LV_TEXT_ALIGN_LEFT);
+                  88, 4, 744, LV_TEXT_ALIGN_LEFT);
         np_label(row, details[i], NP_FONT_SM, np_c_text_2(),
-                  88, 38, 744, LV_TEXT_ALIGN_LEFT);
+                  88, 31, 744, LV_TEXT_ALIGN_LEFT);
         np_label(row, NP_ICON_ARROW_RIGHT, NP_FONT_ICON, np_c_text_2(),
-                  880, (68 - NP_FONT_ICON->line_height) / 2,
+                  880, (58 - NP_FONT_ICON->line_height) / 2,
                   32, LV_TEXT_ALIGN_CENTER);
     }
     return view;

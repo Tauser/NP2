@@ -603,6 +603,7 @@ typedef enum {
     DRAWER_ICON_MARKET,
     DRAWER_ICON_IOT,
     DRAWER_ICON_POMODORO,
+    DRAWER_ICON_AGENDA,
     DRAWER_ICON_SETTINGS,
 } drawer_icon_t;
 
@@ -628,6 +629,9 @@ static void drawer_shape(lv_obj_t *item, drawer_icon_t kind, lv_color_t color,
             break;
         case DRAWER_ICON_POMODORO:
             symbol = NP_ICON_CLOCK;
+            break;
+        case DRAWER_ICON_AGENDA:
+            symbol = NP_ICON_CALENDAR;
             break;
         case DRAWER_ICON_SETTINGS:
         default:
@@ -715,6 +719,7 @@ np_header_t np_header(lv_obj_t *parent)
     header.drawer_pomodoro_button = drawer_item(header.drawer, 292, DRAWER_ICON_POMODORO, false);
     header.drawer_settings_button =
         drawer_item(header.drawer, 360, DRAWER_ICON_SETTINGS, false);
+    header.drawer_agenda_button = drawer_item(header.drawer, 428, DRAWER_ICON_AGENDA, false);
 
     lv_timer_t *const drawer_close_timer = lv_timer_create(
         drawer_timeout_cb, NP_DRAWER_AUTO_CLOSE_MS, header.drawer_scrim);
@@ -726,7 +731,7 @@ np_header_t np_header(lv_obj_t *parent)
         lv_obj_t *const items[] = {
             header.drawer_home_button, header.drawer_weather_button,
             header.drawer_market_button, header.drawer_iot_button,
-            header.drawer_pomodoro_button, header.drawer_settings_button,
+            header.drawer_pomodoro_button, header.drawer_settings_button, header.drawer_agenda_button,
         };
         for (size_t i = 0U; i < sizeof(items) / sizeof(items[0]); ++i) {
             lv_obj_add_event_cb(items[i], drawer_item_event_cb,
@@ -754,7 +759,7 @@ static void drawer_select_item(np_header_t *header, lv_obj_t *selected)
     lv_obj_t *const items[] = {
         header->drawer_home_button, header->drawer_weather_button,
         header->drawer_market_button, header->drawer_iot_button,
-        header->drawer_pomodoro_button, header->drawer_settings_button,
+        header->drawer_pomodoro_button, header->drawer_settings_button, header->drawer_agenda_button,
     };
     for (size_t i = 0U; i < sizeof(items) / sizeof(items[0]); ++i) {
         if (items[i] == NULL) continue;
@@ -1201,4 +1206,9 @@ lv_obj_t *np_dots(lv_obj_t *parent, int32_t y, uint8_t count, uint8_t active)
         cursor += w + gap;
     }
     return root;
+}
+
+void np_header_set_drawer_agenda_active(np_header_t *header)
+{
+    if (header != NULL) drawer_select_item(header, header->drawer_agenda_button);
 }

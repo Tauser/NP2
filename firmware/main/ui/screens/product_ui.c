@@ -1,4 +1,5 @@
 #include "product_ui.h"
+#include "np_memory.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +21,9 @@
 #include "np_weather.h"
 #include "np_market.h"
 #include "np_pomodoro.h"
+#include "np_agenda.h"
+#include "np_spotify.h"
+#include "np_home_widget_gesture.h"
 #include "np_profile.h"
 #include "np_preferences.h"
 #include "np_navigation_manager.h"
@@ -31,12 +35,16 @@
 #include "weather_condition.h"
 #include "provisioning_service.h"
 #include "settings/np_settings_display_sound.h"
+#include "settings/np_settings_photo_frame.h"
 #include "settings/np_settings_notifications.h"
 #include "settings/np_settings_system.h"
 #include "settings/np_settings_timezone.h"
 #include "settings/np_settings_wifi.h"
 #include "settings/np_wifi_password.h"
 #include "np_notification_center.h"
+#include "np_photo_frame.h"
+#include "photo_frame_service.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
 #define BOOT_MINIMUM_MS 1200U
@@ -59,10 +67,12 @@ typedef struct {
         PRODUCT_SCREEN_PROFILE,
         PRODUCT_SCREEN_PREFERENCES,
         PRODUCT_SCREEN_DISPLAY_SOUND,
+        PRODUCT_SCREEN_PHOTO_SETTINGS,
         PRODUCT_SCREEN_SYSTEM,
         PRODUCT_SCREEN_NOTIFICATIONS,
         PRODUCT_SCREEN_WIFI,
         PRODUCT_SCREEN_TIMEZONE,
+        PRODUCT_SCREEN_AGENDA,
     } active_screen;
     uintptr_t wifi_return_screen;
     lv_display_t *display;
@@ -78,10 +88,21 @@ typedef struct {
     np_weather_view_t weather;
     np_market_view_t market;
     np_pomodoro_view_t pomodoro;
+    np_agenda_view_t agenda;
+    np_spotify_view_t spotify;
+    lv_obj_t *home_widget_dots[2];
+    uint8_t home_widget_selected;
+    bool spotify_visible;
     np_devices_view_t devices;
     np_profile_view_t profile;
     np_preferences_view_t preferences;
     np_settings_display_sound_view_t display_sound;
+    np_settings_photo_frame_view_t photo_settings;
+    const photo_thumbnail_page_t *thumbnail_page;
+    uint32_t thumbnail_generation;
+    int8_t thumbnail_lease;
+    uint64_t photo_selection_mask;
+    bool photo_selection_waiting;
     np_settings_system_view_t system_scene;
     np_settings_notifications_view_t notifications_scene;
     np_settings_wifi_view_t wifi_scene;
@@ -113,15 +134,18 @@ typedef struct {
     uint8_t boot_rendered_stage;
     bool boot_saved_network_seen;
     bool home_transition_pending;
+    bool startup_sound_handled;
     bool navigation_pending;
     bool wifi_scan_pending;
     uint32_t wifi_scan_idle_since_tick;
     bool profile_editor_pending;
     bool notification_feedback_initialized;
+    uint32_t last_agenda_notification_id;
     bool notification_center_close_pending;
     bool syncing_notification_controls;
     bool syncing_night_control;
     bool home_data_rendered;
+    bool home_widget_swipe_start;
     bool main_page_swipe_start_valid;
     bool main_page_swipe_consumed;
     lv_point_t main_page_swipe_start;
@@ -129,9 +153,20 @@ typedef struct {
     uint8_t projected_brightness;
     uint8_t projected_volume;
     uint32_t system_scene_object_count;
+    np_photo_frame_view_t photo;
+    const void *photo_source;
+    uint32_t photo_generation;
+    uint32_t photo_preview_tick;
+    uint32_t photo_started_tick;
+    int8_t photo_lease;
+    bool photo_active;
+    bool photo_manual;
+    bool photo_preview_pending;
+    bool syncing_photo_controls;
+    bool photo_pomodoro_completed;
 } product_ui_state_t;
 
-static product_ui_state_t s_ui;
+static NP2_PSRAM_BSS product_ui_state_t s_ui;
 static const char *const TAG = "product_ui";
 
 static void install_display_sound_callbacks(void);
@@ -139,6 +174,7 @@ static void settings_value_bubble_timer_cb(lv_timer_t *timer);
 static void night_switch_event_cb(lv_event_t *event);
 static void notification_switch_event_cb(lv_event_t *event);
 static void notifications_test_event_cb(lv_event_t *event);
+static void melody_select_event_cb(lv_event_t *event);
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index);
 static void wifi_manage_event_cb(lv_event_t *event);
 static void wifi_add_open_async(void *user_data);
@@ -175,7 +211,18 @@ static void navigation_enter(void *context, uintptr_t page);
 static void navigation_failed(void *context, uintptr_t page);
 static uint32_t scene_object_count(lv_obj_t *root);
 static void update_weather_screen(const app_ui_projection_t *projection);
+static void home_widget_sync(const app_ui_projection_t *projection);
+
 static void update_market_screen(const app_ui_projection_t *projection);
+static void photo_controls_event_cb(lv_event_t *event);
+static void photo_preview_event_cb(lv_event_t *event);
+static void photo_widgets_event_cb(lv_event_t *event);
+static void photo_widgets_save_event_cb(lv_event_t *event);
+static void photo_hide(void);
+static void photo_tick(const app_ui_projection_t *projection);
+static void photo_gallery_release(void);
+static void update_photo_settings(const app_ui_projection_t *projection);
+static void photo_gallery_event_cb(lv_event_t *event);
 
 typedef enum {
     SETTINGS_CONTROL_BRIGHTNESS = 0,
@@ -311,9 +358,11 @@ static void install_notification_callbacks(np_settings_notifications_t *notifica
                         LV_EVENT_VALUE_CHANGED, (void *)1U);
     lv_obj_add_event_cb(notifications->system_switch, notification_switch_event_cb,
                         LV_EVENT_VALUE_CHANGED, (void *)2U);
-    if (notifications->test_button != NULL) {
-        lv_obj_add_event_cb(notifications->test_button, notifications_test_event_cb,
-                            LV_EVENT_CLICKED, NULL);
+    for (unsigned i=0U;i<SOUND_CATEGORY_COUNT;++i) {
+        lv_obj_add_event_cb(notifications->melodies[i],melody_select_event_cb,
+            LV_EVENT_VALUE_CHANGED,(void *)(uintptr_t)i);
+        lv_obj_add_event_cb(notifications->previews[i],notifications_test_event_cb,
+            LV_EVENT_CLICKED,(void *)(uintptr_t)i);
     }
 }
 
@@ -401,6 +450,17 @@ static void system_restart_event_cb(lv_event_t *event)
     }
 }
 
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+static void system_spotify_pair_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    const bool armed = provisioning_service_arm_open_network() == ESP_OK;
+    np_feedback_show_toast(&s_ui.feedback, armed ? NP_FEEDBACK_INFO : NP_FEEDBACK_ERROR,
+        armed ? "USB liberada por 60 s" : "USB indisponível",
+        "Teste de pareamento Spotify pelo computador", 8000U);
+}
+#endif
+
 static void notification_switch_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) return;
@@ -416,8 +476,8 @@ static void notification_switch_event_cb(lv_event_t *event)
                                       ? (enabled ? "Notificacoes ativadas"
                                                  : "Notificacoes silenciadas")
                                       : type == 1U
-                                            ? (enabled ? "Som das notificacoes ativado"
-                                                       : "Som das notificacoes desativado")
+                                            ? (enabled ? "Sons do painel ativados"
+                                                       : "Sons do painel desativados")
                                             : (enabled ? "Alertas do sistema ativados"
                                                        : "Alertas do sistema desativados");
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
@@ -438,15 +498,25 @@ static void notifications_test_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
 
-    if (notification_service_request_alert_sound() == ESP_OK) {
+    const sound_category_t category=(sound_category_t)(uintptr_t)lv_event_get_user_data(event);
+    if (notification_service_preview_melody(category) == ESP_OK) {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
-                               "Som de notificacao",
+                               "Prévia da melodia",
                                "Reproduzindo no volume atual", 1800U);
     } else {
         np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                "Som indisponivel",
-                               "Ative notificacoes, som e o volume", 2800U);
+                               "Ative sons, escolha uma melodia e ajuste o volume", 2800U);
     }
+}
+
+static void melody_select_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || s_ui.syncing_notification_controls) return;
+    const sound_category_t category=(sound_category_t)(uintptr_t)lv_event_get_user_data(event);
+    const uint16_t selected=lv_dropdown_get_selected(lv_event_get_target(event));
+    if (selected>=SOUND_VARIANT_COUNT || notification_service_set_melody(category,(uint8_t)selected) != ESP_OK)
+        np_feedback_show_toast(&s_ui.feedback,NP_FEEDBACK_ERROR,"Melodia não alterada","Tente novamente",2500U);
 }
 
 static esp_err_t timezone_select_cb(void *user_data, uint16_t timezone_index)
@@ -1420,7 +1490,7 @@ static void update_home(const app_ui_projection_t *projection)
         memcmp(&s_ui.rendered_home_data, &projection->offline_data,
                sizeof(projection->offline_data)) != 0 ||
         s_ui.rendered_weather_icon_source != projection->weather_assets.icon_source) {
-        update_weather(projection);
+        if (s_ui.home_widget_selected != 1U) update_weather(projection);
         update_market(projection);
         update_exchange(projection);
         update_ibovespa(projection);
@@ -1444,6 +1514,40 @@ static void update_home(const app_ui_projection_t *projection)
                                    "Preferencias salvas", NULL, 1800U);
         }
     }
+}
+
+static void home_widget_build(void)
+{
+    s_ui.spotify = np_spotify_build(s_ui.home.root);
+    np_spotify_bind(&s_ui.spotify);
+    s_ui.home_widget_selected = UINT8_MAX;
+    for (unsigned i = 0; i < 2; ++i) {
+        s_ui.home_widget_dots[i] = np_dot(s_ui.home.root, 292 + (int)i * 16, 436, 8, np_c_text_3());
+        lv_obj_remove_flag(s_ui.home_widget_dots[i], LV_OBJ_FLAG_CLICKABLE);
+    }
+}
+static void home_widget_sync(const app_ui_projection_t *projection)
+{
+    if (s_ui.home.root == NULL || s_ui.spotify.root == NULL) return;
+    const uint8_t selected = projection->device_controls.home_widget == 1U ? 1U : 0U;
+    if (selected != s_ui.home_widget_selected) {
+        s_ui.home_widget_selected = selected;
+        np_set_visible(s_ui.home.weather_card, selected == 0U);
+        np_set_visible(s_ui.spotify.root, selected == 1U);
+        if (selected == 1U) {
+            (void)lv_animimg_delete(s_ui.home.weather_icon);
+            np_set_visible(s_ui.home.weather_icon, false);
+        } else update_weather(projection);
+        for (unsigned i=0;i<2;++i) {
+            np_set_bg_color(s_ui.home_widget_dots[i], i == selected ? np_c_accent() : np_c_text_3());
+        }
+    }
+    bool visible = s_ui.active_screen == PRODUCT_SCREEN_HOME && selected == 1U && !s_ui.photo_active;
+    if (visible != s_ui.spotify_visible) {
+        spotify_remote_command_t c = {.action=visible ? SPOTIFY_REMOTE_VISIBLE : SPOTIFY_REMOTE_HIDDEN};
+        if (app_event_bus_post_spotify(&c)==ESP_OK) s_ui.spotify_visible=visible;
+    }
+    if (visible) np_spotify_sync(&s_ui.spotify, projection->network.online);
 }
 
 static void update_display_sound_controls(const app_ui_projection_t *projection)
@@ -1505,7 +1609,8 @@ static void update_notification_controls(np_settings_notifications_t *notificati
     np_settings_notifications_sync(notifications,
                                    projection->notifications.general_enabled,
                                    projection->notifications.sound_enabled,
-                                   projection->notifications.system_alerts_enabled);
+                                   projection->notifications.system_alerts_enabled,
+                                   projection->notifications.melodies);
     s_ui.syncing_notification_controls = false;
 }
 
@@ -1515,10 +1620,17 @@ static void update_notifications_scene(const app_ui_projection_t *projection)
     update_header(&s_ui.notifications_scene.header, projection, true);
     update_notification_controls(notifications, projection);
     lv_obj_t *controls[] = {notifications->general_switch, notifications->sound_switch,
-                            notifications->system_switch, notifications->test_button};
+                            notifications->system_switch};
     for (unsigned i = 0; i < sizeof(controls) / sizeof(controls[0]); ++i) {
         if (projection->notifications.ready) lv_obj_remove_state(controls[i], LV_STATE_DISABLED);
         else lv_obj_add_state(controls[i], LV_STATE_DISABLED);
+    }
+    for (unsigned i=0U;i<SOUND_CATEGORY_COUNT;++i) {
+        lv_obj_t *sound_controls[]={notifications->melodies[i],notifications->previews[i]};
+        for (unsigned j=0U;j<2U;++j) {
+            if (projection->notifications.ready) lv_obj_remove_state(sound_controls[j],LV_STATE_DISABLED);
+            else lv_obj_add_state(sound_controls[j],LV_STATE_DISABLED);
+        }
     }
     np_set_text(s_ui.notifications_scene.persistence_status,
         !projection->notifications.ready ? "Carregando preferências..."
@@ -1601,6 +1713,9 @@ static void navigation_shell_create(void)
     lv_obj_add_event_cb(s_ui.shell_header.drawer_settings_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+    lv_obj_add_event_cb(s_ui.shell_header.drawer_agenda_button,
+                        scene_navigation_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)PRODUCT_SCREEN_AGENDA);
     lv_obj_add_event_cb(s_ui.shell_header.settings_button,
                         scene_navigation_event_cb, LV_EVENT_CLICKED,
                         (void *)(uintptr_t)PRODUCT_SCREEN_PROFILE);
@@ -1751,6 +1866,10 @@ static void main_page_swipe_event_cb(lv_event_t *event)
      * is the touched object. lv_event_get_indev() would return that object. */
     lv_indev_t *const indev = lv_event_get_target(event);
     if (indev == NULL) return;
+    if (s_ui.photo_active) {
+        s_ui.main_page_swipe_start_valid = false;
+        return;
+    }
 
     if (code == LV_EVENT_SHORT_CLICKED || code == LV_EVENT_SINGLE_CLICKED ||
         code == LV_EVENT_DOUBLE_CLICKED || code == LV_EVENT_TRIPLE_CLICKED ||
@@ -1763,12 +1882,16 @@ static void main_page_swipe_event_cb(lv_event_t *event)
 
     if (code == LV_EVENT_PRESSED) {
         s_ui.main_page_swipe_consumed = false;
+        s_ui.home_widget_swipe_start = false;
         s_ui.main_page_swipe_start_valid = is_main_page(s_ui.active_screen) &&
             s_ui.navigation.phase == NP_NAV_IDLE && !s_ui.navigation_pending;
         if (s_ui.main_page_swipe_start_valid) {
             lv_indev_get_point(indev, &s_ui.main_page_swipe_start);
             s_ui.main_page_swipe_start_valid = s_ui.main_page_swipe_start.y >= NP_HEADER_H;
             lv_obj_t *const touched_object = lv_event_get_param(event);
+            int owner = np_home_widget_owner(touched_object, s_ui.home.weather_card, &s_ui.spotify);
+            s_ui.home_widget_swipe_start = owner == 1 && s_ui.active_screen == PRODUCT_SCREEN_HOME;
+            if (owner < 0) s_ui.main_page_swipe_start_valid = false;
             if (s_ui.shell_header.drawer_scrim == NULL ||
                 !lv_obj_has_flag(s_ui.shell_header.drawer_scrim, LV_OBJ_FLAG_HIDDEN) ||
                 touched_object == NULL) {
@@ -1795,6 +1918,16 @@ static void main_page_swipe_event_cb(lv_event_t *event)
     const int32_t delta_y = end.y - s_ui.main_page_swipe_start.y;
     const int32_t distance_x = delta_x < 0 ? -delta_x : delta_x;
     const int32_t distance_y = delta_y < 0 ? -delta_y : delta_y;
+    if (s_ui.home_widget_swipe_start) {
+        int destination = np_home_widget_destination(delta_x, delta_y);
+        if (destination >= 0) {
+            s_ui.main_page_swipe_consumed = true;
+            if ((uint8_t)destination != s_ui.home_widget_selected &&
+                app_event_bus_post_home_widget((uint8_t)destination) != ESP_OK)
+                np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR, "Painel ocupado", NULL, 2000U);
+        }
+        return;
+    }
     if (distance_x > 32 || distance_y > 32) {
         ESP_LOGI(TAG, "page drag page=%u valid=%u start=%d,%d end=%d,%d delta=%ld,%ld phase=%u pending=%u",
                  (unsigned)s_ui.active_screen, (unsigned)valid_start,
@@ -1910,9 +2043,11 @@ static void home_build_timer_cb(lv_timer_t *timer)
         navigation_build(NULL, requested_page);
     if (!built_preferred_page) {
         s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
+        home_widget_build();
         s_ui.home_data_rendered = false;
         update_home(&projection);
         s_ui.active_screen = PRODUCT_SCREEN_HOME;
+        home_widget_sync(&projection);
         s_ui.navigation.current_page = PRODUCT_SCREEN_HOME;
         s_ui.navigation.destination = PRODUCT_SCREEN_HOME;
         navigation_enter(NULL, PRODUCT_SCREEN_HOME);
@@ -1953,6 +2088,242 @@ static void show_home(const app_ui_projection_t *projection)
     }
 }
 
+static void photo_hide(void)
+{
+    if (s_ui.photo_active) {
+        np_set_visible(s_ui.photo.root, false);
+        s_ui.photo_active = false;
+        ESP_LOGI(TAG, "Photo frame visible=0");
+    }
+    s_ui.photo_preview_pending = false;
+    s_ui.photo_manual = false;
+    lv_display_trigger_activity(s_ui.display);
+}
+
+static void photo_touch_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    /* Hide only at the end of the click; it must never activate a control on
+     * the underlying page with the same gesture. */
+    photo_hide();
+    lv_event_stop_bubbling(event);
+}
+
+static bool photo_object_visible(lv_obj_t *obj)
+{
+    return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void photo_preview_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    photo_frame_status_t status;
+    photo_frame_service_get_status(&status);
+    if (!status.mounted || !status.enabled_count) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO, "Fotos indisponíveis",
+            status.mounted ? "Ative pelo menos uma foto na galeria" : "Confira o cartão SD e reinicie o painel", 4000U);
+        return;
+    }
+    s_ui.photo_preview_pending = true;
+    s_ui.photo_preview_tick = lv_tick_get();
+    photo_frame_service_set_visible(true);
+}
+
+static void photo_controls_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || s_ui.syncing_photo_controls) return;
+    np_settings_photo_frame_view_t *controls = &s_ui.photo_settings;
+    if (device_control_set_photo_settings(
+        lv_obj_has_state(controls->photo_switch, LV_STATE_CHECKED),
+        (uint8_t)lv_dropdown_get_selected(controls->photo_idle),
+        (uint8_t)lv_dropdown_get_selected(controls->photo_interval),
+        (uint8_t)lv_dropdown_get_selected(controls->photo_exit)) != ESP_OK)
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+            "Ajuste indisponível", "Aguarde o painel iniciar", 2400U);
+}
+
+static void photo_widgets_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    app_device_control_projection_t controls;
+    app_state_get_device_control_projection(&controls);
+    const bool create = s_ui.photo_settings.widget_editor.modal.scrim == NULL;
+    np_photo_widget_editor_open(&s_ui.photo_settings,
+        controls.photo_bitcoin_widget, controls.photo_clock_widget);
+    if (create)
+        lv_obj_add_event_cb(s_ui.photo_settings.widget_editor.save,
+            photo_widgets_save_event_cb, LV_EVENT_CLICKED, NULL);
+}
+
+static void photo_widgets_save_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    np_photo_widget_editor_t *editor = &s_ui.photo_settings.widget_editor;
+    if (device_control_set_photo_widgets(np_photo_widget_editor_value(editor, 0),
+                                         np_photo_widget_editor_value(editor, 1)) == ESP_OK)
+        np_modal_hide(&editor->modal);
+    else np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+        "Ajuste indisponível", "Aguarde o painel iniciar", 2400U);
+}
+
+static void photo_gallery_release(void)
+{
+    if (s_ui.thumbnail_lease < 0) return;
+    np_settings_photo_frame_set_thumbnails(&s_ui.photo_settings, NULL);
+    if (s_ui.thumbnail_page)
+        for (unsigned i = 0; i < PHOTO_PAGE_SIZE; ++i)
+            if (s_ui.thumbnail_page->images[i]) lv_image_cache_drop(s_ui.thumbnail_page->images[i]);
+    photo_thumbnail_release(s_ui.thumbnail_lease);
+    s_ui.thumbnail_lease = -1;
+    s_ui.thumbnail_page = NULL;
+    s_ui.thumbnail_generation = 0;
+}
+
+static void photo_gallery_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || s_ui.navigation_pending) return;
+    np_settings_photo_frame_view_t *view = &s_ui.photo_settings;
+    const unsigned action = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (action >= PHOTO_PAGE_SIZE) {
+        photo_gallery_release();
+        if (action == 4U && view->page) --view->page;
+        else if (action == 5U) ++view->page;
+        memset(view->ids, 0, sizeof(view->ids));
+        for (unsigned i = 0; i < PHOTO_PAGE_SIZE; ++i) np_set_visible(view->tiles[i], false);
+        return;
+    }
+    const uint8_t id = view->ids[action];
+    if (!id) return;
+    const uint64_t mask = s_ui.photo_selection_mask ^ (UINT64_C(1) << (id-1U));
+    if (device_control_set_photo_selection(mask) == ESP_OK) {
+        s_ui.photo_selection_mask = mask;
+        s_ui.photo_selection_waiting = true;
+    } else np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+        "Seleção indisponível", "Aguarde o painel iniciar", 2400U);
+}
+
+static void update_photo_settings(const app_ui_projection_t *projection)
+{
+    np_settings_photo_frame_view_t *view = &s_ui.photo_settings;
+    if (!view->root) return;
+    if (s_ui.photo_selection_waiting &&
+        projection->device_controls.photo_enabled_mask == s_ui.photo_selection_mask)
+        s_ui.photo_selection_waiting = false;
+    if (!s_ui.photo_selection_waiting)
+        s_ui.photo_selection_mask = projection->device_controls.photo_enabled_mask;
+    const uint8_t page_before = view->page;
+    const uint64_t catalog_before = view->catalog;
+    s_ui.syncing_photo_controls = true;
+    np_settings_photo_frame_sync(view, &projection->photos, s_ui.photo_selection_mask,
+        (projection->device_controls.photo_config & PHOTO_FRAME_ENABLED) != 0,
+        projection->device_controls.photo_idle_choice, projection->device_controls.photo_interval_choice,
+        projection->device_controls.photo_exit_choice,
+        projection->device_controls.persistence_pending || s_ui.photo_selection_waiting);
+    s_ui.syncing_photo_controls = false;
+    if (view->page != page_before || view->catalog != catalog_before) photo_gallery_release();
+    photo_thumbnail_request(!s_ui.photo_active && !s_ui.photo_preview_pending, view->page);
+    if (projection->photos.thumbnail_ready &&
+        (s_ui.thumbnail_lease < 0 || s_ui.thumbnail_generation != projection->photos.thumbnail_generation)) {
+        int8_t lease = -1;
+        const photo_thumbnail_page_t *page = photo_thumbnail_acquire(&lease);
+        if (page && page->page == view->page && page->catalog == view->catalog) {
+            photo_gallery_release();
+            np_settings_photo_frame_set_thumbnails(view, page);
+            s_ui.thumbnail_page = page;
+            s_ui.thumbnail_lease = lease;
+            s_ui.thumbnail_generation = page->generation;
+        } else if (page) photo_thumbnail_release(lease);
+    }
+    update_header(&view->header, projection, true);
+}
+
+static void photo_tick(const app_ui_projection_t *projection)
+{
+    if (s_ui.active_screen == PRODUCT_SCREEN_PHOTO_SETTINGS) {
+        if (!s_ui.photo_active && !s_ui.photo_preview_pending) update_photo_settings(projection);
+        else photo_thumbnail_request(false, s_ui.photo_settings.page);
+    }
+    const uint8_t config = projection->device_controls.photo_config;
+    /* Advance the single UI lease only after the frame image has dropped
+     * the previous descriptor. The worker never writes to a leased slot. */
+    if (projection->photos.available && projection->photos.generation != s_ui.photo_generation) {
+        uint32_t generation = 0;
+        int8_t lease = -1;
+        const void *source = photo_frame_service_acquire(&generation, &lease);
+        if (source) {
+            const void *old_source = s_ui.photo_source;
+            const int8_t old_lease = s_ui.photo_lease;
+            np_photo_frame_set_source(&s_ui.photo, source);
+            s_ui.photo_source = source;
+            s_ui.photo_lease = lease;
+            s_ui.photo_generation = generation;
+            if (old_source) {
+                lv_image_cache_drop(old_source);
+                photo_frame_service_release(old_lease);
+            }
+        }
+    }
+    if (projection->pomodoro.completed && !s_ui.photo_pomodoro_completed) {
+        photo_hide();
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+            "Foco concluído", "Sua sessão de Pomodoro terminou", 8000U);
+    }
+    s_ui.photo_pomodoro_completed = projection->pomodoro.completed;
+    const bool interrupted = photo_object_visible(s_ui.feedback.toast) ||
+        s_ui.navigation_pending || s_ui.navigation.phase != NP_NAV_IDLE;
+    if (s_ui.photo_active && (interrupted || !projection->photos.available ||
+        (!(config & PHOTO_FRAME_ENABLED) && !s_ui.photo_manual))) photo_hide();
+    if (s_ui.photo_active && photo_exit_due(projection->device_controls.photo_exit_choice,
+        s_ui.photo_started_tick, lv_tick_get())) {
+        ESP_LOGI(TAG, "Photo frame timeout");
+        photo_hide(); /* Resets inactivity before the idle-entry check below. */
+    }
+    if (s_ui.photo_preview_pending &&
+        (!projection->photos.mounted || !photo_mask_count(projection->photos.catalog &
+            projection->device_controls.photo_enabled_mask))) {
+        s_ui.photo_preview_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+            "Fotos indisponíveis", "Ative uma foto na galeria e confira o cartão", 3000U);
+    }
+    if (s_ui.photo_preview_pending && (!s_ui.photo_source || !projection->photos.available) &&
+        lv_tick_elaps(s_ui.photo_preview_tick) > 12000U) {
+        s_ui.photo_preview_pending = false;
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_WARNING,
+            "Não foi possível abrir a foto", "Confira os arquivos no cartão SD", 4000U);
+    }
+    /* Editors/settings and camera pages remain under the user's control.
+     * The idle overlay never discards a form or interrupts a camera stream. */
+    const bool eligible = (is_main_page(s_ui.active_screen) && s_ui.active_screen != PRODUCT_SCREEN_IOT) ||
+        (s_ui.active_screen == PRODUCT_SCREEN_AGENDA && !np_modal_is_visible(&s_ui.agenda.editor));
+    const bool blocked = interrupted || s_ui.home_transition_pending ||
+        np_modal_is_visible(&s_ui.spotify.device_modal) ||
+        np_keyboard_is_visible(&s_ui.keyboard) || photo_object_visible(s_ui.shell_header.drawer_scrim) ||
+        photo_object_visible(s_ui.notification_center.root);
+    const bool idle = (config & PHOTO_FRAME_ENABLED) && eligible && !blocked &&
+        lv_display_get_inactive_time(s_ui.display) >= photo_idle_choice_ms(projection->device_controls.photo_idle_choice);
+    if (!s_ui.photo_active && s_ui.photo_source && projection->photos.available &&
+        (s_ui.photo_preview_pending || idle) && projection->device_controls.ready) {
+        if (!s_ui.photo.root) {
+            s_ui.photo = np_photo_frame_build(lv_layer_top());
+            lv_obj_add_event_cb(s_ui.photo.root, photo_touch_event_cb, LV_EVENT_CLICKED, NULL);
+        }
+        np_photo_frame_set_source(&s_ui.photo, s_ui.photo_source);
+        np_feedback_hide_all(&s_ui.feedback);
+        np_set_visible(s_ui.photo.root, true);
+        lv_obj_move_foreground(s_ui.photo.root);
+        s_ui.photo_active = true;
+        s_ui.photo_started_tick = lv_tick_get();
+        s_ui.photo_manual = s_ui.photo_preview_pending;
+        s_ui.photo_preview_pending = false;
+        ESP_LOGI(TAG, "Photo frame visible=1 generation=%lu", (unsigned long)s_ui.photo_generation);
+    }
+    if (s_ui.photo_active)
+        np_photo_frame_sync(&s_ui.photo, projection->current_unix_s, projection->time_trusted,
+            &projection->offline_data.market, projection->device_controls.photo_bitcoin_widget,
+            projection->device_controls.photo_clock_widget);
+    photo_frame_service_set_visible(s_ui.photo_active || s_ui.photo_preview_pending);
+}
+
 static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -1961,6 +2332,29 @@ static void refresh_timer_cb(lv_timer_t *timer)
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
+    if (s_ui.active_screen == PRODUCT_SCREEN_HOME) home_widget_sync(&projection);
+    if (s_ui.active_screen == PRODUCT_SCREEN_AGENDA && s_ui.agenda.root != NULL) {
+        app_state_get_agenda_projection(&s_ui.agenda.state);
+        np_agenda_sync(&s_ui.agenda, &s_ui.agenda.state);
+        update_header(&s_ui.shell_header, &projection, false);
+        np_header_set_drawer_agenda_active(&s_ui.shell_header);
+    }
+    if (!s_ui.startup_sound_handled && s_ui.active_screen != PRODUCT_SCREEN_BOOT &&
+        projection.notifications.ready && projection.device_controls.ready) {
+        s_ui.startup_sound_handled=true;
+        (void)notification_service_request_startup_sound();
+    }
+    if (projection.notification_center.count != 0U) {
+        const app_notification_item_t *latest = &projection.notification_center.items[projection.notification_center.count - 1U];
+        if (latest->id != s_ui.last_agenda_notification_id) {
+            s_ui.last_agenda_notification_id = latest->id;
+            photo_hide();
+            if (latest->kind == APP_NOTIFICATION_KIND_AGENDA_EVENT || latest->kind == APP_NOTIFICATION_KIND_AGENDA_TASK)
+                np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_INFO,
+                    latest->kind == APP_NOTIFICATION_KIND_AGENDA_TASK ? "Lembrete de tarefa" : "Lembrete de evento",
+                    latest->title, 8000U);
+        }
+    }
 
     if (projection.system.restart_completion_id != s_ui.restart_completion_id) {
         s_ui.restart_completion_id = projection.system.restart_completion_id;
@@ -1971,7 +2365,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
         s_ui.control_save_completion_id) {
         s_ui.control_save_completion_id = projection.device_controls.save_completion_id;
         const uint8_t mask = projection.device_controls.save_completion_mask;
-        const char *const title = (mask & DEVICE_CONTROL_NIGHT_MASK) != 0U
+        const char *const title = (mask & (DEVICE_CONTROL_NIGHT_MASK | DEVICE_CONTROL_PHOTO_MASK | DEVICE_CONTROL_WIDGET_MASK)) != 0U
                                       ? "Preferencias da tela salvas"
                                       : (mask & (DEVICE_CONTROL_BRIGHTNESS_MASK |
                                            DEVICE_CONTROL_VOLUME_MASK)) ==
@@ -2099,6 +2493,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
         np_devices_sync(&s_ui.devices, &projection.iot);
         np_devices_refresh_discovery(&s_ui.devices);
     }
+    photo_tick(&projection);
 }
 
 static void release_current_scene(void)
@@ -2135,9 +2530,13 @@ static void release_current_scene(void)
     np_set_visible(s_ui.weather.root, false);
     np_set_visible(s_ui.devices.root, false);
     np_set_visible(s_ui.pomodoro.root, false);
+    np_set_visible(s_ui.agenda.root, false);
     np_set_visible(s_ui.profile.root, false);
     np_set_visible(s_ui.preferences.root, false);
     np_set_visible(s_ui.display_sound.root, false);
+    photo_gallery_release();
+    photo_thumbnail_request(false, 0);
+    np_set_visible(s_ui.photo_settings.root, false);
     np_set_visible(s_ui.notifications_scene.root, false);
     np_set_visible(s_ui.wifi_scene.root, false);
     np_set_visible(s_ui.system_scene.header.drawer_scrim, false);
@@ -2169,6 +2568,7 @@ static bool navigation_evict_legacy(uintptr_t page)
     switch (page) {
     case PRODUCT_SCREEN_PROFILE: root = s_ui.profile.root; break;
     case PRODUCT_SCREEN_DISPLAY_SOUND: root = s_ui.display_sound.root; break;
+    case PRODUCT_SCREEN_PHOTO_SETTINGS: root = s_ui.photo_settings.root; break;
     case PRODUCT_SCREEN_SYSTEM: root = s_ui.system_scene.root; break;
     case PRODUCT_SCREEN_NOTIFICATIONS: root = s_ui.notifications_scene.root; break;
     case PRODUCT_SCREEN_WIFI: root = s_ui.wifi_scene.root; break;
@@ -2181,6 +2581,8 @@ static bool navigation_evict_legacy(uintptr_t page)
     case PRODUCT_SCREEN_PROFILE: s_ui.profile = (np_profile_view_t){0}; break;
     case PRODUCT_SCREEN_DISPLAY_SOUND:
         s_ui.display_sound = (np_settings_display_sound_view_t){0}; break;
+    case PRODUCT_SCREEN_PHOTO_SETTINGS:
+        s_ui.photo_settings = (np_settings_photo_frame_view_t){0}; break;
     case PRODUCT_SCREEN_SYSTEM:
         s_ui.system_scene = (np_settings_system_view_t){0};
         s_ui.system_scene_object_count = 0; break;
@@ -2200,6 +2602,7 @@ static bool navigation_legacy_cached(uintptr_t page)
     switch (page) {
     case PRODUCT_SCREEN_PROFILE: return s_ui.profile.root != NULL;
     case PRODUCT_SCREEN_DISPLAY_SOUND: return s_ui.display_sound.root != NULL;
+    case PRODUCT_SCREEN_PHOTO_SETTINGS: return s_ui.photo_settings.root != NULL;
     case PRODUCT_SCREEN_SYSTEM: return s_ui.system_scene.root != NULL;
     case PRODUCT_SCREEN_NOTIFICATIONS: return s_ui.notifications_scene.root != NULL;
     case PRODUCT_SCREEN_WIFI: return s_ui.wifi_scene.root != NULL;
@@ -2213,14 +2616,15 @@ static void navigation_reclaim_for_build(uintptr_t destination)
     /* The 64 KiB LVGL pool cannot retain every legacy scene. Free hidden
      * caches after LEAVE and before BUILD, keeping the destination cache. */
     const uint32_t reserve = navigation_legacy_cached(destination) ? 16U * 1024U
-        : (destination == PRODUCT_SCREEN_WIFI || destination == PRODUCT_SCREEN_TIMEZONE)
+        : (destination == PRODUCT_SCREEN_WIFI || destination == PRODUCT_SCREEN_TIMEZONE ||
+           destination == PRODUCT_SCREEN_AGENDA || destination == PRODUCT_SCREEN_PHOTO_SETTINGS)
             ? 40U * 1024U
         : destination == PRODUCT_SCREEN_MARKET ? 48U * 1024U
         : (destination == PRODUCT_SCREEN_HOME || destination == PRODUCT_SCREEN_PREFERENCES)
-            ? 24U * 1024U : 30U * 1024U;
+            ? 40U * 1024U : 30U * 1024U;
     const uintptr_t candidates[] = {
         PRODUCT_SCREEN_SYSTEM, PRODUCT_SCREEN_WIFI, PRODUCT_SCREEN_TIMEZONE,
-        PRODUCT_SCREEN_DISPLAY_SOUND, PRODUCT_SCREEN_NOTIFICATIONS,
+        PRODUCT_SCREEN_DISPLAY_SOUND, PRODUCT_SCREEN_PHOTO_SETTINGS, PRODUCT_SCREEN_NOTIFICATIONS,
         PRODUCT_SCREEN_PROFILE,
     };
     lv_mem_monitor_t heap = {0};
@@ -2257,11 +2661,16 @@ static void navigation_clean(void *context, uintptr_t page)
     s_ui.market = (np_market_view_t){0};
     s_ui.devices = (np_devices_view_t){0};
     s_ui.pomodoro = (np_pomodoro_view_t){0};
+    s_ui.agenda = (np_agenda_view_t){0};
+    s_ui.spotify = (np_spotify_view_t){0};
+    memset(s_ui.home_widget_dots, 0, sizeof(s_ui.home_widget_dots));
+    s_ui.home_widget_selected = UINT8_MAX;
     if (s_ui.navigation.destination != PRODUCT_SCREEN_HOME &&
         s_ui.navigation.destination != PRODUCT_SCREEN_WEATHER &&
         s_ui.navigation.destination != PRODUCT_SCREEN_MARKET &&
         s_ui.navigation.destination != PRODUCT_SCREEN_IOT &&
         s_ui.navigation.destination != PRODUCT_SCREEN_POMODORO &&
+        s_ui.navigation.destination != PRODUCT_SCREEN_AGENDA &&
         s_ui.navigation.destination != PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, false);
     }
@@ -2278,15 +2687,18 @@ static bool navigation_build(void *context, uintptr_t page)
         page == PRODUCT_SCREEN_MARKET ||
         page == PRODUCT_SCREEN_IOT ||
         page == PRODUCT_SCREEN_POMODORO ||
+        page == PRODUCT_SCREEN_AGENDA ||
         page == PRODUCT_SCREEN_PREFERENCES) {
         if (page == PRODUCT_SCREEN_HOME) {
             s_ui.home = np_home_build_with_header(s_ui.content_host, &s_ui.shell_header);
             if (s_ui.home.root == NULL) return false;
+            home_widget_build();
             lv_obj_add_event_cb(s_ui.home.weather_card, scene_navigation_event_cb,
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_WEATHER);
             s_ui.home_data_rendered = false;
             update_home(&projection);
             s_ui.active_screen = PRODUCT_SCREEN_HOME;
+            home_widget_sync(&projection);
         } else if (page == PRODUCT_SCREEN_WEATHER) {
             s_ui.weather = np_weather_build_with_header(s_ui.content_host, &s_ui.shell_header);
             if (s_ui.weather.root == NULL) return false;
@@ -2363,6 +2775,15 @@ static bool navigation_build(void *context, uintptr_t page)
             update_header(&s_ui.shell_header, &projection, false);
             np_header_set_drawer_iot_active(&s_ui.shell_header, true);
             s_ui.active_screen = PRODUCT_SCREEN_IOT;
+        } else if (page == PRODUCT_SCREEN_AGENDA) {
+            s_ui.agenda = np_agenda_build(s_ui.content_host);
+            if (s_ui.agenda.root == NULL) return false;
+            np_agenda_bind(&s_ui.agenda, &s_ui.keyboard);
+            app_state_get_agenda_projection(&s_ui.agenda.state);
+            np_agenda_sync(&s_ui.agenda, &s_ui.agenda.state);
+            update_header(&s_ui.shell_header, &projection, false);
+            np_header_set_drawer_agenda_active(&s_ui.shell_header);
+            s_ui.active_screen = PRODUCT_SCREEN_AGENDA;
         } else if (page == PRODUCT_SCREEN_POMODORO) {
             s_ui.pomodoro = np_pomodoro_build_with_header(s_ui.content_host,
                                                           &s_ui.shell_header);
@@ -2383,10 +2804,11 @@ static bool navigation_build(void *context, uintptr_t page)
             for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
                 lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
                                     LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
-                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
-                                        ? PRODUCT_SCREEN_SYSTEM : i == 3U
-                                        ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
-                                        ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
+                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 1U
+                                        ? PRODUCT_SCREEN_PHOTO_SETTINGS : i == 2U
+                                        ? PRODUCT_SCREEN_WIFI : i == 3U
+                                        ? PRODUCT_SCREEN_TIMEZONE : i == 4U
+                                        ? PRODUCT_SCREEN_NOTIFICATIONS : PRODUCT_SCREEN_SYSTEM));
             }
             update_header(&s_ui.shell_header, &projection, true);
             s_ui.active_screen = PRODUCT_SCREEN_PREFERENCES;
@@ -2396,6 +2818,7 @@ static bool navigation_build(void *context, uintptr_t page)
                        page == PRODUCT_SCREEN_WEATHER ? s_ui.weather.root :
                        page == PRODUCT_SCREEN_MARKET ? s_ui.market.root :
                        page == PRODUCT_SCREEN_IOT ? s_ui.devices.root :
+                       page == PRODUCT_SCREEN_AGENDA ? s_ui.agenda.root :
                        page == PRODUCT_SCREEN_POMODORO ? s_ui.pomodoro.root : s_ui.preferences.root, true);
         return true;
     }
@@ -2441,6 +2864,30 @@ static bool navigation_build(void *context, uintptr_t page)
         }
         root = s_ui.display_sound.root;
         header = &s_ui.display_sound.header;
+    } else if (page == PRODUCT_SCREEN_PHOTO_SETTINGS) {
+        install_header_callbacks = s_ui.photo_settings.root == NULL;
+        if (install_header_callbacks) {
+            s_ui.photo_settings = np_settings_photo_frame_build(lv_screen_active());
+            if (!s_ui.photo_settings.root) return false;
+            lv_obj_add_event_cb(s_ui.photo_settings.back_button, scene_navigation_event_cb,
+                LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
+            lv_obj_t *choices[] = {s_ui.photo_settings.photo_switch, s_ui.photo_settings.photo_idle,
+                s_ui.photo_settings.photo_interval, s_ui.photo_settings.photo_exit};
+            for (unsigned i = 0; i < sizeof(choices)/sizeof(choices[0]); ++i)
+                lv_obj_add_event_cb(choices[i], photo_controls_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+            lv_obj_add_event_cb(s_ui.photo_settings.photo_preview, photo_preview_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.photo_settings.photo_widgets, photo_widgets_event_cb, LV_EVENT_CLICKED, NULL);
+            for (unsigned i = 0; i < PHOTO_PAGE_SIZE; ++i)
+                lv_obj_add_event_cb(s_ui.photo_settings.tiles[i], photo_gallery_event_cb,
+                    LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+            lv_obj_add_event_cb(s_ui.photo_settings.previous, photo_gallery_event_cb, LV_EVENT_CLICKED, (void *)4);
+            lv_obj_add_event_cb(s_ui.photo_settings.next, photo_gallery_event_cb, LV_EVENT_CLICKED, (void *)5);
+        }
+        s_ui.photo_selection_waiting = false;
+        s_ui.photo_selection_mask = projection.device_controls.photo_enabled_mask;
+        root = s_ui.photo_settings.root;
+        header = &s_ui.photo_settings.header;
+        update_photo_settings(&projection);
     } else if (page == PRODUCT_SCREEN_TIMEZONE) {
         install_header_callbacks = s_ui.timezone_scene.root == NULL;
         const uint32_t started = lv_tick_get();
@@ -2510,6 +2957,10 @@ static bool navigation_build(void *context, uintptr_t page)
                                 (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
             lv_obj_add_event_cb(s_ui.system_scene.system.restart_button,
                                 system_restart_event_cb, LV_EVENT_CLICKED, NULL);
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+            lv_obj_add_event_cb(s_ui.system_scene.update_button,
+                                system_spotify_pair_event_cb, LV_EVENT_CLICKED, NULL);
+#endif
             s_ui.system_scene_object_count = scene_object_count(root);
             ESP_LOGI(TAG, "System scene built: %lu objects, %lu ms",
                      (unsigned long)s_ui.system_scene_object_count,
@@ -2539,6 +2990,8 @@ static bool navigation_build(void *context, uintptr_t page)
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_IOT);
         lv_obj_add_event_cb(header->drawer_pomodoro_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_POMODORO);
+        lv_obj_add_event_cb(header->drawer_agenda_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_AGENDA);
         lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED,
                             (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
@@ -2567,6 +3020,10 @@ static bool navigation_build(void *context, uintptr_t page)
 static void navigation_enter(void *context, uintptr_t page)
 {
     (void)context;
+    if (page != PRODUCT_SCREEN_HOME && s_ui.spotify_visible) {
+        spotify_remote_command_t c = {.action=SPOTIFY_REMOTE_HIDDEN};
+        if(app_event_bus_post_spotify(&c)==ESP_OK) s_ui.spotify_visible=false;
+    }
     if (page == PRODUCT_SCREEN_WIFI) {
         s_ui.wifi_scan_pending = true;
         s_ui.wifi_scan_idle_since_tick = 0U;
@@ -2575,6 +3032,7 @@ static void navigation_enter(void *context, uintptr_t page)
         page == PRODUCT_SCREEN_MARKET ||
         page == PRODUCT_SCREEN_IOT ||
         page == PRODUCT_SCREEN_POMODORO ||
+        page == PRODUCT_SCREEN_AGENDA ||
         page == PRODUCT_SCREEN_PREFERENCES) {
         np_set_visible(s_ui.shell, true);
         lv_obj_move_foreground(s_ui.shell);
@@ -2800,6 +3258,10 @@ static void scene_navigation_async(void *user_data)
                                 LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
             lv_obj_add_event_cb(s_ui.system_scene.system.restart_button, system_restart_event_cb,
                                 LV_EVENT_CLICKED, NULL);
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+            lv_obj_add_event_cb(s_ui.system_scene.update_button,
+                                system_spotify_pair_event_cb, LV_EVENT_CLICKED, NULL);
+#endif
             s_ui.system_scene_object_count = scene_object_count(root);
             ESP_LOGI(TAG, "System scene built: %lu objects, %lu ms",
                      (unsigned long)s_ui.system_scene_object_count,
@@ -2821,10 +3283,11 @@ static void scene_navigation_async(void *user_data)
             for (uint8_t i = 0; i < NP_PREFERENCES_ITEM_COUNT; ++i) {
                 lv_obj_add_event_cb(s_ui.preferences.rows[i], scene_navigation_event_cb,
                                     LV_EVENT_CLICKED, (void *)(uintptr_t)(i == 0U
-                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 4U
-                                        ? PRODUCT_SCREEN_SYSTEM : i == 3U
-                                        ? PRODUCT_SCREEN_NOTIFICATIONS : i == 1U
-                                        ? PRODUCT_SCREEN_WIFI : PRODUCT_SCREEN_TIMEZONE));
+                                        ? PRODUCT_SCREEN_DISPLAY_SOUND : i == 1U
+                                        ? PRODUCT_SCREEN_PHOTO_SETTINGS : i == 2U
+                                        ? PRODUCT_SCREEN_WIFI : i == 3U
+                                        ? PRODUCT_SCREEN_TIMEZONE : i == 4U
+                                        ? PRODUCT_SCREEN_NOTIFICATIONS : PRODUCT_SCREEN_SYSTEM));
             }
         }
         header = &s_ui.preferences.header;
@@ -2834,6 +3297,8 @@ static void scene_navigation_async(void *user_data)
     if (install_header_callbacks) {
         lv_obj_add_event_cb(header->drawer_home_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_HOME);
+        lv_obj_add_event_cb(header->drawer_agenda_button, scene_navigation_event_cb,
+                            LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_AGENDA);
         lv_obj_add_event_cb(header->drawer_settings_button, scene_navigation_event_cb,
                             LV_EVENT_CLICKED, (void *)(uintptr_t)PRODUCT_SCREEN_PREFERENCES);
         lv_obj_add_event_cb(header->settings_button, scene_navigation_event_cb,
@@ -3112,6 +3577,8 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
 
     s_ui = (product_ui_state_t){
         .display = display,
+        .photo_lease = -1,
+        .thumbnail_lease = -1,
         .touch_indev = touch_indev,
         .started_at_tick = lv_tick_get(),
         .rendered_revision = UINT32_MAX,

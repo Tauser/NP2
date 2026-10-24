@@ -2209,3 +2209,763 @@ refresh já existia. CPU, RAM, armazenamento, SD e ações usam ícones Material
 sem fontes dinâmicas. Fonte oficial fixada por revisão/hash e receita em
 `tools/generate_system_material_icons.py`. Evidências e limites em
 [SYSTEM-RESOURCES-VALIDATION.md](SYSTEM-RESOURCES-VALIDATION.md).
+
+## ADR-094 — Agenda local, lembretes e sincronização Google limitada
+
+**Decisão (2026-10-19):** a pedido do responsável, substituir a agenda de
+referência por criação/edição de eventos e tarefas, conclusão, exclusão
+confirmada e lembretes no centro de notificações, com som sob as preferências
+existentes. `app_loop` permanece o escritor único; comandos têm ID/revisão,
+fila limitada e resultado projetado. Domínio sem ESP-IDF/LVGL; seis linhas
+reutilizadas e máximo de 12 itens. Agenda tem getter próprio, sem lista extra
+nas cópias gerais do AppState.
+
+Dados autoritativos usam duas gerações LittleFS, schema/magic/CRC, temporário,
+fsync, verificação e rename pelo FlashCoordinator. Debounce de 5 s e intervalo
+mínimo de 60 s por tentativa; a UI explicita dados ainda não duráveis.
+Normalizados de agenda/storage/sync usam PSRAM por capability, como exceção
+documentada; corpo HTTP, tokens JSON, OAuth e TLS ficam internos. Reutilizar
+o buffer de 4 KiB do coordenador, sem aumentar sua fila. Sem mudança de
+partições, dependências, Kconfig, C6 ou eFuses.
+
+Uma primeira captura mostrou mínimo de 1.572 bytes na pilha de 8 KiB do
+`app_loop`. Mover sua cópia normalizada do evento recebido para um buffer
+PSRAM alocado antes de criar a task, com dono único e sem segredos. Isso
+mantém a fila existente e evita ampliar a reserva interna de pilha. A margem
+final precisa de medição separada; a otimização não aprova o pico HTTPS.
+
+Google usa agenda principal, tarefas pendentes da lista padrão e eventos de
+sete dias; overflow é erro explícito. Sincronização manual ou a cada 5 min
+no executor HTTPS existente, com admissão conservadora de SRAM. O fluxo de TV
+não suporta Calendar/Tasks: autorização inicial no PC com OAuth desktop,
+PKCE/state/loopback e transferência USB fisicamente armada. Renovação fica no
+painel. Vault OAuth NVS de duas gerações e conta identificada por subject;
+reauthorização conserva a mesma conta, sem misturar IDs de outra conta.
+
+ETag/If-Match, escolha explícita de conflito, ID determinístico de eventos e
+marcador de criação de Tasks evitam overwrite/POST cego. Tasks tem prazo só
+por data na API; hora/lembrete são locais. Dia inteiro é somente leitura no
+primeiro editor. Lembretes exigem hora confiável e aceitam atraso de até 15 min;
+uma perda antes do commit pode repetir um alerta, sem promessa de exactly-once.
+
+**Validação/limites:** testes host de domínio, barramento, parser, sync HTTP
+simulado, persistência com falhas e UI real. Build P4 e gravação/boot são
+registrados separadamente em [AGENDA-GOOGLE.md](AGENDA-GOOGLE.md).
+Projeto/consentimento Google, TLS real, margem de memória, interação física,
+cortes de energia e soak continuam pendentes; esta decisão não fecha gates
+físicos nem aprova integração Google para produção.
+
+## ADR-095 — Recuperar SRAM para HTTPS da agenda sem reduzir o piso
+
+**Decisão (2026-10-19):** após vincular Google, a admissão recusou o sync com
+`ESP_ERR_NO_MEM`. O ELF mostrou 64 KiB do pool builtin LVGL e 24 KiB de
+buffers de diagnóstico de flash permanentemente internos, além das cópias
+públicas de UI/estado. Habilitar BSS externa e posicionar explicitamente em
+PSRAM somente esses dados sem segredos: pool builtin, estado visual, projeções,
+snapshots do barramento, metadados de ícones, resultado de scan Wi-Fi e buffers
+de diagnóstico. Locks, filas, pilhas, credenciais e TLS permanecem internos.
+O fragmento do linker seleciona apenas BSS de `lv_mem_core_builtin`, mantendo
+o pool de 64 KiB e a extensão existente de 128 KiB; não diminui capacidade UI.
+
+Corpo de providers e chunk de OTA de 4 KiB passam de reservas permanentes para
+alocações internas transitórias, com dono no executor HTTPS e liberação em
+todos os retornos. A admissão Google conserva piso de 80 KiB, envelope TLS
+de 64 KiB, workspace e maior bloco de 32 KiB. Medir mínimo durante TLS real,
+integridade, retorno ao regime e margem de pilhas antes de declarar sucesso.
+PSRAM exige cache ativo nesses consumidores; o experimento XiP já existente
+permanece inalterado. Não mover DMA/draw, retirar framebuffer, trocar modos,
+alterar dependências, C6, partições ou eFuses. Gates físicos continuam abertos.
+
+A primeira leitura real retornou HTTP 200 em token, Tasks e Calendar, com
+mínimo interno de 125.899 B e heap íntegro. Porém o worker de 8 KiB ficou com
+apenas 112 B de pilha: ampliar sua pilha interna para 12 KiB, colocar o corpo
+de escrita Google de 1 KiB no workspace interno transitório e liberar espaço
+equivalente por BSS pública de conectividade/flash, snapshot do provider e
+buffer de diagnóstico NVS em PSRAM. Repetir leitura e escrita reais e medir
+>=25% livre; a primeira conexão sozinha não aprova essa margem.
+
+Na revisão de 12 KiB, pico total medido de 51.956 B inclui workspace de
+22.408 B; o restante observado é 29.548 B, incluindo HTTP/TLS e atividade
+concorrente. Dimensionar envelope TLS em 48 KiB, mais de 19 KiB acima desse
+restante observado, mantendo ainda 4 KiB separados para formulário OAuth.
+O piso de 80 KiB e o bloco mínimo de 32 KiB não mudam. O envelope provisório
+de 64 KiB recusava novas tentativas por variações transitórias de poucos KiB,
+mesmo com mínimo real acima de 120 KiB. Esta é calibração por medida em
+laboratório; cadeias futuras, reconexão e carga máxima continuam no gate de
+memória. Novos testes conferem os dois limites e nenhuma chamada HTTP abaixo
+do limiar. Repetir leitura e criação reais após a calibração.
+
+**Evidência de 20/10:** GET dos dois eventos conhecidos confirmou a ida/volta
+do evento criado na UI; a exclusão explícita do teste retornou HTTP 204.
+Mínimo interno final de 123.767 B, maior bloco de 100.352 B, heap íntegro,
+rede com 4.216 B livres em 12 KiB e app_loop com 2.284 B em 8 KiB.
+Artefatos e limitações em [AGENDA-MEMORY-VALIDATION.md](AGENDA-MEMORY-VALIDATION.md).
+
+## ADR-096 — Agenda com hierarquia visual e navegação local
+
+**Decisão (2026-10-20):** a pedido do responsável, manter o design system,
+usar toda a largura para a informação da Agenda e mover criação/edição para
+o componente `np_modal` existente. Quatro linhas de 60 px têm data/hora
+separadas, título maior, ícone e etiqueta de Evento/Tarefa, estado e lembrete.
+Filtros Todos/Eventos/Tarefas exibem contagens. A ordenação usa índices limitados
+a 12 itens; sem prazo e tarefas concluídas ficam ao final, sem reordenar o
+modelo ou mudar a identidade usada pelos comandos.
+
+Agrupar data/hora por início e término, ocultar término em tarefas, explicitar
+novo/editar e usar os estados/estilos compartilhados para salvar/excluir.
+O modal é construído no primeiro uso e reutilizado até sair da tela. Cancelar
+não envia comando; fechar durante envio conserva seu resultado. ACK de comando
+aceito fecha o formulário e a lista continua mostrando a persistência pendente
+até confirmação. Todos os campos de texto ficam acima do teclado compartilhado,
+que é liberado ao fechar/sair. Fontes, paleta, pool LVGL e pipeline permanecem.
+
+**Validação/limites:** regressão host com LVGL e 100 lifecycles, revisão de
+renders, build/flash e boot registrados em
+[AGENDA-UX-VALIDATION.md](AGENDA-UX-VALIDATION.md). Fotografias/renders não
+encerram os gates físicos de interação, tearing ou soak.
+
+## ADR-097 — Agenda compacta e autorização Google contextual
+
+**Decisão (2026-10-21):** a pedido do responsável, substituir a paginação de
+quatro linhas da ADR-096 por seis de 56 px, sem rodapé. Filtros, criação,
+sincronização e conexão ficam no cabeçalho; as duas últimas ações usam somente
+ícones Material de 48 px. Conectar aparece apenas sem vínculo ou diante de uma
+falha de autorização identificada, com redistribuição das ações vizinhas.
+Tipo/estado continuam explícitos na linha, sem repetir a etiqueta em um badge.
+Tarefas usam modal de 400 px; eventos, 480 px. Reutilizar os botões do formulário
+para escolhas de conflito, sem alocar dois botões ocultos extras.
+
+Acrescentar somente o resultado sanitizado `AGENDA_SYNC_AUTH_REQUIRED=-2001`
+e o booleano transitório `google_auth_required` à projeção. HTTP 401 ou
+`invalid_grant` no refresh HTTP 400 sinalizam autorização necessária; falhas
+de rede, 403 e 5xx não são convertidas cegamente em pedido de reautorização.
+O app_loop mantém o booleano até um sync bem-sucedido. Sem novos segredos,
+mudança de vault, registro durável, schema, partições ou dependências.
+
+O status Google abre detalhes no modal reutilizado e permite o gesto físico
+Liberar USB para o helper confirmar o commit depois de o ícone conectar sumir.
+Preservar 60 s e um comando por janela; ACK de fila continua sem equivaler a
+credencial persistida. O helper mantém a segunda consulta e não dispara OAuth
+de novo em `--check-link`. Mensagens comuns expiram em 8 s; instruções USB,
+em 60 s, por tick da UI, sem timer com lifetime próprio.
+
+**Validação/limites:** UI com 100 lifecycles, 12 itens alcançáveis, rotas de
+conflito, modal de conexão/retorno ao editor, autorização/expiração de aviso;
+HTTP simulado com invalid_grant/401/403/5xx; cinco testes do helper; barramento
+com 8.000 snapshots. Build, boot e limites físicos registrados em
+[AGENDA-UX-VALIDATION.md](AGENDA-UX-VALIDATION.md). Base de erros:
+[OAuth desktop](https://developers.google.com/identity/protocols/oauth2/native-app#errors)
+e [Calendar](https://developers.google.com/workspace/calendar/api/guides/errors).
+
+## ADR-098 — Agenda do mês corrente e capacidade de 64 itens
+
+**Decisão (2026-10-21):** substituir a janela móvel de sete dias pelo mês
+civil inteiro no fuso configurado do painel: início inclusivo no dia 1,
+fim exclusivo no dia 1 seguinte. Calcular os dois limites por calendário
+local, com `tm_isdst=-1`, e converter para RFC3339 UTC na consulta. Manter
+recorrências expandidas e eventos já encerrados durante o mês; a limpeza
+local remove somente eventos Google fora da janela, sem apagá-los no servidor.
+O cabeçalho identifica mês/ano; eventos de dia inteiro conservam a data visível.
+
+Ampliar o limite conjunto de eventos/tarefas de 12 para 64, mantendo seis
+linhas LVGL e até onze páginas. Percorrer páginas remotas de dez itens sem
+aumentar o corpo de 12 KiB ou os 512 tokens JSON internos. Tokens têm no
+máximo 256 bytes e são codificados; repetição, excesso de páginas, dados ou
+capacidade falham explicitamente. Conservar deadline global de 120 s e uma
+única conexão HTTPS. Consultas individuais são reservadas para ETags de
+edições pendentes, evitando 64 GETs extras a cada polling mensal.
+Um snapshot adicional limitado de 15.244 B em PSRAM permite reconstruir cada
+lista e restaurá-la integralmente diante de falha. Isso também permite a
+substituição de um item removido por um novo com o cache cheio, preservando
+metadados de itens observados e sem exigir uma 65ª vaga temporária.
+
+Persistência v2 tem payload de 15.244 B e lê v1 de 2.868 B com CRC antes da
+expansão, preservando IDs, ETags, pendências e lembretes consumidos. Não
+formatar nem regravar durante a leitura. O coordenador recebe um snapshot
+PSRAM de tamanho fixo, de propriedade da fila, liberado ao consumir ou se
+o enqueue falhar; acrescentar somente um ponteiro ao envelope em vez de
+multiplicar 15 KiB pelos slots da fila. Armazenamento e estado continuam
+em PSRAM; credenciais, HTTP, TLS e JSON continuam internos. Sem mudança
+de partições, dependências, Kconfig, vault ou permissões Google.
+
+**Compatibilidade:** o leitor atual aceita v1 e v2. Firmware antigo não lê
+v2; rollback para a versão anterior requer preservar/restaurar uma geração
+v1 íntegra, nunca formatar automaticamente. Gerações anteriores permanecem
+até serem naturalmente substituídas pelo esquema de dois slots.
+
+**Validação:** limites de mês, ano, fevereiro bissexto e fronteira UTC/local;
+64 itens em sete páginas HTTP e onze páginas de UI; aniversários de dia
+inteiro, repetição/escape de token, falha em página posterior, migração
+v1→v2, falhas de fsync/rename e fallback CRC. Evidência de build/placa em
+[AGENDA-MONTH-VALIDATION.md](AGENDA-MONTH-VALIDATION.md).
+Contrato da consulta: [Events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list).
+
+## ADR-099 — Melodias locais de notificações, alarmes e inicialização
+
+**Decisão (2026-10-21):** compor três melodias originais por categoria,
+geradas localmente como PCM16 mono a 22.050 Hz, sem MP3, arquivos externos,
+rede, novas dependências ou mudança de codec. Notificações: Cristal/Gotas/
+Dueto (0,30–0,44 s); alarmes: Aurora/Sinos/Pulso (1,41–1,55 s); inicialização:
+Boas-vindas/Ascendente/Minimal (0,50–0,93 s). Variante zero silencia a categoria.
+Seno com LUT interpolada, harmônico suave e envelope de ataque/decaimento/
+release, amplitude abaixo de 0,23 FS; volume continua sendo o já configurado.
+
+`device_control_service` conserva a propriedade do codec. Sintetizar/gravar
+no máximo 256 samples por passagem (512 B na pilha), mantendo controles e
+mute entre os blocos. No máximo três slots coalescidos, um por categoria;
+alarme pode interromper outra categoria na fronteira de bloco. Sem novos
+workers, alocações por som ou reprodução em LVGL. Master desligado cancela
+sons; volume zero também limpa a reprodução. Rate limit de 350 ms/categoria.
+O preview de volume conserva um tom fixo, como confirmação local do controle.
+
+Preferências de melodia ficam no serviço de notificações e são projetadas
+pelo app_loop. Master de som abrange as três categorias; notificações gerais
+silenciam a entrega de avisos, e alarmes/Pomodoro e boot respeitam o master
+independentemente desse switch visual. Boot é solicitado somente uma vez
+após sair da cena de inicialização, com preferências/controles restaurados.
+Não tocar ao trocar de página, reacender ou reconectar a rede. A tela de
+configuração oferece três seletores e prévias, sem I/O nos callbacks.
+
+Registro NVS de notificações v2 de 6 B com duas gerações/CRC; leitor aceita
+v1 de 3 B e preserva seus três switches com melodias padrão 1/1/1, sem escrita
+no restore. Escrita permanece no FlashCoordinator, debounce e ACK existente.
+Firmware antigo não interpreta v2; rollback exige cópia v1 íntegra. Sem
+mudança de partições, vault, Kconfig ou esquemas de providers.
+
+**Validação:** síntese/duração/ganho e invariância de chunks, migração e
+persistência concorrente de preferências, política de mute/preview e layout
+LVGL. Build, flash e evidência física descritos em `docs/SOUNDS-VALIDATION.md`.
+
+## ADR-100 — Fotos locais, idle e widgets independentes
+
+**Decisão (2026-10-22):** implementar o modelo visual aprovado com foto que
+preenche 1024 × 600, widget Bitcoin à esquerda e relógio/data à direita.
+Sem faixa opaca de tela inteira. Cada widget tem visibilidade, posição
+superior/inferior, tamanho e fundo independentes. Usar fontes subsetadas
+existentes (32/48 px e legendas 16 px), sem fonte dinâmica. Formulário em
+modal de Tela e som. Mercado pode usar a mesma foto sob os cards a 70% e
+overlay preto a 40%; ausência de foto conserva as superfícies originais.
+
+O SD existente continua com um único dono de leitura/montagem: o worker de
+weather assets também executa o passo de fotos, de até 32 KiB a cada 100 ms.
+Sem nova task, conexão HTTPS, escrita de SD, formato automático, Kconfig,
+partição ou dependência. Galeria em `np2/photos/photo001.npf` a `photo064.npf`,
+catálogo limitado a 256 entradas, reconsulta a cada 60 s. NPFP v1: header
+24 B, RGB565 LE 1024 × 600 (1.228.800 B), tamanho exato e CRC32. Conversão
+JPG/PNG no computador com orientação EXIF e recorte central, preservando a
+proporção e evitando barras. Uma foto não provoca releituras periódicas.
+
+Alocação preguiçosa de até dois buffers alinhados em PSRAM (2.457.600 B),
+com publicação imutável e lease do consumidor LVGL. Slot publicado ou leased
+nunca é sobrescrito. A UI atualiza ambos os objetos de imagem, descarta o
+cache anterior e só então devolve o lease. Falha de arquivo, CRC ou memória
+preserva a última foto íntegra. Buffers de imagens são exceção limitada e
+documentada à prioridade de PSRAM para display; medir a margem na placa.
+
+Idle padrão 5 min e troca 2 min, ajustáveis. Entrada automática nas páginas
+principais (exceto dispositivos/câmera) e Agenda sem formulário; modais,
+drawer, teclado e notificações visíveis bloqueiam a entrada. Prévia manual
+em Tela e som. Um toque completo retorna à página anterior sem disparar
+ações abaixo. Notificação e fim de Pomodoro interrompem a foto; a agenda e
+os serviços continuam pelo app_loop. Não alterar brilho ou modo noturno.
+
+Preferências ficam no perfil de controles, escrito apenas pelo coordenador:
+payload 6 B (configuração geral e dois bytes de widgets), registro 32 B,
+CRC e duas gerações. Leitura conserva payloads legados 2/3/4 B de registros
+28 B, com defaults novos, sem escrita no restore. Firmware antigo não lê o
+payload novo; rollback depende de geração anterior íntegra. Não migrar os
+dados de agenda, rede ou notificações por causa das fotos.
+
+**Validação:** testes host de lease/backpressure, ausência/remoção, corrupção,
+truncamento, byte excedente, falha de alocação e migração NVS; fixture LVGL
+real com modal e 100 ciclos. Evidências de build/placa e limitações ficam em
+[PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md). A campanha não fecha
+qualificação de SD concorrente, remoção a quente, tearing ou soak.
+
+**Ajuste visual (2026-10-22):** por pedido do responsável, o valor do Bitcoin
+acompanha o tamanho escolhido para o relógio (Normal 32 px/Grande 48 px),
+inclusive ao ler perfis existentes com escolhas divergentes. A modal indica
+Igual ao relógio para Bitcoin. Posição, visibilidade e fundo continuam
+independentes; sem alteração do formato de storage ou migração automática.
+
+**Revisão de escopo (2026-10-22):** remover Fundo no Mercado por preferência
+explícita do responsável. Fotos ficam somente no quadro de inatividade e
+na prévia. Excluir a UI e os objetos de wallpaper/shade do Mercado. Bit 1
+antigo fica reservado e ignorado, inclusive na admissão de leitura; leitores
+continuam aceitando perfis anteriores sem regravação no restore. Nenhuma
+mudança de schema, partições ou pipeline de display.
+
+## ADR-101 — Tela do quadro de fotos, seleção e miniaturas limitadas
+
+**Decisão (2026-10-22):** mover o quadro para uma tela própria em
+Preferências, com quatro miniaturas por página, seleção persistente de até
+64 fotos e tempos independentes: idle 30 s–1 h, troca 10 s–1 h. Ampliar
+relógio/Bitcoin para 48/64 px com fontes subsetadas existentes. Preservar
+toque para voltar e as interrupções globais. Mercado não recebe fotos.
+
+Perfil de controles passa a payload de 16 B: seis campos anteriores,
+índices de idle/troca e máscara de 64 bits. Registro 40 B, CRC e duas
+gerações no FlashCoordinator; aceitar payloads 2/3/4/6 B e mapear tempos
+anteriores sem escrita no restore. Default seleciona todos os IDs, inclusive
+novos arquivos; desmarcar não apaga arquivos. Seleção vazia impede entrada
+e prévia. Firmware anterior não lê 16 B: rollback requer geração antiga.
+
+Miniaturas 192 × 112 RGB565 são produzidas pelo dono SD existente, no máximo
+16 linhas fonte/32 KiB por passo de 100 ms. Validar header/tamanho e leituras;
+o CRC integral continua obrigatório na imagem do slideshow. Dois buffers de
+página, quatro imagens cada, até 344.064 B de PSRAM, sem fallback interno,
+leases imutáveis e mailbox coalescida. Troca rápida de página cancela a
+leitura anterior. UI só troca descritores, solta cache e devolve lease após
+destacar imagens. Sem task, escrita SD, dependência ou mudança de Kconfig.
+
+**Motivo:** seleção visual com custo limitado, sem manter 64 imagens em RAM
+nem fazer I/O em callbacks. A prévia em miniatura pode refletir corrupção
+de pixels que será recusada pelo CRC do slideshow; não é prova de integridade.
+Ensaiar migração, seleção durante leitura, páginas rápidas, leases, falhas,
+modal e ciclos LVGL. Build/flash/boot e limites em PHOTO-FRAME-VALIDATION.md;
+gates de render/SD concorrente e soak continuam abertos.
+
+
+## ADR-102 — Retorno automático do quadro de fotos
+
+**Decisão (2026-10-22):** acrescentar Voltar após na tela do quadro:
+Não sair (padrão), 30 s, 1/2/5/10/15/30 min ou 1 h. A sessão começa quando
+a foto é revelada, tanto na prévia quanto por inatividade; trocar a imagem
+não reinicia esse prazo. Ao vencer, a task LVGL esconde o overlay e reinicia
+a inatividade do display, retornando à página anterior sem reentrada imediata.
+Toque, notificações e Pomodoro conservam as interrupções existentes.
+
+Perfil de controles passa de 16 para 24 B, registro de 48 B. Campo de saída
+no offset 16 e sete bytes reservados explicitamente zero; CRC não cobre
+padding indeterminado. Aceitar 2/3/4/6/16 B, preservando tempos, widgets e
+máscara, com saída desabilitada e sem escrita no restore. Somente o dono de
+controles solicita persistência serializada ao FlashCoordinator, com duas
+gerações e readback. ACK antigo não limpa uma edição de timer feita em voo.
+Firmware anterior não lê 24 B; rollback depende de geração legada íntegra.
+Sem task nova, I/O de toque, alteração do pipeline, Kconfig ou partições.
+
+**Motivo:** permitir limitar a exibição sem mudar a duração de cada foto
+nem provocar um ciclo de fechar/reabrir no mesmo refresh. Contagem monotônica
+com subtração unsigned tolera wrap do tick LVGL; opção desativada mantém o
+comportamento dos perfis já instalados. Testar limites, migração e edição
+em voo; registrar build, flash e limites em PHOTO-FRAME-VALIDATION.md.
+
+
+## ADR-103 — Investigar Spotify nativo em projeto de compilação isolado
+
+**Decisão (2026-10-22):** após o responsável escolher áudio no próprio
+NovaPanel e confirmar Premium, avaliar cspot em tools/spotify_native_probe,
+sem importar a biblioteca no firmware do produto. Fixar o candidato
+philippe44/cspot em 99e5c95ad6d862a1b7845dda81fd9c8233b45b9f e bell em
+46a4a8f21f3b0bc0ccefd01915b24d74f0ab9bef, registrando transitivas e patches.
+Usar ESP-IDF 5.5.4/esp32p4, remover a seleção de assembly Xtensa somente na
+lista de fontes do ensaio, e gerar protobuf em ambiente Python isolado.
+Compilar as bibliotecas; o app vazio é somente boilerplate do CMake, não uma
+imagem de player para gravar. Nenhum ajuste de Kconfig do ensaio se propaga
+aos defaults/lock do produto. Exceções ficam nos alvos externos do teste.
+
+**Motivo:** existe referência de Spotify em outro P4/IDF 5.5, mas isso não
+valida Hosted/Wi-Fi, codec, memória e concorrência desta placa. Auditoria
+inicial encontrou HTTP/TLS em workers próprios, leitura de corpo sem limite
+central, fallback de TLS sem validação se bundle ausente e log da URL de
+CDN. Nenhum desses caminhos entra no produto sem adaptação ao executor
+único, validação obrigatória, buffers/prazos limitados e remoção de segredos
+em logs. Áudio precisa de dono/arbitragem com alarmes e notificações.
+
+A licença do fork efetivamente baixado é GPL-3.0-or-later; a descrição de
+MIT em outro fork não se transfere para este. Registro técnico em
+SPOTIFY-NATIVE-INVESTIGATION.md. Compilação não comprova autenticação,
+reprodução ou estabilidade. Não gravar o app vazio nem declarar Spotify
+instalado; o painel permanece na aplicação validada até um player real
+satisfazer os gates técnicos. Não há aprovação de release nesta decisão.
+
+## ADR-104 — Transporte privado do Spotify no executor HTTPS existente
+
+**Decisão (2026-10-22):** adaptar o HTTP de cspot/Bell por uma interface C
+privada, com uma solicitação em voo e espera de 25 s. O executor de rede do
+produto recebe um modo específico; somente ele abre HTTPS. Copiar entradas
+para SRAM interna, prazo de 20 s desde o envio, máximo 2 KiB de URL/auth,
+512 B de POST, 8 KiB de JSON e 14 KiB de range de áudio. Falha de fila,
+DNS, NTP, TLS, prazo ou memória conclui o pedido sem transferir corpo. Duas
+referências (chamador e worker) impedem liberação durante conclusão tardia;
+o slot só volta a ficar livre quando ambas forem devolvidas. Limpar dados
+privados na liberação. Não há fila ilimitada nem task HTTPS adicional.
+
+Aceitar apenas endpoints previstos de resolve/token/storage e hosts de CDN
+com HTTPS, CA/hostname obrigatórios, sem redirect. Range único, status 206,
+Content-Range/tamanho coerentes; JSON exige 200. Corpo chunked de JSON tem
+limite e verificação de EOF. Recusar compressão. Limitar o parser HTTP do
+IDF a 8 KiB de cabeçalhos por definição de compilação no componente, pois
+o default de 80 KiB permite alocar uma única linha antes do callback de
+rejeição. O limite vale para os demais clientes do produto: testar agenda,
+mercado e clima na bancada antes de considerá-lo qualificado.
+
+Admissão preserva piso de 80 KiB, envelope conservador de 64 KiB para TLS,
+cliente/cabeçalhos e corpo separado, com maior bloco de pelo menos 32 KiB.
+Nenhum buffer HTTP vai para PSRAM. Medir os certificados/CDN reais antes
+de reduzir envelope; falhar por memória é preferível a ignorar o piso.
+
+**Motivo:** o HTTP original de Bell abre conexões independentes e não
+impõe os limites do produto. O adaptador do ensaio substitui HTTPClient e
+torna TLSSocket indisponível para impedir bypass. Pins, licença, decoder,
+sessão Connect e áudio continuam sob ADR-103. Registrar testes host e
+build/flash separadamente; esta ponte não anuncia dispositivo Connect,
+não provisiona credenciais, não inicia requests sozinha e não constitui
+um player. Bibliotecas externas continuam fora da aplicação do produto.
+
+## ADR-105 — PCM de música no dono existente do ES8311
+
+**Decisão (2026-10-22):** preparar entrada PCM limitada para o futuro player,
+sem criar outro dono de codec/I2S. Preservar PCM16 mono/22.050 Hz e os pinos
+atuais. Converter estéreo/44.100 Hz fora da UI por downmix e FIR Q15 de 127
+taps antes de decimar por dois. Estado do filtro pertence ao produtor e é
+reiniciado por faixa; nenhuma alocação por bloco. Rejeitar formato diferente
+até haver conversor específico. O guard do decoder não substitui a validação
+de mudanças de formato durante o stream, ainda pendente no candidato.
+
+Usar fila de PCM mono de 256 KiB, alocada explicitamente em PSRAM somente
+quando solicitada e sem fallback para SRAM. A exceção é para amostras já
+decodificadas; TLS, JSON e corpos HTTP continuam internos. O worker atual
+de controles aloca/libera a fila e consome no máximo 256 amostras por bloco.
+Produtor copia no máximo 256 amostras por chamada, com backpressure sem
+descarte silencioso. Geração invalida callbacks de faixa anterior após
+flush/stop; pausa retém buffer. Volume Spotify será ganho de software volátil,
+subordinado ao volume geral, sem escrita de preferências por atualização.
+
+Alertas existentes conservam prioridade; a música só usa o codec quando
+o sintetizador estiver livre. Nenhum acesso a I2S em callbacks do decoder,
+toque ou rede. Sem consumidor Spotify iniciado, não alocar a fila no boot.
+Testar downmix, antialias, fragmentação, limites da fila, gerações, pausa e
+prioridade. Medir PSRAM/stack, underruns, alarmes e flash/SD em concorrência
+antes de declarar música contínua validada. A entrada PCM não equivale a
+pareamento ou reprodução Spotify e não fecha os gates de ADR-103/104.
+
+Ensaio opt-in NP2_MUSIC_AUDIO_BENCH (OFF por padrão): uma única prova de
+3 s após 45 s, na task de manutenção existente, prazo máximo10s. Workspace
+interno limitado, fila real PSRAM e sinal estéreo sintético baixo passam por
+conversor e owner do codec; nenhum segredo/HTTP/arquivo. Após medir, compilar
+OFF e gravar a imagem normal. Evidência em SPOTIFY-AUDIO-PIPELINE.md.
+
+## ADR-106 — Runtime Connect experimental e fronteiras de entrada
+
+**Decisão (2026-10-23):** reutilizar os pins de ADR-103 e as adaptações de
+ADR-104 em uma recipe CMake comum ao harness e ao produto. A integração
+continua opt-in, desabilitada por padrão. Antes de ativar o receiver, limitar
+pacotes AP/Shannon a 8 KiB, mailbox a dois pacotes e Mercury a 16 partes,
+recusando fragmentação, truncamento, tamanho incoerente e MAC inválido.
+Saturação deve encerrar a sessão, nunca crescer sem limite. Sockets têm
+conexão e transferência limitadas; EOF é falha imediata. As tasks externas
+usam a API WithCaps do IDF para alocação e liberação, pilhas PSRAM explícitas,
+prioridade até 3 e captura de exceções na entrada. Não usar timers para
+liberar TCB/pilha de task encerrada. Objetos de workers permanecem vivos
+até reboot; não oferecer recriação ilimitada após falha.
+
+Credenciais do app passam somente pela manutenção USB física já existente,
+em mailbox privada e RAM. Nenhum segredo em CMake, binário, estado público,
+logs ou anúncio mDNS. Pareamento LAN só durante janela explícita; só anunciar
+receiver após inicialização real. Logs externos são silenciados, expondo
+apenas fases/resultados numéricos locais. HTTP permanece no executor único
+com os pisos de SRAM de ADR-104. Buffers de áudio decodificado continuam em
+PSRAM conforme ADR-105; qualquer exceção adicional exige medida própria.
+
+**Motivo:** compilar a biblioteca e ouvir PCM sintético não valida entrada
+Connect, ciclo de vida de tasks nem decoder. Separar testes de parsing,
+autenticação, decoder e reprodução física, registrando precisamente o que
+foi executado. Manter a imagem normal recuperável e não promover o ensaio
+a uma integração qualificada sem áudio real e concorrência medidos.
+
+Primeiro incremento executável: `NP2_SPOTIFY_PAIRING_BENCH`, OFF por padrão,
+vincula somente o necessário para validar app, assinatura RSA/SHA-1 do AP,
+pareamento Zeroconf e autenticação de conta. Não inicia Mercury/TrackPlayer,
+não anuncia reprodução validada e apaga app/conta ao terminar. Servidor LAN
+em 8080, URI fixa, POST máximo 4 KiB, até seis tentativas e janela de 180 s.
+mDNS continua pertencendo ao serviço LAN existente. HTTPD e worker de ensaio
+usam pilhas explícitas em PSRAM; corpos e workspace JSON ficam internos.
+O build de laboratório habilita exceções C++ e pool emergencial de 2 KiB;
+`-fexceptions` sozinho com o Kconfig desligado faria a libstdc++ abortar.
+O perfil normal permanece sem essa alteração. Verificação do AP usa a
+âncora pública id 0 também utilizada pelo librespot, antes de derivar a
+sessão; nenhuma credencial de usuário é necessária para esse pré-teste.
+
+## ADR-107 — Decoder Vorbis com orçamento e saída controlada
+
+**Decisão (2026-10-23):** antes de ativar streaming, envolver o Tremor privado
+em uma fronteira C com um único decoder, até 2 MiB de dados e 2.048 alocações
+vivas, explicitamente em PSRAM. A memória de codec/PCM e buffers de áudio
+decifrados é exceção medida; TLS, JSON e corpos HTTP continuam internos.
+Não substituir malloc global nem alterar o checkout externo. Compilar cópias
+com `_ogg_malloc/calloc/realloc/free` direcionados ao ledger do decoder.
+
+O candidato não checa todos os retornos de malloc. Uma falha de recurso
+dentro de Tremor deve voltar por `setjmp/longjmp` exclusivamente entre frames
+C do wrapper/codec, liberar o ledger inteiro e invalidar o arquivo. Não
+lançar exceção C++ através do decoder nem retornar NULL para pontos que o
+desreferenciam sem verificar. Callbacks C++ de I/O continuam capturando suas
+próprias exceções antes de retornar a C; não podem executar alocador do codec
+ou saltar sobre RAII. Fora da chamada protegida, esse alocador não é usado.
+Um decoder por vez, nenhuma task de UI/rede toca esse contexto.
+
+Validar Vorbis estéreo/44.100 Hz, leitura incremental, seek/EOF, formato
+incompatível, truncamento e falha em cada ponto de alocação com fixture Ogg
+gerada localmente. Medir bytes/pico/limpeza e PCM comparado ao decoder de
+referência antes de acoplar ao Spotify e ao owner do ES8311. Este gate não
+equivale a faixa Spotify, throughput de CDN ou qualificação do codec.
+
+**Motivo:** colocar o decoder original em SRAM consome a margem de HTTPS;
+apenas trocar malloc por PSRAM deixaria caminhos de falha capazes de derrubar
+o painel. O limite e a fronteira de erro precisam ser exercitados antes do
+primeiro stream, preservando a imagem de pareamento já aprovada na placa.
+
+## ADR-108 — Sessão Connect nativa e entrega PCM com backpressure
+
+**Decisão (2026-10-23):** após o pareamento/autenticação física de ADR-106 e
+o gate Vorbis de ADR-107, habilitar somente por opt-in um runtime Connect.
+Credenciais continuam privadas/em RAM, uma sessão por boot, sem reconnect
+automático. Recusar startup sem país recebido do AP; congelar esse campo
+antes de iniciar a fila e assinar Mercury. Callbacks/eventos são vinculados
+antes das tasks. Assinatura/app/decoder precisam passar antes do anúncio.
+
+Serializar estado Spirc por mutex recursivo privado; proteger mapas pendentes
+sem invocar callbacks sob o mutex. Máximos: 16 respostas, duas assinaturas,
+quatro chaves e 128 referências de faixa. Callbacks de faixa usam weak_ptr;
+estado compartilhado da fila é atômico. Reader usa mailbox de dois pacotes,
+com espera de até 200 ms antes de encerrar por saturação. Socket espera até
+130 s pelo primeiro byte do cabeçalho de sessão ociosa, até 15 s por pacote
+parcial/conexão/escrita. Falha termina a sessão, sem tempestade de retries.
+No preflight sem conta, erro de socket permite até três tentativas com500ms
+entre elas; cada tentativa conserva prazos limitados. Outros erros encerram.
+Diagnóstico enumera somente mensagens fixas conhecidas, sem imprimir exceções.
+O mesmo limite vale para a conexão inicial após receber o blob, antes de
+enviar autenticação; recriar MercurySession por tentativa para descartar
+cipher/DH parcial. EOF/DNS/connect/read/write têm códigos numéricos próprios,
+sem imprimir destino. Pacote/endpoint inválido não conta como socket retryable.
+
+Tarefa de player única permanece criada em idle, stop não faz join segurando
+o mutex Spirc. Objetos dos workers permanecem vivos até reboot para não
+liberar `this` durante o epílogo da task. Worker principal e decoder usam
+48 KiB de stack PSRAM; fila 32 KiB, reader 4 KiB, prioridade máxima 3.
+Liberar estado DH/auth duplicado depois de autenticar, antes de iniciar mídia.
+
+PCM é entregue ao owner do ES8311 existente, estéreo44.100→mono22.050,
+fila256KiB PSRAM, volume Spotify volátil inicialmente20% subordinado ao geral.
+Callback só converte/copia; nunca faz I2S, UI ou rede. Só reconhecer bytes de
+entrada quando o PCM pendente estiver enfileirado, sem converter duas vezes
+em retries. Quatro marcadores limitados relacionam ID da faixa à amostra
+consumida; notificar Spirc fora do mutex PCM. Prefill de1s, pausa retém fila,
+flush/seek reinicia geração, fim drena. Alertas continuam prioritários.
+
+O ensaio inicial usou Vorbis96kbps; após recusa da chave desse arquivo na
+placa, testar preferência160kbps, formato também presente nos metadados.
+Isso é hipótese de compatibilidade, não solução confirmada; há relato de
+falha em96kbps em librespot-org/librespot#1433. Se o servidor recusar também
+160kbps, registrar a limitação em vez de repetir indefinidamente a solicitação.
+Ranges/cache de áudio de8KiB reduzem SRAM por
+requisição. A política HTTP aloca a extensão validada do range, no máximo
+14KiB, em vez de reservar sempre o máximo; conservar piso80KiB/envelopeTLS64KiB.
+Medir mínimo local de heap por HTTPS e registrar só contadores/resultados,
+bytes/latência/stack. Nenhum segredo/URL/corpo em diagnóstico ou estado público.
+Após medir falta de SRAM na sessão ativa, containers das duas listas de
+referências (até128faixas cada) e seus textos URI/context passam a allocator
+privado em PSRAM, assim como PCM1KiB. Depois do ensaio seguinte, GID de faixa
+também usa PSRAM, com callback protobuf próprio; credenciais não mudam de allocator.
+Callbacks protobuf de texto conhecem explicitamente o tipo da string privada.
+Sem alterar alocação global nem transferir HTTP/JSON/TLS para PSRAM.
+O job HTTP passa a alocar em SRAM interna somente os tamanhos já validados
+de URL/header/corpo, em um bloco contíguo privado, preservando caps e limites.
+Isso evita reservar buffers máximos de autorização/URL em requests pequenos;
+refs, prazo único e limpeza de todo o bloco conservam a semântica anterior.
+Após o primeiro ensaio físico, limitar respostas resolve/token a4KiB;
+storage conserva8KiB. Isso reduz reserva e rejeita respostas maiores, sem
+alterar o piso80KiB nem envelopeTLS64KiB. O resolve da sessão havia sido
+recusado antes de TLS com154.619B disponíveis e reserva genérica155.648B.
+
+Encerrar por desconexão/falha, 300s sem primeiro áudio ou pausa de10min.
+O prazo inicial foi ampliado de120s no laboratório para permitir a interação
+do operador durante a captura. Carregamento por faixa espera até60s, em
+fatias de100ms interrompíveis por stop/reset, em vez do prazo externo5s que
+era menor que request20s/backoff30s. Não abandonar a faixa enquanto a primeira
+tentativa de rede ainda está dentro do prazo. Estados de frame/fila/metadata/
+chave/formatos e status Mercury são apenas numéricos no diagnóstico privado.
+Sessão tocando não tem limite artificial de duração. Token pode renovar
+somente pelo executor HTTPS único. Persistência de credenciais, retomada
+após reboot/rede e UI de player ficam fora deste ensaio até reprodução física.
+No ensaio de áudio, a janela de seleção é de5min; pareamento isolado conserva
+180s. Exigir o perfil XiP/stack PSRAM já qualificado no baseline; não habilitar
+novos flags de flash para viabilizar tasks externas. Falta qualificar música
+concorrente com escrita de cache/preferências no mesmo perfil.
+**Motivo:** conectar os caminhos já medidos sem criar dono de áudio/TLS
+concorrente, evitando deadlock de stop, áudio duplicado e crescimento de filas.
+
+## ADR-109 — Encerrar reprodução Spotify nativa e usar controle remoto oficial
+
+**Decisão (2026-10-24):** por solicitação do responsável, substituir no produto
+o experimento cspot/Connect por uma tela de controle remoto usando Web API
+oficial. Áudio fica no celular, PC ou outra saída Spotify. Build normal mantém
+pareamento/reprodução nativos OFF; fontes e evidências dos ADR-106–108 ficam
+como histórico de laboratório, sem afirmar que reproduziram música.
+
+OAuth PKCE no helper local, apenas Client ID/refresh token no vault privado,
+persistência e rotação pelo FlashCoordinator. Access token somente em SRAM.
+UI publica intenção, app_loop publica estado e o executor HTTPS existente
+executa token/API/capa sequencialmente; não criar worker/TLS paralelo.
+Polling de 5 s apenas na tela aberta, 429 com Retry-After, 401 pede nova
+autorização. Nenhuma retentativa automática de comando com efeito remoto.
+
+Capa opcional de até 64 px e 8 KiB JPEG, origem i.scdn.co estritamente
+validada e sem autorização de conta no download. Decoder TJpgDec privado
+derivado do LVGL fixado usa pool de 8 KiB; dois slots de 8 KiB RGB565 em
+PSRAM com leases são exceção explícita para dados visuais, sem mover TLS,
+JSON ou corpo HTTP para PSRAM. Falha de capa preserva controles/placeholder.
+
+**Motivo:** o servidor recusou a chave de áudio `00 01` nos testes nativos,
+sem PCM musical. A API oficial atende o novo objetivo sem decoder musical,
+Mercury/AP ou saída de áudio Spotify no painel. Uso pessoal exige Premium e
+conta autorizada no app; a UI deve expor indisponibilidade/restrições. Detalhes,
+limites e procedimentos em [SPOTIFY-REMOTE.md](SPOTIFY-REMOTE.md). A decisão
+não fecha qualificação física, OTA, segurança ou estabilidade gráfica.
+
+## ADR-110 — Card da Home com widgets Clima/Spotify e escolha manual persistida
+
+**Decisão (2026-10-24):** a pedido do responsável, usar o card esquerdo de
+560×376 da Home como área de widgets. Seletor Clima/Spotify manual, lembrando
+o último escolhido; nenhuma troca automática ao iniciar música. O player
+remoto dispensa tela própria. Saídas, volume e vinculação ficam em modal.
+
+A UI mantém as duas árvores limitadas, pausa a animação do clima oculto e
+só pede polling quando o widget Spotify está visível. Outras páginas e
+quadro de fotos suspendem a leitura. Sliders/modal não iniciam swipe de
+navegação ou idle do quadro de fotos. O conteúdo de mercado permanece.
+
+A intenção percorre EventBus/app_loop. A escolha usa um registro independente
+`np2_home`, duas gerações/CRC, debounce de5s e intervalo mínimo60s pelo
+FlashCoordinator; não reutilizar bytes reservados do perfil de foto/som,
+porque firmware antigo os rejeitaria no rollback. Default Clima sem registro
+válido. Cortes/CRC e restauro precisam de evidência própria.
+**Motivo:** acesso ao player sem navegar, ampliação futura da área de widgets
+e preservação das configurações existentes. Sem promessa de widgets novos.
+
+## ADR-111 — Widget por deslize e player equilibrado na Home
+
+**Decisão (2026-10-24):** implementar a proposta visual 1 selecionada pelo
+responsável: capa 160×160 à esquerda, título em até duas linhas à direita,
+artista/saída, progresso com tempos separados e transporte centralizado.
+Pausa/reprodução em círculo verde; anterior/próxima usam glyphs Material
+próprios. Opções ficam em ícone, atualização dentro da modal. A superfície,
+os demais cards e o header real continuam seguindo os tokens do produto.
+
+Substituir os botões Clima/Spotify por dois pontos e gesto horizontal dentro
+do card: esquerda abre Spotify, direita abre Clima, sem rotação automática.
+Exigir pelo menos 72px e predominância horizontal de 2:1. Gestos nos limites
+pertencem ao card e não navegam páginas. Sliders, transporte e modal mantêm
+o próprio gesto; consumir o clique residual de um swipe reconhecido para
+não abrir a página de clima. Navegação fora do card permanece existente.
+
+Reutilizar intenção e persistência do ADR-110; não escrever no toque. Troca
+atômica entre árvores existentes, sem animar duas superfícies completas.
+Capa mantém orçamento até64px/8KiB e é ampliada visualmente para160px.
+Mensagens de falha/vinculação permanecem disponíveis; omitir a frase normal
+redundante e o estado de polling do layout principal.
+**Motivo:** priorizar música e capa, reduzir ruído visual e conservar controles
+com áreas de toque de48/64px no espaço fixo da Home.
+
+
+## ADR-112 — Capa Spotify como fundo do card
+
+**Decisão (2026-10-24):** atender ao pedido de usar a capa como fundo da área
+Spotify na Home. Aplicar COVER centralizado em560×376, sem distorcer a
+proporção, com clipping no raio do card e camada preta190/255 (~75%).
+Texto e controles ficam acima da camada; não repetir a miniatura no layout
+padrão. Sem imagem, usar a superfície gráfica existente.
+
+Reutilizar o mesmo descriptor/lease até64px, sem segundo download, bitmap
+ampliado persistido, worker ou mudança de orçamento TLS/JSON. Alinhamento
+COVER do LVGL mantém pivot0,0 e centraliza o corte. Sem animação de capa,
+blur dinâmico ou troca automática de widget. Fontes e áreas48/64px mantidas;
+labels de tempo usam text_2 para contraste sobre capas claras. Atualização
+continua condicionada à mudança de dados e geração da capa.
+
+**Motivo:** dar identidade à música no card mantendo legibilidade, fluxo de
+controle remoto e concorrência. Exigir teste com pool LVGL comparável à placa,
+recorte/cantos, ausência de capa, descarte e medição física; host/build não
+fecham estabilidade gráfica ou soak.
+
+
+## ADR-113 — Capa em meia área com degradê e resolução até300px
+
+**Decisão (2026-10-24):** implementar o mock4 aprovado: arte à direita,
+viewport360×376 emx200 no card560×376, máscara horizontal de superfície opaca
+até aproximadamente metade do card e transparente à direita, mais fade
+vertical para superfície na região dos controles. Texto em coluna224/240px,
+título em até duas linhas, sem miniatura. Descriptors de degradê pertencem
+à view final, não à variável temporária de construção. Viewport impede que
+COVER pinte fora da área devido à ampliação/corte; cantos permanecem limitados.
+
+Preferir a maior variante anunciada até300×300, mesma allowlist HTTPS do
+ADR-109, com fallback anunciado até64px se download/decode/reserva falhar.
+JPEG até32KiB, sem redirect/Bearer, mesmo executor/prazo18s. Dois slots RGB565
+300×300 fixos em PSRAM (360016B), substituem os dois slots64px (16400B):
+exceção visual medida; pool decoder continua8KiB. TLS/JSON/HTTP permanecem
+em SRAM. Corpos maiores que8KiB usam buffer SRAM transitório somente após
+headers/TLS, limitado ao Content-Length ou32KiB+sentinela, exigindo reserva
+livre de80KiB após alocação e maior bloco suficiente. Alternativa pequena
+usa o buffer HTTP8KiB existente. Liberar a extensão em sucesso, erro, fallback
+e encerramento. Não aumentar o corpo JSON nem criar conexão concorrente.
+
+Cache considera a identidade preferida mesmo se entregou fallback, evitando
+tentar baixar a grande em cada poll; tentar de novo quando a identidade
+mudar. 429 conserva Retry-After sem fallback imediato. Sem foto, superfície
+padrão; falhas de capa não desabilitam controle remoto. Campanha física deve
+medir qualidade300px, heap mínimo, stack, CPU e convivência com agenda.
+**Motivo:** aumentar definição no recorte aprovado sem penalizar segurança de
+memória, legibilidade, fluxo ou serialização dos requests.
+
+
+## ADR-114 — Restaurar capa integral e recuperar resolução maior
+
+**Decisão (2026-10-24):** após relato de imagem ausente/degradê insatisfatório,
+o responsável pediu voltar à imagem anterior e melhorar só a qualidade.
+Restaurar o fundo integral aprovado no ADR-112: COVER560×376, preto190/255,
+texto em largura512px, sem viewport lateral, gradientes ou miniatura. Preservar
+300px/32KiB/reserva80KiB e demais limites de download/decode do ADR-113.
+
+Fallback64 temporário será reavaliado no máximo uma vez por minuto enquanto
+o widget estiver visível, aproveitando o job de metadata. Durante essa nova
+tentativa manter capa/geração atuais; se falhar, não limpar a foto nem baixar
+a mesma miniatura de novo. Ao obter a variante maior, substituir via slots/
+leases existentes e parar retentativas. 429 continua respeitando Retry-After.
+Ao receber204/sem item, zerar também a identidade de tentativa e seu prazo:
+a retomada do mesmo álbum deve baixar novamente sem herdar o backoff de60s.
+Exceção: Retry-After explícito de429 permanece válido após204.
+Não criar task, conexão simultânea ou persistência de capa. Validar o render
+integral com fontes64 e300px no pool194592B, não apenas o decoder.
+**Motivo:** conservar o layout aceito, melhorar nitidez e evitar que uma falha
+transitória fixe a baixa resolução até trocar de álbum.
+
+
+## ADR-115 — Stride e pixels da capa compatíveis com alinhamento64 do painel
+
+**Decisão (2026-10-24):** após relato físico de capa300px ausente, reproduzir
+o render com LV_DRAW_BUF_STRIDE_ALIGN=64 e LV_DRAW_BUF_ALIGN=64 já existentes
+no firmware. Não mudar Kconfig/BSP/adapter. O host anterior usava alinhamento
+padrão e não exercitava o mesmo caminho de decoder/postprocessamento.
+
+Uma linha300px RGB565 ocupa600B, mas o decoder LVGL exige stride640B nesse
+perfil. O descriptor sem padding provocava cópia192000B para ajustar stride;
+com pool194596B já contendo a árvore UI (maior bloco inicial131064B na
+placa), essa cópia falha e a capa não desenha.
+Fixture64 passava porque stride128B já era múltiplo64. A regressão foi
+reproduzida no host:64 passa,300 falha na asserção de pixels visíveis.
+
+Alinhar início dos pixels e cada slot em64B; usar stride por imagem arredondado
+para64B e gravar cada linha nesse stride desde o TJpgDec. Descriptor informa
+stride/tamanho reais. Slots fixos máximos640×300 com cabeçalho alinhado,
+192064B cada/384128B no total em PSRAM. Padding zerado a cada decode. Pool
+JPEG8KiB, limites300px/32KiB e reserva interna80KiB permanecem. Não marcar
+imagem como modificável para empurrar uma cópia oculta ao renderizador.
+
+Host passa a usar alinhamento64 e pool194592B, testa64/300px, pixels visíveis,
+cores/últimas linhas e verifica que o decoder devolve o mesmo ponteiro de
+pixels, sem repack. Assert de compilação garante offset/tamanho alinhados.
+**Motivo:** o objetivo inclui imagem desenhada, não apenas download/decodificação
+concluídos. Preservar o fundo integral pedido e permitir a maior resolução
+sem crescimento grande do heap LVGL nem alterar configuração global.

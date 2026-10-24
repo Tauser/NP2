@@ -1,0 +1,6 @@
+# Python 3.11, isolated from the ESP-IDF Python installation.
+grpcio-tools==1.62.3
+grpcio==1.84.1
+protobuf==4.25.8
+setuptools==75.8.0
+typing-extensions==4.16.0

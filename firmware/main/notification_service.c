@@ -2,6 +2,7 @@
 
 #include "device_control_service.h"
 #include "flash_coordinator.h"
+#include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,6 +26,7 @@ static notification_service_status_t s_status = {
     .general_enabled = true,
     .sound_enabled = true,
     .system_alerts_enabled = true,
+    .melodies = {1U,1U,1U},
     .last_result = ESP_OK,
 };
 
@@ -34,7 +36,8 @@ static bool profile_matches_status(const notification_profile_t *profile,
     return profile != NULL && status != NULL &&
            profile->general_enabled == status->general_enabled &&
            profile->sound_enabled == status->sound_enabled &&
-           profile->system_alerts_enabled == status->system_alerts_enabled;
+           profile->system_alerts_enabled == status->system_alerts_enabled &&
+           memcmp(profile->melodies,status->melodies,sizeof(profile->melodies)) == 0;
 }
 
 static bool profiles_match(const notification_profile_t *left,
@@ -43,7 +46,8 @@ static bool profiles_match(const notification_profile_t *left,
     return left != NULL && right != NULL &&
            left->general_enabled == right->general_enabled &&
            left->sound_enabled == right->sound_enabled &&
-           left->system_alerts_enabled == right->system_alerts_enabled;
+           left->system_alerts_enabled == right->system_alerts_enabled &&
+           memcmp(left->melodies,right->melodies,sizeof(left->melodies)) == 0;
 }
 
 static void restore_preferences_if_available(void)
@@ -58,6 +62,7 @@ static void restore_preferences_if_available(void)
             s_status.general_enabled = flash.notification_profile.general_enabled;
             s_status.sound_enabled = flash.notification_profile.sound_enabled;
             s_status.system_alerts_enabled = flash.notification_profile.system_alerts_enabled;
+            memcpy(s_status.melodies,flash.notification_profile.melodies,sizeof(s_status.melodies));
             s_status.persisted_generation = flash.notification_profile_generation;
             ++s_status.generation;
             s_status.last_result = ESP_OK;
@@ -104,11 +109,12 @@ static void submit_pending_profile(void)
     portEXIT_CRITICAL(&s_lock);
     if (!should_submit) return;
 
-    const notification_profile_t profile = {
+    notification_profile_t profile = {
         .general_enabled = snapshot.general_enabled,
         .sound_enabled = snapshot.sound_enabled,
         .system_alerts_enabled = snapshot.system_alerts_enabled,
     };
+    memcpy(profile.melodies,snapshot.melodies,sizeof(profile.melodies));
     uint32_t sequence = 0U;
     const esp_err_t result =
         flash_coordinator_request_notification_profile_write(&profile, &sequence);
@@ -193,7 +199,9 @@ esp_err_t notification_service_set_general_enabled(bool enabled)
 
 esp_err_t notification_service_set_sound_enabled(bool enabled)
 {
-    return set_preference(1U, enabled);
+    const esp_err_t result=set_preference(1U, enabled);
+    if (result == ESP_OK && !enabled) device_control_stop_sounds();
+    return result;
 }
 
 esp_err_t notification_service_set_system_alerts_enabled(bool enabled)
@@ -201,13 +209,34 @@ esp_err_t notification_service_set_system_alerts_enabled(bool enabled)
     return set_preference(2U, enabled);
 }
 
-esp_err_t notification_service_request_alert_sound(void)
+static esp_err_t request_sound(sound_category_t category,bool preview)
 {
+    if ((unsigned)category >= SOUND_CATEGORY_COUNT) return ESP_ERR_INVALID_ARG;
     portENTER_CRITICAL(&s_lock);
     const bool allowed = s_started && s_status.ready &&
-                         s_status.general_enabled && s_status.sound_enabled;
+                         s_status.sound_enabled && (preview || category != SOUND_NOTIFICATION || s_status.general_enabled);
+    const uint8_t melody=s_status.melodies[category];
     portEXIT_CRITICAL(&s_lock);
-    return allowed ? device_control_play_notification_tone() : ESP_ERR_INVALID_STATE;
+    return allowed && melody != 0U ? device_control_play_melody(category,melody) : ESP_ERR_INVALID_STATE;
+}
+esp_err_t notification_service_request_alert_sound(void) { return request_sound(SOUND_NOTIFICATION,false); }
+esp_err_t notification_service_request_alarm_sound(void) { return request_sound(SOUND_ALARM,false); }
+esp_err_t notification_service_request_startup_sound(void) { return request_sound(SOUND_STARTUP,false); }
+esp_err_t notification_service_preview_melody(sound_category_t category) { return request_sound(category,true); }
+esp_err_t notification_service_set_melody(sound_category_t category,uint8_t variant)
+{
+    if (!sound_choice_valid(category,variant)) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_lock);
+    if (!s_started || !s_status.ready) { portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE; }
+    if (s_status.melodies[category] != variant) {
+        s_status.melodies[category]=variant; ++s_status.generation;
+        s_status.persistence_pending=true; s_status.last_result=ESP_OK;
+    }
+    const TaskHandle_t task=s_task;
+    portEXIT_CRITICAL(&s_lock);
+    if (variant == 0U) (void)device_control_play_melody(category,0U);
+    if (task != NULL) xTaskNotifyGive(task);
+    return ESP_OK;
 }
 
 void notification_service_get_status(notification_service_status_t *out_status)

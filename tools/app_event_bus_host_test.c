@@ -139,6 +139,25 @@ static void test_lifecycle_and_commands(void)
     assert(result.type == APP_EVENT_NOTIFICATION_MARK_READ && result.notification_id == 1234);
     assert(app_event_bus_post_notification_mark_all_read() == ESP_OK);
     assert(receive().type == APP_EVENT_NOTIFICATION_MARK_ALL_READ);
+    agenda_command_t agenda = {.request_id = 123U, .action = AGENDA_UPSERT,
+        .item = {.kind = AGENDA_TASK, .reminder_minutes = AGENDA_REMINDER_NONE}};
+    strcpy(agenda.item.title, "Agenda ownership");
+    assert(app_event_bus_post_agenda(&agenda) == ESP_OK);
+    memset(agenda.item.title, 0, sizeof(agenda.item.title));
+    result = receive();
+    assert(result.type == APP_EVENT_AGENDA_COMMAND && result.agenda_command.request_id == 123U);
+    assert(strcmp(result.agenda_command.item.title, "Agenda ownership") == 0);
+    assert(app_event_bus_post_agenda_sync() == ESP_OK);
+    assert(receive().type == APP_EVENT_AGENDA_SYNC);
+    assert(app_event_bus_post_agenda(NULL) == ESP_ERR_INVALID_ARG);
+    spotify_remote_command_t spotify = {.action=SPOTIFY_REMOTE_TRANSFER,.value=3,.revision=1234};
+    assert(app_event_bus_post_spotify(&spotify)==ESP_OK);
+    memset(&spotify,0,sizeof(spotify)); result=receive();
+    assert(result.type==APP_EVENT_SPOTIFY_REMOTE && result.spotify_command.action==SPOTIFY_REMOTE_TRANSFER &&
+        result.spotify_command.value==3 && result.spotify_command.revision==1234);
+    assert(app_event_bus_post_home_widget(1)==ESP_OK);
+    result=receive(); assert(result.type==APP_EVENT_HOME_WIDGET && result.home_widget==1);
+    assert(app_event_bus_post_home_widget(2)==ESP_ERR_INVALID_ARG);
     expect_empty();
 }
 

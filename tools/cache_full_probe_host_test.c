@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "lfs.h"
 #include "cache_record.h"
+#include "np_memory.h"
 #include "offline_data_codec.h"
 
 typedef int esp_err_t;
@@ -132,7 +133,7 @@ static void setup(size_t payload_size)
     assert(lfs_mkdir(&filesystem,"/lfsdiag")==0);
     uint8_t payload[4096]; memset(payload,42,sizeof(payload));
     if (payload_size == OFFLINE_DATA_ENCODED_SIZE) {
-        offline_data_snapshot_t snapshot={.schema_version=1,.origin=OFFLINE_DATA_ORIGIN_CACHE,
+        offline_data_snapshot_t snapshot={.schema_version=OFFLINE_DATA_SCHEMA_VERSION,.origin=OFFLINE_DATA_ORIGIN_CACHE,
             .weather={.available=true,.temperature_deci_c=230,.relative_humidity_percent=50,
                       .observed_at_unix_s=1760000000}};
         assert(offline_data_snapshot_encode(&snapshot,payload,payload_size));

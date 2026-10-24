@@ -17,6 +17,11 @@
 #include "flash_coordinator.h"
 #include "network_validation_service.h"
 #include "update_development.h"
+#include "google_agenda_sync.h"
+#include "spotify_remote.h"
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+#include "spotify_pairing_service.h"
+#endif
 #include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -29,7 +34,7 @@
 #define NP2_PROVISIONING_ARM_WINDOW_MS 60000U
 #define NP2_PROVISIONING_INPUT_SETTLE_MS 500U
 #define NP2_PROVISIONING_POLL_MS 100U
-#define NP2_PROVISIONING_LINE_BYTES 64U
+#define NP2_PROVISIONING_LINE_BYTES 1600U
 #define NP2_PROVISIONING_SSID_BYTES 33U
 #define NP2_PROVISIONING_PASSWORD_BYTES 64U
 
@@ -107,7 +112,7 @@ static bool is_accepting_commands(void)
 
 static void discard_pending_usb_input(void)
 {
-    uint8_t discarded[NP2_PROVISIONING_LINE_BYTES];
+    uint8_t discarded[64];
     while (usb_serial_jtag_read_bytes(discarded, sizeof(discarded), 0) > 0) {
     }
     secure_zero(discarded, sizeof(discarded));
@@ -154,7 +159,28 @@ static void process_line(uint8_t *line, size_t length)
         --command_length;
     }
 
-    if (command_length > 5U && memcmp(command, "OPEN ", 5U) == 0) {
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+    if (command_length > 13U && memcmp(command, "SPOTIFY_PAIR ", 13U) == 0) {
+        result = spotify_pairing_provision_json((const char *)command + 13U, command_length - 13U);
+    } else
+#endif
+    if (command_length > 13U && memcmp(command, "SPOTIFY_AUTH ", 13U) == 0) {
+        result = spotify_remote_provision_json((const char *)command + 13U, command_length - 13U);
+    } else if (command_length == 14U && memcmp(command, "SPOTIFY_STATUS", 14U) == 0) {
+        flash_coordinator_status_t status = {0};
+        flash_coordinator_get_status(&status);
+        write_reply(!status.pending && !status.busy && status.spotify_auth_result == ESP_OK && spotify_remote_linked()
+            ? "SPOTIFY_LINKED\n" : "SPOTIFY_UNLINKED\n");
+        result = status.pending || status.busy ? ESP_ERR_INVALID_STATE : status.spotify_auth_result;
+    } else if (command_length > 12U && memcmp(command, "GOOGLE_AUTH ", 12U) == 0) {
+        result = google_agenda_provision_json((const char *)command + 12U, command_length - 12U);
+    } else if (command_length == 13U && memcmp(command, "GOOGLE_STATUS", 13U) == 0) {
+        flash_coordinator_status_t status = {0};
+        flash_coordinator_get_status(&status);
+        write_reply(!status.pending && !status.busy && status.google_auth_result == ESP_OK && google_agenda_linked()
+            ? "GOOGLE_LINKED\n" : "GOOGLE_UNLINKED\n");
+        result = status.pending || status.busy ? ESP_ERR_INVALID_STATE : status.google_auth_result;
+    } else if (command_length > 5U && memcmp(command, "OPEN ", 5U) == 0) {
         const size_t ssid_length = command_length - 5U;
         if (ssid_length <= 32U) {
             bool valid = true;
@@ -257,7 +283,14 @@ static void process_line(uint8_t *line, size_t length)
 static void provisioning_task(void *arg)
 {
     (void)arg;
-    uint8_t line[NP2_PROVISIONING_LINE_BYTES] = {0};
+#ifdef NP2_MUSIC_AUDIO_BENCH
+    /* Explicit laboratory build only. No additional task, network request or
+     * persistent switch; normal builds never run this probe. */
+    extern void music_audio_run_probe(void);
+    vTaskDelay(pdMS_TO_TICKS(45000U));
+    music_audio_run_probe();
+#endif
+    static uint8_t line[NP2_PROVISIONING_LINE_BYTES];
     size_t length = 0;
 
     for (;;) {
@@ -286,6 +319,7 @@ static void provisioning_task(void *arg)
         }
         if (byte == '\n') {
             process_line(line, length);
+            secure_zero(line, sizeof(line));
             length = 0;
             continue;
         }

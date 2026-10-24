@@ -10,8 +10,12 @@
 #include "update_journal.h"
 #include "coingecko_quota.h"
 #include "device_control_profile.h"
+#include "notification_profile.h"
 #include "user_profile.h"
 #include "np_ewelink.h"
+#include "agenda_service.h"
+#include "google_agenda_sync.h"
+#include "spotify_remote.h"
 
 #define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES 64U
 #define FLASH_COORDINATOR_BRAPI_API_KEY_BYTES 128U
@@ -31,11 +35,6 @@ typedef struct {
 /* Non-secret product preferences. This record is deliberately independent of
  * the offline-data schema so changing notification settings never migrates a
  * cached provider payload. */
-typedef struct {
-    bool general_enabled;
-    bool sound_enabled;
-    bool system_alerts_enabled;
-} notification_profile_t;
 
 typedef struct {
     bool ready;
@@ -51,6 +50,19 @@ typedef struct {
     uint32_t last_littlefs_writes;
     uint32_t last_littlefs_verified_bytes;
     bool littlefs_ready;
+    bool agenda_loaded;
+    bool agenda_unsaved;
+    esp_err_t agenda_load_result;
+    uint32_t agenda_completed_sequence;
+    esp_err_t agenda_write_result;
+    bool home_widget_loaded;
+    uint8_t home_widget;
+    uint32_t home_widget_completion;
+    esp_err_t home_widget_result;
+    uint32_t spotify_auth_completion;
+    esp_err_t spotify_auth_result;
+    uint32_t google_auth_completion;
+    esp_err_t google_auth_result;
     bool usage_available;
     uint32_t total_bytes;
     uint32_t used_bytes;
@@ -121,6 +133,9 @@ typedef struct {
 } flash_coordinator_status_t;
 
 esp_err_t flash_coordinator_start(void);
+esp_err_t flash_coordinator_request_agenda_write(const agenda_data_t *data, uint32_t *out_sequence);
+void flash_coordinator_set_agenda_unsaved(bool pending);
+esp_err_t flash_coordinator_request_google_credentials_write(const google_agenda_credentials_t *credentials);
 /* Physical UI confirmation must precede this request. The sole flash owner
  * rechecks readiness/preferences/OTA before restarting the P4. */
 esp_err_t flash_coordinator_request_restart(void);
@@ -244,3 +259,7 @@ esp_err_t flash_coordinator_request_p4_ota_rollback(void);
 
 /* Safe from the LVGL task; returns a short critical-section snapshot. */
 void flash_coordinator_get_status(flash_coordinator_status_t *out_status);
+
+esp_err_t flash_coordinator_request_spotify_credentials_write(const spotify_remote_credentials_t *credentials);
+
+esp_err_t flash_coordinator_request_home_widget_write(uint8_t widget);

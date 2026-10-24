@@ -258,7 +258,11 @@ void np_settings_system_scene_create(np_settings_system_view_t *view, lv_obj_t *
     np_label(actions, "Firmware", NP_FONT_SM, np_c_text_3(), 20, 18, 100, LV_TEXT_ALIGN_LEFT);
     s->firmware = np_label(actions, "Carregando...", NP_FONT_MD, np_c_text(), 124, 16, 452, LV_TEXT_ALIGN_LEFT);
     np_label(actions, "ESP32-P4 + C6 · IDF 5.5.4", NP_FONT_SM, np_c_text_2(), 20, 48, 432, LV_TEXT_ALIGN_LEFT);
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+    view->update_button = np_button(actions, 600, 16, 176, NP_TOUCH_TARGET, "Parear Spotify", false);
+#else
     view->update_button = np_button(actions, 600, 16, 176, NP_TOUCH_TARGET, NP_ICON_REFRESH " Atualizar", false);
     lv_obj_add_state(view->update_button, LV_STATE_DISABLED);
+#endif
     s->restart_button = np_button(actions, 792, 16, 164, NP_TOUCH_TARGET, NP_ICON_POWER " Reiniciar", false);
 }

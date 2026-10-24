@@ -1,0 +1,4 @@
+# Laboratory exception boundary required by cspot/Bell. The normal product
+# configuration remains unchanged. C domain still uses typed results.
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_EXCEPTIONS_EMG_POOL_SIZE=2048

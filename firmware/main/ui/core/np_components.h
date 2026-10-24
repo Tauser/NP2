@@ -151,6 +151,7 @@ typedef struct {
     lv_obj_t *drawer_market_button;
     lv_obj_t *drawer_iot_button;
     lv_obj_t *drawer_pomodoro_button;
+    lv_obj_t *drawer_agenda_button;
     lv_obj_t *drawer_settings_button;
     lv_obj_t *settings_button;
     lv_obj_t *wifi_button;
@@ -176,6 +177,7 @@ void np_header_set_drawer_weather_active(np_header_t *header, bool weather_activ
 void np_header_set_drawer_market_active(np_header_t *header, bool market_active);
 void np_header_set_drawer_iot_active(np_header_t *header, bool iot_active);
 void np_header_set_drawer_pomodoro_active(np_header_t *header, bool active);
+void np_header_set_drawer_agenda_active(np_header_t *header);
 void np_header_set_connections(np_header_t *header, bool wifi_online,
                                int8_t wifi_rssi, bool wifi_rssi_measured,
                                bool bluetooth_online, bool has_alert);

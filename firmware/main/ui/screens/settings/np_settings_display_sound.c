@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "np_settings_display_sound.h"
+#include "photo_frame_model.h"
 /* Extracted from np_settings.c, shared with the legacy screen. */
 #define SETTINGS_COL_A_X 28
 #define SETTINGS_COL_A_TEXT_X 84
@@ -98,8 +99,8 @@ np_settings_display_sound_view_t np_settings_display_sound_build(lv_obj_t *paren
     np_label(badge, NP_ICON_DISPLAY, NP_FONT_ICON, np_c_text_on_accent(),
               0, (64 - NP_FONT_ICON->line_height) / 2, 64, LV_TEXT_ALIGN_CENTER);
     np_label(panel, "Tela e som", NP_FONT_TITLE, np_c_text(),
-              112, 16, 800, LV_TEXT_ALIGN_LEFT);
-    np_label(panel, "Ajuste o brilho, volume e modo noturno da tela", NP_FONT_SM,
+              112, 16, 580, LV_TEXT_ALIGN_LEFT);
+    np_label(panel, "Brilho, volume e suas fotos no painel", NP_FONT_SM,
               np_c_text_2(), 112, 60, 800, LV_TEXT_ALIGN_LEFT);
     np_hline(panel, 24, 104, 928);
     np_settings_display_sound_slider(panel, 156, NP_ICON_UV, "Brilho da tela", 0,
@@ -110,8 +111,7 @@ np_settings_display_sound_view_t np_settings_display_sound_build(lv_obj_t *paren
         &view.controls.volume_slider, &view.controls.volume_value,
         &view.controls.volume_bubble, &view.controls.volume_bubble_value);
     np_vline(panel, 520, 104, 368);
-    np_label(panel, NP_ICON_NIGHT, NP_FONT_ICON, np_c_text_2(),
-              548, 159, 30, LV_TEXT_ALIGN_CENTER);
-    np_settings_display_sound_night(panel, 596, 156, 896, &view.controls);
+    np_settings_display_sound_night(panel, 548, 128, 896, &view.controls);
+    np_hline(panel, 548, 208, 384);
     return view;
 }

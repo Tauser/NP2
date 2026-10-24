@@ -1,4 +1,6 @@
 #include "weather_asset_service.h"
+#include "photo_frame_service.h"
+#include "np_memory.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +44,7 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static weather_asset_service_status_t s_status = {
     .last_result = ESP_ERR_INVALID_STATE,
 };
-static weather_icon_slot_t s_icon_slots[WEATHER_ASSET_SLOT_COUNT];
+static NP2_PSRAM_BSS weather_icon_slot_t s_icon_slots[WEATHER_ASSET_SLOT_COUNT];
 static bool s_icons_allocated;
 static bool s_started;
 static bool s_request_pending;
@@ -337,6 +339,7 @@ static void weather_asset_task(void *arg)
             }
             taskEXIT_CRITICAL(&s_lock);
         }
+        photo_frame_service_step(mounted);
         vTaskDelay(pdMS_TO_TICKS(WEATHER_ASSET_WORKER_PERIOD_MS));
     }
 }

@@ -37,6 +37,8 @@ static const char *notification_title(app_notification_kind_t kind)
     case APP_NOTIFICATION_KIND_STORAGE_ERROR: return "Falha no armazenamento";
     case APP_NOTIFICATION_KIND_STORAGE_RECOVERED: return "Armazenamento recuperado";
     case APP_NOTIFICATION_KIND_RESTART_FAILED: return "Falha no reinício";
+    case APP_NOTIFICATION_KIND_AGENDA_EVENT: return "Lembrete de evento";
+    case APP_NOTIFICATION_KIND_AGENDA_TASK: return "Lembrete de tarefa";
     default: return "Notificação do sistema";
     }
 }
@@ -145,7 +147,8 @@ void np_notification_center_sync(np_notification_center_t *view,
         format_notification_age(item->timestamp_unix_s, current_unix_s,
                                 age, sizeof(age));
         np_set_text(view->row_times[row], age);
-        np_set_text(view->row_details[row], notification_detail(item->kind));
+        np_set_text(view->row_details[row], item->title[0] != '\0'
+            ? item->title : notification_detail(item->kind));
         np_set_visible(view->row_unread[row], item->unread);
         np_set_text_color(view->row_titles[row],
                           item->unread ? np_c_text() : np_c_text_2());

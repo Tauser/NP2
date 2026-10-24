@@ -47,9 +47,10 @@ foreach ($entry in $headers.GetEnumerator()) {
     [IO.File]::WriteAllText((Join-Path $shim $entry.Key), $entry.Value)
 }
 $executable = Join-Path $OutputDirectory 'notification_preferences_host_test.exe'
-& gcc -std=c11 -O2 -Wall -Wextra -Werror -fwhole-program -ffunction-sections -fdata-sections `
+& gcc -std=c11 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections `
     -I $shim -I (Join-Path $repo 'firmware/main') `
     (Join-Path $PSScriptRoot 'notification_preferences_host_test.c') `
+    (Join-Path $repo 'firmware/main/sound_melody.c') `
     '-Wl,--gc-sections' -o $executable
 if ($LASTEXITCODE -ne 0) { throw 'Notification preferences host compilation failed' }
 & $executable

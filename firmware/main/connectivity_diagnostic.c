@@ -8,6 +8,7 @@
  * restore a disposable lab credential from FlashCoordinator after startup.
  */
 #include "connectivity_diagnostic.h"
+#include "np_memory.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -74,7 +75,7 @@ typedef struct {
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static EventGroupHandle_t s_wifi_scan_events;
-static connectivity_diagnostic_status_t s_status = {
+static NP2_PSRAM_BSS connectivity_diagnostic_status_t s_status = {
     .state = CONNECTIVITY_DIAGNOSTIC_STATE_IDLE,
     .last_result = ESP_OK,
 };
@@ -732,7 +733,7 @@ static void process_request(connectivity_request_t *request)
             uint16_t found = 0;
             err = esp_wifi_scan_get_ap_num(&found);
             observe_wifi_scan_rpc_result(err);
-            static wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
+            static NP2_PSRAM_BSS wifi_ap_record_t records[NP2_WIFI_SCAN_RESULTS_MAX];
             uint16_t count = found < NP2_WIFI_SCAN_RESULTS_MAX ? found : NP2_WIFI_SCAN_RESULTS_MAX;
             if (err == ESP_OK && count > 0U) {
                 err = esp_wifi_scan_get_ap_records(&count, records);

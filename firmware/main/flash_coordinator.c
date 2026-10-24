@@ -7,6 +7,9 @@
  * filesystem GC, staging and maintenance mode are separate future requests.
  */
 #include "flash_coordinator.h"
+#include "np_memory.h"
+#include "agenda_storage.h"
+#include "home_widget_preferences.h"
 #include "credentials/np2_provider_secrets.h"
 #include "timezone_catalog.h"
 #include "device_control_service.h"
@@ -206,6 +209,10 @@ typedef enum {
     FLASH_REQUEST_P4_OTA_CONFIRM,
     FLASH_REQUEST_P4_OTA_ROLLBACK,
     FLASH_REQUEST_RESTART,
+    FLASH_REQUEST_AGENDA_WRITE,
+    FLASH_REQUEST_GOOGLE_CREDENTIALS_WRITE,
+    FLASH_REQUEST_SPOTIFY_CREDENTIALS_WRITE,
+    FLASH_REQUEST_HOME_WIDGET_WRITE,
 } flash_request_kind_t;
 
 typedef struct {
@@ -221,6 +228,7 @@ typedef struct {
     const esp_partition_t *ota_partition;
     uint32_t ota_expected_bytes;
     uint32_t ota_chunk_bytes;
+    agenda_data_t *agenda; /* Queue owns this bounded PSRAM snapshot until consumed. */
     uint8_t ota_chunk[FLASH_COORDINATOR_OTA_CHUNK_BYTES];
 } flash_request_t;
 
@@ -233,6 +241,9 @@ typedef struct {
     bool finished;
 } p4_ota_session_t;
 
+_Static_assert(offsetof(flash_request_t, ota_chunk) % _Alignof(agenda_data_t) == 0U,
+               "agenda mailbox must remain aligned");
+
 static QueueHandle_t s_request_queue;
 static flash_request_t s_p4_ota_request;
 static SemaphoreHandle_t s_p4_ota_submission_lock;
@@ -244,7 +255,7 @@ static ewelink_inventory_workspace_t *s_ewelink_workspace;
 #define s_ewelink_record_scratch_b (s_ewelink_workspace->scratch_b)
 #define s_ewelink_record_scratch_write (s_ewelink_workspace->scratch_write)
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
-static flash_coordinator_status_t s_status;
+static NP2_PSRAM_BSS flash_coordinator_status_t s_status;
 static int64_t s_last_success_us;
 static int64_t s_last_offline_data_write_us;
 static int64_t s_power_cut_deadline_us;
@@ -385,6 +396,12 @@ static esp_err_t mount_littlefs(void)
 
 static esp_err_t format_and_mount_littlefs(void)
 {
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (status.agenda_unsaved || !agenda_storage_owner_format_allowed()) {
+        ESP_LOGW(TAG, "Cache-only format refused: agenda exists or absence is unverified");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (esp_littlefs_mounted(LITTLEFS_PARTITION)) {
         ESP_RETURN_ON_ERROR(esp_vfs_littlefs_unregister(LITTLEFS_PARTITION), TAG,
                             "LittleFS unmount before format failed");
@@ -471,7 +488,7 @@ static esp_err_t commit_nvs_compaction_probe(uint32_t sequence, uint32_t *out_wr
         return err;
     }
 
-    static uint8_t payload[FLASH_COORDINATOR_NVS_COMPACTION_BLOB_BYTES];
+    static NP2_PSRAM_BSS uint8_t payload[FLASH_COORDINATOR_NVS_COMPACTION_BLOB_BYTES];
     for (uint32_t write_index = 0; write_index < FLASH_COORDINATOR_NVS_COMPACTION_WRITES;
          ++write_index) {
         for (size_t byte_index = 0; byte_index < sizeof(payload); ++byte_index) {
@@ -824,7 +841,7 @@ static esp_err_t run_cache_full_probe(uint32_t sequence)
     bool baseline_ready = false;
     bool proposal_rejected = false;
     size_t accepted_proposals = 0U;
-    static uint8_t fill_chunk[FLASH_COORDINATOR_FULL_PROBE_CHUNK_BYTES];
+    static NP2_PSRAM_BSS uint8_t fill_chunk[FLASH_COORDINATOR_FULL_PROBE_CHUNK_BYTES];
     uint8_t payload[OFFLINE_DATA_ENCODED_SIZE] = {0};
     const offline_data_snapshot_t proposal = {
         .schema_version = OFFLINE_DATA_SCHEMA_VERSION,
@@ -928,7 +945,7 @@ static esp_err_t run_cache_power_cut_probe(uint32_t sequence, bool after_rename)
                         "No valid cache generation before power-cut probe");
 
     const uint32_t generation = latest.generation + 1U;
-    static uint8_t payload[FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES];
+    static NP2_PSRAM_BSS uint8_t payload[FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES];
     memset(payload, (int)(sequence & UINT32_C(0xff)), sizeof(payload));
     cache_record_header_t header = {
         .magic = NP2_CACHE_RECORD_MAGIC,
@@ -1124,7 +1141,8 @@ static esp_err_t read_onboarding_profile_slot(const char *key,
     result = nvs_get_blob(handle, key, &record, &record_size);
     nvs_close(handle);
     if (result != ESP_OK) return result;
-    if (record_size != sizeof(record) ||
+    if ((record_size != sizeof(record) && record_size != sizeof(cache_record_header_t) + 4U) ||
+        (record_size == sizeof(cache_record_header_t) + 4U && record.header.payload_size > 4U) ||
         !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
         record.header.payload_size != sizeof(record.profile) ||
         record.header.payload_crc32 != cache_record_crc32((const uint8_t *)&record.profile,
@@ -1208,7 +1226,7 @@ typedef struct {
 
 static bool notification_profile_is_valid(const notification_profile_t *profile)
 {
-    return profile != NULL;
+    return notification_profile_valid(profile);
 }
 
 static esp_err_t read_notification_profile_slot(const char *key,
@@ -1225,15 +1243,23 @@ static esp_err_t read_notification_profile_slot(const char *key,
     nvs_close(handle);
     if (result != ESP_OK) return result;
 
-    if (record_size != sizeof(record) ||
-        !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
-        record.header.payload_size != sizeof(record.profile) ||
+    const bool legacy=record.header.schema_version == 1U && record.header.payload_size == 3U;
+    const bool current=record.header.schema_version == 2U && record.header.payload_size == sizeof(record.profile);
+    if ((!legacy && !current) ||
+        record_size != (legacy ? 28U : sizeof(record)) ||
+        record.header.magic != NP2_CACHE_RECORD_MAGIC || record.header.generation == 0U ||
+        record.header.header_size != sizeof(record.header) ||
+        record.header.header_crc32 != cache_record_crc32((const uint8_t *)&record.header,
+            offsetof(cache_record_header_t,header_crc32)) ||
         record.header.payload_crc32 != cache_record_crc32(
                                         (const uint8_t *)&record.profile,
-                                        sizeof(record.profile)) ||
-        !notification_profile_is_valid(&record.profile)) {
+                                        record.header.payload_size)) {
         return ESP_ERR_INVALID_CRC;
     }
+    notification_profile_t decoded;
+    if (!notification_profile_decode((const uint8_t *)&record.profile,record.header.payload_size,&decoded))
+        return ESP_ERR_INVALID_CRC;
+    record.profile=decoded;
     if (out_record != NULL) *out_record = record;
     return ESP_OK;
 }
@@ -1286,7 +1312,7 @@ static esp_err_t write_notification_profile(const notification_profile_t *profil
     const uint32_t generation = latest_result == ESP_OK ? latest.header.generation + 1U : 1U;
     notification_profile_record_t record = {
         .header = {.magic = NP2_CACHE_RECORD_MAGIC,
-                   .schema_version = NP2_CACHE_RECORD_SCHEMA_VERSION,
+                   .schema_version = 2U,
                    .header_size = sizeof(cache_record_header_t),
                    .generation = generation,
                    .payload_size = sizeof(profile[0])},
@@ -1623,8 +1649,8 @@ typedef struct {
     device_control_profile_t profile;
 } device_control_profile_record_t;
 
-_Static_assert(sizeof(device_control_profile_record_t) == sizeof(cache_record_header_t) + 4U,
-               "Keep legacy controls record alignment");
+_Static_assert(sizeof(device_control_profile_record_t) == sizeof(cache_record_header_t) + 24U,
+               "Controls record contains a twenty-four-byte payload");
 
 static esp_err_t read_device_control_profile_slot(
     const char *key, device_control_profile_record_t *out_record)
@@ -1639,9 +1665,14 @@ static esp_err_t read_device_control_profile_slot(
     result = nvs_get_blob(handle, key, &record, &record_size);
     nvs_close(handle);
     if (result != ESP_OK) return result;
-    if (record_size != sizeof(record) ||
+    if ((record_size != sizeof(record) && record_size != sizeof(cache_record_header_t) + 4U &&
+         record_size != sizeof(cache_record_header_t) + 8U &&
+         record_size != sizeof(cache_record_header_t) + 16U) ||
+        (record_size < sizeof(cache_record_header_t) + record.header.payload_size) ||
         !cache_record_header_is_valid(&record.header, sizeof(record.profile)) ||
-        (record.header.payload_size != 2U && record.header.payload_size != sizeof(record.profile)) ||
+        (record.header.payload_size != 2U && record.header.payload_size != 3U && record.header.payload_size != 4U &&
+         record.header.payload_size != 6U && record.header.payload_size != 16U &&
+         record.header.payload_size != sizeof(record.profile)) ||
         record.header.payload_crc32 != cache_record_crc32(
             (const uint8_t *)&record.profile, record.header.payload_size)) {
         return ESP_ERR_INVALID_CRC;
@@ -2231,7 +2262,7 @@ static esp_err_t commit_littlefs_probe(uint32_t sequence, uint32_t *out_writes,
     cache_record_header_t latest = {0};
     const esp_err_t latest_result = select_latest_cache(&latest);
     uint32_t generation = latest_result == ESP_OK ? latest.generation + 1U : 1U;
-    static uint8_t payload[FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES];
+    static NP2_PSRAM_BSS uint8_t payload[FLASH_COORDINATOR_LITTLEFS_PAYLOAD_BYTES];
     for (uint32_t write_index = 0; write_index < FLASH_COORDINATOR_LITTLEFS_WRITES;
          ++write_index) {
         for (size_t byte_index = 0; byte_index < sizeof(payload); ++byte_index) {
@@ -2275,7 +2306,7 @@ static bool restart_requests_safe(bool from_owner)
                            flash.update_journal_state != UPDATE_JOURNAL_ACCEPTED);
     return system_restart_allowed(flash.ready && controls.ready && notifications.ready,
                                    !from_owner && flash.busy, !from_owner && flash.pending,
-                                   controls.persistence_pending || notifications.persistence_pending ||
+                                   flash.agenda_unsaved || controls.persistence_pending || notifications.persistence_pending ||
                                        onboarding.timezone_persistence_pending || onboarding.required,
                                    updating, boot_state == ESP_OTA_IMG_PENDING_VERIFY);
 }
@@ -2344,12 +2375,27 @@ static void flash_worker_task(void *arg)
     refresh_ewelink_inventory_status();
     refresh_credential_vault_status();
     refresh_update_journal_status();
+    (void)google_agenda_credentials_owner_load();
+    (void)spotify_remote_credentials_owner_load();
+    uint8_t home_widget = 0;
+    esp_err_t home_widget_result = home_widget_owner_load(&home_widget);
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.home_widget_loaded = true; s_status.home_widget = home_widget;
+    s_status.home_widget_result = home_widget_result;
+    portEXIT_CRITICAL(&s_status_lock);
     if (littlefs_init_result != ESP_OK) {
         ESP_LOGW(TAG, "LittleFS unavailable until explicit format: %s",
                  esp_err_to_name(littlefs_init_result));
     } else {
         refresh_cache_status();
     }
+
+    const esp_err_t agenda_result = littlefs_init_result == ESP_OK
+        ? agenda_storage_owner_load() : littlefs_init_result;
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.agenda_load_result = agenda_result;
+    s_status.agenda_loaded = true;
+    portEXIT_CRITICAL(&s_status_lock);
 
     refresh_storage_usage();
     TickType_t last_usage_tick = xTaskGetTickCount();
@@ -2382,6 +2428,40 @@ static void flash_worker_task(void *arg)
         bool littlefs_format = false;
         esp_err_t result;
         switch (request.kind) {
+        case FLASH_REQUEST_GOOGLE_CREDENTIALS_WRITE:
+            result = google_agenda_credentials_owner_write((const google_agenda_credentials_t *)request.ota_chunk);
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.google_auth_result = result;
+            ++s_status.google_auth_completion;
+            portEXIT_CRITICAL(&s_status_lock);
+            secure_zero(request.ota_chunk, sizeof(request.ota_chunk));
+            break;
+        case FLASH_REQUEST_HOME_WIDGET_WRITE:
+            result = home_widget_owner_write(request.ota_chunk[0]);
+            portENTER_CRITICAL(&s_status_lock);
+            if (result == ESP_OK) s_status.home_widget = request.ota_chunk[0];
+            s_status.home_widget_result = result; ++s_status.home_widget_completion;
+            portEXIT_CRITICAL(&s_status_lock);
+            break;
+        case FLASH_REQUEST_SPOTIFY_CREDENTIALS_WRITE:
+            result = spotify_remote_credentials_owner_write((const spotify_remote_credentials_t *)request.ota_chunk);
+            spotify_remote_provision_end();
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.spotify_auth_result = result;
+            ++s_status.spotify_auth_completion;
+            portEXIT_CRITICAL(&s_status_lock);
+            ESP_LOGI("np2_spotify_remote", "credentials completion result=%ld", (long)result);
+            secure_zero(request.ota_chunk, sizeof(request.ota_chunk));
+            break;
+        case FLASH_REQUEST_AGENDA_WRITE:
+            result = agenda_storage_owner_write(request.agenda);
+            heap_caps_free(request.agenda);
+            request.agenda = NULL;
+            portENTER_CRITICAL(&s_status_lock);
+            s_status.agenda_completed_sequence = request.sequence;
+            s_status.agenda_write_result = result;
+            portEXIT_CRITICAL(&s_status_lock);
+            break;
         case FLASH_REQUEST_ONBOARDING_PROFILE_WRITE:
             result = write_onboarding_profile(&request.onboarding_profile);
             break;
@@ -2853,6 +2933,65 @@ esp_err_t flash_coordinator_request_onboarding_profile_write(const onboarding_pr
     return ESP_OK;
 }
 
+void flash_coordinator_set_agenda_unsaved(bool pending)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.agenda_unsaved = pending;
+    portEXIT_CRITICAL(&s_status_lock);
+}
+
+esp_err_t flash_coordinator_request_google_credentials_write(const google_agenda_credentials_t *credentials)
+{
+    if (credentials == NULL || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending || status.p4_ota_active || status.p4_ota_finished) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_GOOGLE_CREDENTIALS_WRITE,
+        .sequence = status.last_sequence + 1U};
+    memcpy(s_p4_ota_request.ota_chunk, credentials, sizeof(*credentials));
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    secure_zero(s_p4_ota_request.ota_chunk, sizeof(s_p4_ota_request.ota_chunk));
+    if (queued) set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t flash_coordinator_request_agenda_write(const agenda_data_t *data, uint32_t *out_sequence)
+{
+    if (!agenda_data_valid(data) || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || !status.littlefs_ready || status.busy || status.pending ||
+        status.p4_ota_active || status.p4_ota_finished || status.restart_pending) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_AGENDA_WRITE,
+        .sequence = status.last_sequence + 1U};
+    s_p4_ota_request.agenda = heap_caps_malloc(sizeof(*data), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_p4_ota_request.agenda == NULL) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_NO_MEM;
+    }
+    *s_p4_ota_request.agenda = *data;
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    if (!queued) heap_caps_free(s_p4_ota_request.agenda);
+    s_p4_ota_request.agenda = NULL;
+    if (queued) {
+        if (out_sequence != NULL) *out_sequence = s_p4_ota_request.sequence;
+        set_busy(false, true);
+    }
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
 esp_err_t flash_coordinator_request_notification_profile_write(
     const notification_profile_t *profile, uint32_t *out_sequence)
 {
@@ -3321,4 +3460,47 @@ void flash_coordinator_get_status(flash_coordinator_status_t *out_status)
                                                   : (uint32_t)((remaining_us + 999LL) / 1000LL);
     }
     portEXIT_CRITICAL(&s_status_lock);
+}
+
+esp_err_t flash_coordinator_request_spotify_credentials_write(const spotify_remote_credentials_t *credentials)
+{
+    if (credentials == NULL || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending || status.p4_ota_active || status.p4_ota_finished) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_SPOTIFY_CREDENTIALS_WRITE,
+        .sequence = status.last_sequence + 1U};
+    memcpy(s_p4_ota_request.ota_chunk, credentials, sizeof(*credentials));
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    secure_zero(s_p4_ota_request.ota_chunk, sizeof(s_p4_ota_request.ota_chunk));
+    if (queued) set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+
+esp_err_t flash_coordinator_request_home_widget_write(uint8_t widget)
+{
+    if (widget > 1U || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending || status.p4_ota_active || status.p4_ota_finished) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_HOME_WIDGET_WRITE,
+        .sequence = status.last_sequence + 1U};
+    s_p4_ota_request.ota_chunk[0] = widget;
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    secure_zero(s_p4_ota_request.ota_chunk, sizeof(s_p4_ota_request.ota_chunk));
+    if (queued) set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
 }

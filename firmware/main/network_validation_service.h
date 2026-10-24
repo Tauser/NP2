@@ -25,6 +25,9 @@ typedef enum {
     NETWORK_VALIDATION_MODE_P4_UPDATE_PREFLIGHT,
     NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY,
     NETWORK_VALIDATION_MODE_EWELINK_SYNC,
+    NETWORK_VALIDATION_MODE_GOOGLE_SYNC,
+    NETWORK_VALIDATION_MODE_SPOTIFY_HTTP,
+    NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE,
 } network_validation_mode_t;
 
 typedef struct {
@@ -58,6 +61,7 @@ esp_err_t network_validation_service_request_offline_data_refresh(void);
  * worker. Credentials remain owned by the eWeLink service and are consumed
  * once by the worker. */
 esp_err_t network_validation_service_request_ewelink_sync(void);
+esp_err_t network_validation_service_request_google_sync(void);
 
 /* Development-only OTA preflight on the existing one-request HTTPS worker. */
 esp_err_t network_validation_service_request_p4_update_preflight(
@@ -81,3 +85,5 @@ void network_validation_service_get_status(network_validation_status_t *out_stat
 #ifdef __cplusplus
 }
 #endif
+
+esp_err_t network_validation_service_request_spotify_remote(void);

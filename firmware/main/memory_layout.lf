@@ -1,0 +1,11 @@
+# ADR-095: retain the 64 KiB builtin object pool without reserving internal RAM.
+# DMA draw buffers and the rest of LVGL keep their existing allocation policy.
+[scheme:np2_psram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:np2_lvgl_object_pool]
+archive: liblvgl__lvgl.a
+entries:
+    lv_mem_core_builtin (np2_psram_bss)

@@ -6,6 +6,10 @@
  * single task. It retains neither time nor credentials and accepts no URL.
  */
 #include "network_validation_service.h"
+#include "np_memory.h"
+#include "google_agenda_sync.h"
+#include "spotify_http_bridge.h"
+#include "spotify_remote.h"
 #include "esp_hosted.h"
 #include "esp_ota_ops.h"
 #include "esp_chip_info.h"
@@ -40,7 +44,8 @@
 #include "update_journal.h"
 #include "update_p4_writer.h"
 
-#define NP2_NETWORK_VALIDATION_TASK_STACK_BYTES (8U * 1024U)
+/* Real Google TLS left 112 bytes on 8 KiB. Keep >=25% through write paths. */
+#define NP2_NETWORK_VALIDATION_TASK_STACK_BYTES (12U * 1024U)
 #define NP2_NETWORK_VALIDATION_TASK_PRIORITY 2U
 #define NP2_DNS_RESOLVER_TASK_STACK_BYTES (4U * 1024U)
 #define NP2_NETWORK_VALIDATION_POLL_MS 100U
@@ -109,16 +114,13 @@ static char s_update_image_url[NP2_UPDATE_URL_MAX_BYTES];
 static update_keyring_entry_t s_update_keyring_entries[NETWORK_P4_UPDATE_MAX_TRUSTED_KEYS];
 static size_t s_update_keyring_entries_count;
 static update_environment_t s_update_environment;
-static uint8_t s_update_stream_chunk[UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES];
 /* Only the HTTPS worker mutates this snapshot. The app_loop owns its separate
  * projected copy, received through the bounded EventBus. */
-static offline_data_snapshot_t s_product_snapshot;
+static NP2_PSRAM_BSS offline_data_snapshot_t s_product_snapshot;
 static bool s_product_snapshot_initialized;
 /* Owned exclusively by the HTTPS worker; retain newest data on bus saturation. */
 static bool s_product_delivery_pending;
 static int64_t s_last_product_cache_write_us;
-/* Owned by the sole HTTPS worker; kept out of its 8 KiB task stack. */
-static uint8_t s_product_body[NP2_PROVIDER_MAX_BODY_BYTES];
 /* Sole HTTPS worker owns both the budget and its monotonic admission timer. */
 static coingecko_quota_t s_coingecko_quota;
 static bool s_coingecko_quota_loaded;
@@ -558,9 +560,9 @@ static esp_err_t validate_https(const char *url, uint32_t timeout_ms,
                                  NULL, 0U, NULL);
 }
 
-static esp_err_t stream_update_image(const char *url, uint32_t expected_bytes,
+static esp_err_t stream_update_image_with_buffer(const char *url, uint32_t expected_bytes,
                                      update_p4_writer_t *writer,
-                                     update_image_hash_session_t *hash)
+                                     update_image_hash_session_t *hash, uint8_t *chunk)
 {
     if (url == NULL || expected_bytes == 0U || writer == NULL || hash == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -615,14 +617,14 @@ static esp_err_t stream_update_image(const char *url, uint32_t expected_bytes,
         if (result != ESP_OK) {
             break;
         }
-        const int read = esp_http_client_read(client, (char *)s_update_stream_chunk,
-                                              sizeof(s_update_stream_chunk));
+        const int read = esp_http_client_read(client, (char *)chunk,
+                                              UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES);
         if (read == -ESP_ERR_HTTP_EAGAIN) {
             result = ESP_ERR_TIMEOUT;
         } else if (read <= 0) {
             result = read == 0 ? ESP_ERR_HTTP_INCOMPLETE_DATA : ESP_FAIL;
         } else if ((uint32_t)read > expected_bytes - received ||
-                   update_p4_writer_append(writer, hash, s_update_stream_chunk,
+                   update_p4_writer_append(writer, hash, chunk,
                                            (size_t)read) != UPDATE_P4_WRITER_OK) {
             result = ESP_FAIL;
         } else {
@@ -633,6 +635,19 @@ static esp_err_t stream_update_image(const char *url, uint32_t expected_bytes,
     esp_http_client_cleanup(client);
     return result == ESP_OK && received == expected_bytes ? ESP_OK
                                                            : (result == ESP_OK ? ESP_ERR_HTTP_INCOMPLETE_DATA : result);
+}
+
+static esp_err_t stream_update_image(const char *url, uint32_t expected_bytes,
+                                     update_p4_writer_t *writer,
+                                     update_image_hash_session_t *hash)
+{
+    uint8_t *chunk = heap_caps_calloc(1U, UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES,
+                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (chunk == NULL) return ESP_ERR_NO_MEM;
+    const esp_err_t result = stream_update_image_with_buffer(url, expected_bytes, writer, hash, chunk);
+    secure_zero(chunk, UPDATE_IMAGE_HASH_CHUNK_MAX_BYTES);
+    heap_caps_free(chunk);
+    return result;
 }
 
 static esp_err_t persist_update_journal_and_wait(const update_journal_record_t *record,
@@ -837,7 +852,8 @@ static void retry_pending_product_delivery(void)
 }
 
 /* This runs only in the sole HTTPS worker, after DNS and trusted time. */
-static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t request_start_us)
+static esp_err_t refresh_product_domain_with_buffer(data_refresh_domain_t domain,
+                                                    int64_t request_start_us, uint8_t *body)
 {
     ensure_product_snapshot();
 
@@ -847,7 +863,6 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
     }
     update_weather_visual(&s_product_snapshot, now);
 
-    uint8_t *const body = s_product_body;
     size_t body_size = 0U;
     esp_err_t result = ESP_ERR_INVALID_ARG;
     switch (domain) {
@@ -972,6 +987,17 @@ static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t re
         return ESP_ERR_INVALID_ARG;
     }
     publish_product_snapshot();
+    return result;
+}
+
+static esp_err_t refresh_product_domain(data_refresh_domain_t domain, int64_t request_start_us)
+{
+    uint8_t *body = heap_caps_calloc(1U, NP2_PROVIDER_MAX_BODY_BYTES,
+                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (body == NULL) return ESP_ERR_NO_MEM;
+    const esp_err_t result = refresh_product_domain_with_buffer(domain, request_start_us, body);
+    secure_zero(body, NP2_PROVIDER_MAX_BODY_BYTES);
+    heap_caps_free(body);
     return result;
 }
 
@@ -1229,7 +1255,17 @@ static void network_validation_task(void *arg)
                                   : (time_status.trusted ? ESP_OK : ESP_ERR_INVALID_STATE);
         }
         const uint32_t https_budget_ms = remaining_request_budget_ms(start_us);
-        if (ntp_result == ESP_OK && https_budget_ms > 0U) {
+        if (mode == NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE) {
+            https_result = spotify_remote_process(ntp_result != ESP_OK
+                ? (dns_result != ESP_OK ? dns_result : ntp_result)
+                : (https_budget_ms == 0U ? ESP_ERR_TIMEOUT : ESP_OK));
+        } else if (mode == NETWORK_VALIDATION_MODE_SPOTIFY_HTTP) {
+            /* Consume and complete the private job even on DNS/NTP failure.
+             * Only this worker can create a Spotify HTTPS connection. */
+            https_result = spotify_http_bridge_process(ntp_result != ESP_OK
+                ? (dns_result != ESP_OK ? dns_result : ntp_result)
+                : (https_budget_ms == 0U ? ESP_ERR_TIMEOUT : ESP_OK));
+        } else if (ntp_result == ESP_OK && https_budget_ms > 0U) {
             const bool slow_https = mode == NETWORK_VALIDATION_MODE_HTTPS_TIMEOUT;
             const bool oversize_https = mode == NETWORK_VALIDATION_MODE_HTTPS_OVERSIZE;
             if (scheduled_product_refresh) {
@@ -1244,6 +1280,11 @@ static void network_validation_task(void *arg)
                 https_result = np_ewelink_service_process_sync();
                 ESP_LOGI(TAG, "eWeLink sync task stack minimum free=%u bytes",
                          (unsigned int)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
+            } else if (mode == NETWORK_VALIDATION_MODE_GOOGLE_SYNC) {
+                esp_hosted_coprocessor_fwver_t c6 = {0};
+                if (esp_hosted_get_coprocessor_fwversion(&c6) == ESP_OK)
+                    ESP_LOGI("np2_google", "c6=%u.%u.%u", (unsigned)c6.major1, (unsigned)c6.minor1, (unsigned)c6.patch1);
+                https_result = google_agenda_process_sync();
             } else {
                 https_result = validate_https(mode == NETWORK_VALIDATION_MODE_TLS_REJECT
                                                   ? NP2_TLS_REJECT_URL
@@ -1264,7 +1305,10 @@ static void network_validation_task(void *arg)
         }
 
         const uint32_t duration_ms = elapsed_ms_since(start_us);
+        if (mode == NETWORK_VALIDATION_MODE_GOOGLE_SYNC && https_result != ESP_OK)
+            google_agenda_fail_sync(https_result);
         if (mode != NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY &&
+            mode != NETWORK_VALIDATION_MODE_GOOGLE_SYNC &&
             mode != NETWORK_VALIDATION_MODE_EWELINK_SYNC &&
             duration_ms > NP2_REQUEST_TOTAL_TIMEOUT_MS) {
             https_result = ESP_ERR_TIMEOUT;
@@ -1347,6 +1391,40 @@ esp_err_t network_validation_service_request_check(network_validation_mode_t mod
     taskEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;
 }
+
+esp_err_t network_validation_service_request_google_sync(void)
+{
+    /* Same mutex-protected single pending slot as every other HTTPS producer. */
+    taskENTER_CRITICAL(&s_status_lock);
+    if (!s_started || s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_INVALID_STATE;
+    }
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_GOOGLE_SYNC;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
+}
+
+esp_err_t network_validation_service_request_spotify_http(void)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    taskENTER_CRITICAL(&s_status_lock);
+    if (!s_started || !connectivity.online) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_INVALID_STATE;
+    }
+    if (s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_TIMEOUT;
+    }
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_SPOTIFY_HTTP;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
+}
+
+
 
 esp_err_t network_validation_service_request_offline_data_refresh(void)
 {
@@ -1455,4 +1533,22 @@ void network_validation_service_get_status(network_validation_status_t *out_stat
     taskENTER_CRITICAL(&s_status_lock);
     *out_status = s_status;
     taskEXIT_CRITICAL(&s_status_lock);
+}
+
+esp_err_t network_validation_service_request_spotify_remote(void)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    taskENTER_CRITICAL(&s_status_lock);
+    if (!s_started || !connectivity.online) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_INVALID_STATE;
+    }
+    if (s_status.busy || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_TIMEOUT;
+    }
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return ESP_OK;
 }

@@ -74,7 +74,12 @@ int main(int argc, char **argv)
     };
     np_settings_system_sync_resources(&view.system, &r);
     assert(lv_arc_get_value(view.system.cpu_arc) == 18);
+#ifdef NP2_SPOTIFY_PAIRING_BENCH
+    assert(!lv_obj_has_state(view.update_button, LV_STATE_DISABLED));
+    assert(strcmp(lv_label_get_text(lv_obj_get_child(view.update_button, 0)), "Parear Spotify") == 0);
+#else
     assert(lv_obj_has_state(view.update_button, LV_STATE_DISABLED));
+#endif
     assert(lv_obj_get_height(view.system.restart_button) == NP_TOUCH_TARGET);
     for (unsigned i = 0; i < 30; ++i) {
         ++r.sequence; r.uptime_s += 2; r.cpu_percent = 10 + (i * 7) % 30;

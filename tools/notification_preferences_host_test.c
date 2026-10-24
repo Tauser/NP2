@@ -10,6 +10,9 @@ static notification_profile_t queued;
 static uint32_t sequence;
 static unsigned writes;
 static unsigned sounds;
+static unsigned stopped;
+static sound_category_t last_category;
+static uint8_t last_variant;
 static esp_err_t submission_result = ESP_OK;
 static bool write_in_flight;
 
@@ -30,11 +33,14 @@ esp_err_t flash_coordinator_request_notification_profile_write(
     return ESP_OK;
 }
 
-esp_err_t device_control_play_notification_tone(void)
+esp_err_t device_control_play_melody(sound_category_t category,uint8_t variant)
 {
-    ++sounds;
+    assert(sound_choice_valid(category,variant));
+    if (variant != 0U) ++sounds;
+    last_category=category;last_variant=variant;
     return ESP_OK;
 }
+void device_control_stop_sounds(void) { ++stopped; }
 
 static void complete_write(esp_err_t result)
 {
@@ -61,7 +67,7 @@ static void reboot_service(void)
     s_submitted_profile = (notification_profile_t){0};
     s_status = (notification_service_status_t){
         .general_enabled = true, .sound_enabled = true,
-        .system_alerts_enabled = true, .last_result = ESP_OK};
+        .system_alerts_enabled = true, .melodies={1U,1U,1U}, .last_result = ESP_OK};
     assert(notification_service_start() == ESP_OK);
     assert(notification_service_set_general_enabled(false) == ESP_ERR_INVALID_STATE);
     restore_preferences_if_available();
@@ -90,7 +96,8 @@ int main(void)
     flash.ready = true;
     flash.notification_profile_valid = true;
     flash.notification_profile_generation = 1U;
-    flash.notification_profile = (notification_profile_t){true, true, true};
+    flash.notification_profile = (notification_profile_t){.general_enabled=true,.sound_enabled=true,
+        .system_alerts_enabled=true,.melodies={1U,1U,1U}};
     reboot_service();
     expect_profile(7U, false);
 
@@ -148,6 +155,25 @@ int main(void)
     set_profile(3U);
     assert(notification_service_request_alert_sound() == ESP_OK);
     assert(sounds == 1U);
-    puts("Notification service: restoration, coalescing, in-flight edits, failures and sound: PASS");
+    assert(last_category == SOUND_NOTIFICATION && last_variant == 1U);
+    assert(notification_service_set_melody(SOUND_ALARM,3U) == ESP_OK);
+    submit_pending_profile();
+    assert(notification_service_set_melody(SOUND_STARTUP,2U) == ESP_OK);
+    complete_write(ESP_OK);assert(s_status.persistence_pending);
+    submit_pending_profile();complete_write(ESP_OK);reboot_service();
+    assert(s_status.melodies[SOUND_ALARM] == 3U && s_status.melodies[SOUND_STARTUP] == 2U);
+    assert(notification_service_request_alarm_sound() == ESP_OK && last_category == SOUND_ALARM && last_variant == 3U);
+    assert(notification_service_request_startup_sound() == ESP_OK && last_category == SOUND_STARTUP && last_variant == 2U);
+    assert(notification_service_set_general_enabled(false) == ESP_OK);
+    assert(notification_service_request_alert_sound() == ESP_ERR_INVALID_STATE);
+    assert(notification_service_preview_melody(SOUND_NOTIFICATION) == ESP_OK);
+    assert(notification_service_request_alarm_sound() == ESP_OK);
+    assert(notification_service_set_melody(SOUND_STARTUP,0U) == ESP_OK);
+    assert(notification_service_request_startup_sound() == ESP_ERR_INVALID_STATE);
+    assert(notification_service_set_melody(SOUND_ALARM,4U) == ESP_ERR_INVALID_ARG);
+    assert(notification_service_set_melody(SOUND_CATEGORY_COUNT,1U) == ESP_ERR_INVALID_ARG);
+    assert(notification_service_set_sound_enabled(false) == ESP_OK && stopped>0U);
+    assert(notification_service_request_alarm_sound() == ESP_ERR_INVALID_STATE && notification_service_preview_melody(SOUND_NOTIFICATION) == ESP_ERR_INVALID_STATE);
+    puts("Notification service: melody persistence/in-flight changes, categories, mute, preview, restoration and failures: PASS");
     return 0;
 }

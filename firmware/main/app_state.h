@@ -9,6 +9,10 @@
 #include "user_profile.h"
 #include "pomodoro_service.h"
 #include "system_resource_model.h"
+#include "agenda_service.h"
+#include "spotify_remote.h"
+#include "sound_melody.h"
+#include "photo_frame_model.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -100,6 +104,7 @@ typedef struct {
     bool general_enabled;
     bool sound_enabled;
     bool system_alerts_enabled;
+    uint8_t melodies[SOUND_CATEGORY_COUNT];
     bool persistence_pending;
     uint32_t generation;
     uint32_t persisted_generation;
@@ -114,6 +119,8 @@ typedef enum {
     APP_NOTIFICATION_KIND_STORAGE_ERROR,
     APP_NOTIFICATION_KIND_STORAGE_RECOVERED,
     APP_NOTIFICATION_KIND_RESTART_FAILED,
+    APP_NOTIFICATION_KIND_AGENDA_EVENT,
+    APP_NOTIFICATION_KIND_AGENDA_TASK,
 } app_notification_kind_t;
 
 typedef struct {
@@ -121,6 +128,7 @@ typedef struct {
     uint32_t timestamp_unix_s;
     app_notification_kind_t kind;
     bool unread;
+    char title[AGENDA_TITLE_BYTES];
 } app_notification_item_t;
 
 typedef struct {
@@ -136,6 +144,14 @@ typedef struct {
     uint8_t effective_brightness_percent;
     bool night_mode_enabled;
     bool night_mode_active;
+    uint8_t home_widget;
+    uint8_t photo_config;
+    uint8_t photo_bitcoin_widget;
+    uint8_t photo_clock_widget;
+    uint8_t photo_idle_choice;
+    uint8_t photo_interval_choice;
+    uint8_t photo_exit_choice;
+    uint64_t photo_enabled_mask;
     bool persistence_pending;
     uint32_t save_completion_id;
     uint8_t save_completion_mask;
@@ -203,6 +219,7 @@ typedef struct {
     app_network_projection_t network;
     app_onboarding_projection_t onboarding;
     app_weather_asset_projection_t weather_assets;
+    photo_frame_status_t photos;
     app_notification_projection_t notifications;
     app_notification_center_projection_t notification_center;
     app_device_control_projection_t device_controls;
@@ -237,6 +254,7 @@ esp_err_t app_state_request_notification_mark_all_read(void);
 
 /* Lock-protected copy for the LVGL task; no service I/O is performed here. */
 void app_state_get_ui_projection(app_ui_projection_t *out_projection);
+void app_state_get_agenda_projection(agenda_projection_t *out_projection);
 void app_state_get_device_control_projection(
     app_device_control_projection_t *out_projection);
 
@@ -246,3 +264,5 @@ void app_state_get_health(app_state_health_t *out_health);
 #ifdef __cplusplus
 }
 #endif
+
+void app_state_get_spotify_projection(spotify_remote_projection_t *out);

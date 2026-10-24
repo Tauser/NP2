@@ -1,4 +1,5 @@
 #include "device_control_service.h"
+#include "music_audio_service.h"
 
 #include "flash_coordinator.h"
 #include "night_mode_policy.h"
@@ -25,9 +26,7 @@
 #define DEVICE_CONTROL_PRIORITY           2U
 #define DEVICE_CONTROL_POLL_MS            100U
 #define DEVICE_CONTROL_SAVE_DELAY_MS      500U
-#define DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES 768U
-#define DEVICE_CONTROL_POMODORO_NOTE_SAMPLES 2048U
-#define DEVICE_CONTROL_POMODORO_GAP_SAMPLES 1024U
+#define DEVICE_CONTROL_SOUND_CHUNK_SAMPLES 256U
 #define DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS 350U
 
 static const char *const TAG = "device_controls";
@@ -39,8 +38,12 @@ static temperature_sensor_handle_t s_temperature_sensor;
 static bool s_started;
 static bool s_brightness_pending;
 static bool s_volume_pending;
-static bool s_notification_tone_pending;
-static bool s_pomodoro_alarm_pending;
+static uint8_t s_sound_pending, s_sound_cancel;
+static uint8_t s_sound_variants[SOUND_CATEGORY_COUNT];
+static TickType_t s_sound_ticks[SOUND_CATEGORY_COUNT];
+static bool s_sound_queued[SOUND_CATEGORY_COUNT];
+static sound_player_t s_player;
+static int s_active_sound = -1;
 static uint8_t s_requested_brightness;
 static uint8_t s_requested_volume;
 static uint8_t s_dirty_mask;
@@ -49,7 +52,6 @@ static uint32_t s_pending_flash_sequence;
 static uint8_t s_submitted_mask;
 static device_control_profile_t s_submitted_profile;
 static TickType_t s_last_change_tick;
-static TickType_t s_last_notification_tone_tick;
 static device_control_status_t s_status = {
     .brightness_percent = DEVICE_CONTROL_DEFAULT_BRIGHTNESS,
     .volume_percent = DEVICE_CONTROL_DEFAULT_VOLUME,
@@ -136,12 +138,32 @@ static void restore_preferences(void)
     s_status.effective_brightness_percent = brightness;
     s_status.night_mode_enabled = flash.device_control_profile_valid &&
                                  flash.device_control_profile.night_mode_enabled != 0U;
+    s_status.photo_config = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_config : PHOTO_CONFIG_DEFAULT;
+    s_status.photo_bitcoin_widget = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_bitcoin_widget : PHOTO_BITCOIN_WIDGET_DEFAULT;
+    s_status.photo_clock_widget = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_clock_widget : PHOTO_CLOCK_WIDGET_DEFAULT;
+    s_status.photo_idle_choice = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_idle_choice : PHOTO_IDLE_CHOICE_DEFAULT;
+    s_status.photo_interval_choice = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_interval_choice : PHOTO_INTERVAL_CHOICE_DEFAULT;
+    s_status.photo_exit_choice = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_exit_choice : PHOTO_EXIT_CHOICE_DEFAULT;
+    s_status.photo_enabled_mask = flash.device_control_profile_valid
+        ? flash.device_control_profile.photo_enabled_mask : UINT64_MAX;
     memcpy(s_status.firmware_version, version, sizeof(version));
     s_status.brightness_result = brightness_result;
     s_status.volume_result = volume_result;
     s_status.audio_ready = volume_result == ESP_OK;
     s_status.ready = true;
+    const uint32_t idle_ms = photo_idle_choice_ms(s_status.photo_idle_choice);
+    const uint32_t interval_ms = photo_interval_choice_ms(s_status.photo_interval_choice);
+    const uint32_t exit_ms = photo_exit_choice_ms(s_status.photo_exit_choice);
+    const uint8_t selected = photo_mask_count(s_status.photo_enabled_mask);
     portEXIT_CRITICAL(&s_lock);
+    ESP_LOGI(TAG, "Photo preferences restored idle_ms=%lu interval_ms=%lu selected=%u exit_ms=%lu",
+        (unsigned long)idle_ms, (unsigned long)interval_ms, selected, (unsigned long)exit_ms);
     ESP_LOGI(TAG, "Controls restored: brightness=%u volume=%u",
              (unsigned int)brightness, (unsigned int)volume);
 }
@@ -216,76 +238,60 @@ static void apply_night_schedule(void)
     portEXIT_CRITICAL(&s_lock);
 }
 
-static void fill_tone_samples(int16_t *samples, uint32_t sample_count,
-                              uint8_t phase_step)
+static bool play_pending_sound_chunk(void)
 {
-    uint8_t phase = 0U;
-    for (uint32_t i = 0U; i < sample_count; ++i) {
-        const int32_t triangle =
-            ((phase < 50U ? (int32_t)phase : 100 - (int32_t)phase) * 2) - 50;
-        const uint32_t remaining = sample_count - 1U - i;
-        const int32_t envelope = i < 40U ? (int32_t)i :
-                                 remaining < 40U ? (int32_t)remaining : 40;
-        samples[i] = (int16_t)((triangle * 360 * envelope) / 40);
-        phase = (uint8_t)((phase + phase_step) % 100U);
-    }
-}
-
-static void play_pending_notification_tone(void)
-{
-    bool pending = false;
+    static const sound_category_t priority[]={SOUND_ALARM,SOUND_NOTIFICATION,SOUND_STARTUP};
     portENTER_CRITICAL(&s_lock);
-    pending = s_notification_tone_pending;
-    s_notification_tone_pending = false;
-    portEXIT_CRITICAL(&s_lock);
-    if (!pending || s_speaker == NULL) return;
-
-    int16_t samples[DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES];
-    const uint8_t phase_steps[] = {3U, 4U};
-    for (uint32_t i = 0U; i < sizeof(phase_steps) / sizeof(phase_steps[0]); ++i) {
-        fill_tone_samples(samples, DEVICE_CONTROL_NOTIFICATION_TONE_SAMPLES,
-                          phase_steps[i]);
-        const esp_err_t result = codec_result(esp_codec_dev_write(
-            s_speaker, (void *)samples, sizeof(samples)));
-        if (result != ESP_OK) {
-            ESP_LOGW(TAG, "Notification tone unavailable: %s", esp_err_to_name(result));
-            return;
+    const uint8_t cancel=s_sound_cancel; s_sound_cancel=0U;
+    s_sound_pending &= (uint8_t)~cancel;
+    const bool muted=s_status.volume_percent == 0U || !s_status.audio_ready;
+    if (muted) s_sound_pending=0U;
+    if (muted || (s_active_sound>=0 && (cancel&(1U<<s_active_sound)))) {
+        s_player=(sound_player_t){0}; s_active_sound=-1;
+    }
+    if ((s_sound_pending&(1U<<SOUND_ALARM)) && s_active_sound != SOUND_ALARM) {
+        s_player=(sound_player_t){0}; s_active_sound=-1;
+    }
+    if (s_active_sound<0 && !muted) {
+        for (unsigned i=0U;i<SOUND_CATEGORY_COUNT;++i) {
+            const sound_category_t category=priority[i];
+            if (!(s_sound_pending&(1U<<category))) continue;
+            s_sound_pending &= (uint8_t)~(1U<<category);
+            if (sound_player_start(&s_player,category,s_sound_variants[category])) { s_active_sound=(int)category; break; }
         }
     }
+    portEXIT_CRITICAL(&s_lock);
+    if (s_active_sound<0 || s_speaker == NULL) return false;
+    int16_t samples[DEVICE_CONTROL_SOUND_CHUNK_SAMPLES];
+    const size_t count=sound_player_read(&s_player,samples,DEVICE_CONTROL_SOUND_CHUNK_SAMPLES);
+    const esp_err_t result=count ? codec_result(esp_codec_dev_write(s_speaker,samples,(int)(count*sizeof(samples[0])))) : ESP_OK;
+    if (result != ESP_OK) { ESP_LOGW(TAG,"Melody playback failed: %s",esp_err_to_name(result)); s_player=(sound_player_t){0}; }
+    if (s_player.melody == NULL) { ESP_LOGI(TAG,"Melody complete category=%d result=%ld",s_active_sound,(long)result); s_active_sound=-1; }
+    return s_active_sound>=0;
 }
 
-static void play_pending_pomodoro_alarm(void)
+static bool play_music_chunk(void)
 {
-    bool pending = false;
-    portENTER_CRITICAL(&s_lock);
-    pending = s_pomodoro_alarm_pending;
-    s_pomodoro_alarm_pending = false;
-    portEXIT_CRITICAL(&s_lock);
-    if (!pending || s_speaker == NULL) return;
-
-    int16_t samples[DEVICE_CONTROL_POMODORO_NOTE_SAMPLES];
-    int16_t silence[DEVICE_CONTROL_POMODORO_GAP_SAMPLES] = {0};
-    const uint8_t phase_steps[] = {3U, 4U, 5U};
-    for (uint32_t i = 0U; i < sizeof(phase_steps) / sizeof(phase_steps[0]); ++i) {
-        fill_tone_samples(samples, DEVICE_CONTROL_POMODORO_NOTE_SAMPLES,
-                          phase_steps[i]);
-        esp_err_t result = codec_result(esp_codec_dev_write(
-            s_speaker, (void *)samples, sizeof(samples)));
-        if (result != ESP_OK) {
-            ESP_LOGW(TAG, "Pomodoro alarm unavailable: %s", esp_err_to_name(result));
-            return;
-        }
-        if (i + 1U < sizeof(phase_steps) / sizeof(phase_steps[0])) {
-            result = codec_result(esp_codec_dev_write(
-                s_speaker, (void *)silence, sizeof(silence)));
-            if (result != ESP_OK) {
-                ESP_LOGW(TAG, "Pomodoro alarm gap unavailable: %s",
-                         esp_err_to_name(result));
-                return;
-            }
-        }
+    music_audio_status_t music={0};music_audio_get_status(&music);
+    if(!music.active || music.paused || !music.ready)return false;
+    if(!s_status.audio_ready || !s_speaker) {
+        music_audio_owner_fail(ESP_ERR_INVALID_STATE);return false;
     }
+    int16_t samples[MUSIC_PCM_CHUNK]={0};
+    const size_t count=music_audio_owner_read(samples,MUSIC_PCM_CHUNK);
+    /* Preserve device pacing through a brief underrun. Only this owner
+     * writes I2S, including silence; producer/decoder never touches hardware. */
+    const size_t frames=count ? count : MUSIC_PCM_CHUNK;
+    const esp_err_t result=codec_result(esp_codec_dev_write(s_speaker,samples,(int)(frames*sizeof(samples[0]))));
+    if(result!=ESP_OK){music_audio_owner_fail(result);return false;}
+    return true;
 }
+
+static void wake_audio_owner(void)
+{ if(s_task)xTaskNotifyGive(s_task); }
+
+static bool play_audio_chunk(void)
+{ return play_pending_sound_chunk() || play_music_chunk(); }
 
 static void finish_save_if_complete(void)
 {
@@ -305,7 +311,14 @@ static void finish_save_if_complete(void)
                        flash.device_control_profile.volume_percent ==
                            s_submitted_profile.volume_percent &&
                        flash.device_control_profile.night_mode_enabled ==
-                           s_submitted_profile.night_mode_enabled;
+                           s_submitted_profile.night_mode_enabled &&
+                       flash.device_control_profile.photo_config == s_submitted_profile.photo_config &&
+                       flash.device_control_profile.photo_bitcoin_widget == s_submitted_profile.photo_bitcoin_widget &&
+                       flash.device_control_profile.photo_clock_widget == s_submitted_profile.photo_clock_widget &&
+                       flash.device_control_profile.photo_idle_choice == s_submitted_profile.photo_idle_choice &&
+                       flash.device_control_profile.photo_interval_choice == s_submitted_profile.photo_interval_choice &&
+                       flash.device_control_profile.photo_enabled_mask == s_submitted_profile.photo_enabled_mask &&
+                       flash.device_control_profile.photo_exit_choice == s_submitted_profile.photo_exit_choice;
     if (saved) {
         if ((s_submitted_mask & DEVICE_CONTROL_BRIGHTNESS_MASK) != 0U &&
             s_status.brightness_percent == s_submitted_profile.brightness_percent) {
@@ -316,6 +329,21 @@ static void finish_save_if_complete(void)
             s_status.volume_percent == s_submitted_profile.volume_percent) {
             s_dirty_mask &= (uint8_t)~DEVICE_CONTROL_VOLUME_MASK;
             completed_mask |= DEVICE_CONTROL_VOLUME_MASK;
+        }
+        if ((s_submitted_mask & DEVICE_CONTROL_PHOTO_MASK) != 0U &&
+            s_status.photo_config == s_submitted_profile.photo_config &&
+            s_status.photo_idle_choice == s_submitted_profile.photo_idle_choice &&
+            s_status.photo_interval_choice == s_submitted_profile.photo_interval_choice &&
+            s_status.photo_enabled_mask == s_submitted_profile.photo_enabled_mask &&
+            s_status.photo_exit_choice == s_submitted_profile.photo_exit_choice) {
+            s_dirty_mask &= (uint8_t)~DEVICE_CONTROL_PHOTO_MASK;
+            completed_mask |= DEVICE_CONTROL_PHOTO_MASK;
+        }
+        if ((s_submitted_mask & DEVICE_CONTROL_WIDGET_MASK) != 0U &&
+            s_status.photo_bitcoin_widget == s_submitted_profile.photo_bitcoin_widget &&
+            s_status.photo_clock_widget == s_submitted_profile.photo_clock_widget) {
+            s_dirty_mask &= (uint8_t)~DEVICE_CONTROL_WIDGET_MASK;
+            completed_mask |= DEVICE_CONTROL_WIDGET_MASK;
         }
         s_status.save_result = ESP_OK;
         if ((s_submitted_mask & DEVICE_CONTROL_NIGHT_MASK) != 0U &&
@@ -334,7 +362,15 @@ static void finish_save_if_complete(void)
         s_status.save_completion_mask = completed_mask;
         ++s_status.save_completion_id;
     }
+    const uint8_t selected = photo_mask_count(s_status.photo_enabled_mask);
+    const uint32_t idle_ms = photo_idle_choice_ms(s_status.photo_idle_choice);
+    const uint32_t interval_ms = photo_interval_choice_ms(s_status.photo_interval_choice);
+    const uint32_t exit_ms = photo_exit_choice_ms(s_status.photo_exit_choice);
+    const esp_err_t save_result = s_status.save_result;
     portEXIT_CRITICAL(&s_lock);
+    if (completed_mask & DEVICE_CONTROL_PHOTO_MASK)
+        ESP_LOGI(TAG, "Photo preferences saved result=%ld selected=%u idle_ms=%lu interval_ms=%lu exit_ms=%lu",
+            (long)save_result, selected, (unsigned long)idle_ms, (unsigned long)interval_ms, (unsigned long)exit_ms);
 }
 
 static void submit_dirty_profile(void)
@@ -352,6 +388,13 @@ static void submit_dirty_profile(void)
         .brightness_percent = s_status.brightness_percent,
         .volume_percent = s_status.volume_percent,
         .night_mode_enabled = s_status.night_mode_enabled ? 1U : 0U,
+        .photo_config = s_status.photo_config,
+        .photo_bitcoin_widget = s_status.photo_bitcoin_widget,
+        .photo_clock_widget = s_status.photo_clock_widget,
+        .photo_idle_choice = s_status.photo_idle_choice,
+        .photo_interval_choice = s_status.photo_interval_choice,
+        .photo_enabled_mask = s_status.photo_enabled_mask,
+        .photo_exit_choice = s_status.photo_exit_choice,
     };
     mask = s_dirty_mask;
     portEXIT_CRITICAL(&s_lock);
@@ -396,6 +439,7 @@ static void device_control_task(void *arg)
     TickType_t last_resources_log = xTaskGetTickCount();
     bool restored = false;
     for (;;) {
+        bool audio_active=false;
         if (!restored) {
             flash_coordinator_status_t flash = {0};
             flash_coordinator_get_status(&flash);
@@ -406,8 +450,8 @@ static void device_control_task(void *arg)
         } else {
             apply_pending_controls();
             apply_night_schedule();
-            play_pending_notification_tone();
-            play_pending_pomodoro_alarm();
+            music_audio_owner_maintain();
+            audio_active=play_audio_chunk();
             finish_save_if_complete();
             submit_dirty_profile();
         }
@@ -461,7 +505,7 @@ static void device_control_task(void *arg)
                     (unsigned long)metrics.uptime_s);
             }
         }
-        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DEVICE_CONTROL_POLL_MS));
+        (void)ulTaskNotifyTake(pdTRUE, s_active_sound>=0 || audio_active ? 0U : pdMS_TO_TICKS(DEVICE_CONTROL_POLL_MS));
     }
 }
 
@@ -474,6 +518,8 @@ esp_err_t device_control_service_start(void)
     }
     s_started = true;
     portEXIT_CRITICAL(&s_lock);
+
+    music_audio_bind_wake(wake_audio_owner);
 
     if (xTaskCreate(device_control_task, "device_controls",
                     DEVICE_CONTROL_STACK_BYTES, NULL,
@@ -526,6 +572,81 @@ esp_err_t device_control_set_volume(uint8_t percent)
     return request_update(percent, false);
 }
 
+esp_err_t device_control_set_photo_widgets(uint8_t bitcoin, uint8_t clock)
+{
+    if (!photo_widget_valid(bitcoin) || !photo_widget_valid(clock)) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_lock);
+    if (!s_started || !s_status.ready || s_task == NULL) {
+        portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE;
+    }
+    if (s_status.photo_bitcoin_widget != bitcoin || s_status.photo_clock_widget != clock) {
+        s_status.photo_bitcoin_widget = bitcoin;
+        s_status.photo_clock_widget = clock;
+        s_dirty_mask |= DEVICE_CONTROL_WIDGET_MASK;
+        s_status.persistence_pending = true;
+        s_last_change_tick = xTaskGetTickCount();
+    }
+    const TaskHandle_t task = s_task;
+    portEXIT_CRITICAL(&s_lock);
+    xTaskNotifyGive(task);
+    return ESP_OK;
+}
+
+esp_err_t device_control_set_photo_settings(bool enabled, uint8_t idle, uint8_t interval, uint8_t exit_choice)
+{
+    if (idle >= PHOTO_IDLE_CHOICE_COUNT || interval >= PHOTO_INTERVAL_CHOICE_COUNT ||
+        exit_choice >= PHOTO_EXIT_CHOICE_COUNT)
+        return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_lock);
+    if (!s_status.ready) { portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE; }
+    const uint8_t config = enabled ? PHOTO_FRAME_ENABLED : 0U;
+    if (s_status.photo_config != config || s_status.photo_idle_choice != idle ||
+        s_status.photo_interval_choice != interval || s_status.photo_exit_choice != exit_choice) {
+        s_status.photo_config = config;
+        s_status.photo_idle_choice = idle;
+        s_status.photo_interval_choice = interval;
+        s_status.photo_exit_choice = exit_choice;
+        s_dirty_mask |= DEVICE_CONTROL_PHOTO_MASK;
+        s_status.persistence_pending = true;
+        s_last_change_tick = xTaskGetTickCount();
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return ESP_OK;
+}
+
+esp_err_t device_control_set_photo_selection(uint64_t enabled_mask)
+{
+    portENTER_CRITICAL(&s_lock);
+    if (!s_status.ready) { portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE; }
+    if (s_status.photo_enabled_mask != enabled_mask) {
+        s_status.photo_enabled_mask = enabled_mask;
+        s_dirty_mask |= DEVICE_CONTROL_PHOTO_MASK;
+        s_status.persistence_pending = true;
+        s_last_change_tick = xTaskGetTickCount();
+    }
+    portEXIT_CRITICAL(&s_lock);
+    return ESP_OK;
+}
+
+esp_err_t device_control_set_photo_config(uint8_t config)
+{
+    if (!photo_config_valid(config)) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&s_lock);
+    if (!s_started || !s_status.ready || s_task == NULL) {
+        portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE;
+    }
+    if (s_status.photo_config != config) {
+        s_status.photo_config = config;
+        s_dirty_mask |= DEVICE_CONTROL_PHOTO_MASK;
+        s_status.persistence_pending = true;
+        s_last_change_tick = xTaskGetTickCount();
+    }
+    const TaskHandle_t task = s_task;
+    portEXIT_CRITICAL(&s_lock);
+    xTaskNotifyGive(task);
+    return ESP_OK;
+}
+
 esp_err_t device_control_set_night_mode(bool enabled)
 {
     portENTER_CRITICAL(&s_lock);
@@ -545,45 +666,33 @@ esp_err_t device_control_set_night_mode(bool enabled)
     return ESP_OK;
 }
 
-esp_err_t device_control_play_notification_tone(void)
+esp_err_t device_control_play_melody(sound_category_t category,uint8_t variant)
 {
+    if (!sound_choice_valid(category,variant)) return ESP_ERR_INVALID_ARG;
     portENTER_CRITICAL(&s_lock);
-    const TickType_t now = xTaskGetTickCount();
-    const uint8_t effective_volume =
-        s_volume_pending ? s_requested_volume : s_status.volume_percent;
+    const TickType_t now=xTaskGetTickCount();
+    const uint8_t volume=s_volume_pending ? s_requested_volume : s_status.volume_percent;
     if (!s_started || !s_status.ready || !s_status.audio_ready || s_task == NULL ||
-        effective_volume == 0U ||
-        now - s_last_notification_tone_tick <
-            pdMS_TO_TICKS(DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS)) {
-        portEXIT_CRITICAL(&s_lock);
-        return ESP_ERR_INVALID_STATE;
+        (variant != 0U && (volume == 0U || (s_sound_queued[category] &&
+         now-s_sound_ticks[category]<pdMS_TO_TICKS(DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS))))) {
+        portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE;
     }
-    s_notification_tone_pending = true;
-    s_last_notification_tone_tick = now;
-    const TaskHandle_t task = s_task;
+    if (variant == 0U) { s_sound_cancel |= (uint8_t)(1U<<category); s_sound_pending &= (uint8_t)~(1U<<category); }
+    else { s_sound_variants[category]=variant; s_sound_pending |= (uint8_t)(1U<<category); s_sound_ticks[category]=now;s_sound_queued[category]=true; }
+    const TaskHandle_t task=s_task;
     portEXIT_CRITICAL(&s_lock);
-
-    xTaskNotifyGive(task);
-    return ESP_OK;
+    xTaskNotifyGive(task);return ESP_OK;
 }
-
-esp_err_t device_control_play_pomodoro_alarm(void)
+void device_control_stop_sounds(void)
 {
     portENTER_CRITICAL(&s_lock);
-    const uint8_t effective_volume =
-        s_volume_pending ? s_requested_volume : s_status.volume_percent;
-    if (!s_started || !s_status.ready || !s_status.audio_ready ||
-        s_task == NULL || effective_volume == 0U) {
-        portEXIT_CRITICAL(&s_lock);
-        return ESP_ERR_INVALID_STATE;
-    }
-    s_pomodoro_alarm_pending = true;
-    const TaskHandle_t task = s_task;
+    s_sound_cancel=(1U<<SOUND_CATEGORY_COUNT)-1U; s_sound_pending=0U;
+    const TaskHandle_t task=s_task;
     portEXIT_CRITICAL(&s_lock);
-
-    xTaskNotifyGive(task);
-    return ESP_OK;
+    if (task != NULL) xTaskNotifyGive(task);
 }
+esp_err_t device_control_play_notification_tone(void) { return device_control_play_melody(SOUND_NOTIFICATION,1U); }
+esp_err_t device_control_play_pomodoro_alarm(void) { return device_control_play_melody(SOUND_ALARM,1U); }
 
 void device_control_get_status(device_control_status_t *out_status)
 {

@@ -5547,3 +5547,939 @@ inspecionado visualmente após o flash.
   fica abaixo do piso de 80 KiB do plano; não mede o pico TLS. Interação na
   placa, flush com animações, SD concomitante/remoção e soak ainda exigem prova.
   Nenhum gate adicional é encerrado por esta consolidação documental.
+
+### Agenda e preparação Google — 19/10/2026
+
+- Implementação, procedimento OAuth, limites e artefatos em
+  [AGENDA-GOOGLE.md](AGENDA-GOOGLE.md), ADR-094. Base `777abde` com alterações
+  desta entrega no working tree. Build P4 limpo inicial e incrementais finais;
+  app-flash em COM8, somente 3.502.592 B em `0x20000`, hash verificado e boot
+  sanitizado de 100 s concluído. Bin final SHA-256
+  `EDE9FE2E516751EB4748F2400A1695F9D03F3367C9D8ED7AAB5843620AFAA7C8`.
+- P4 revisão v1.3 reconhecida, PSRAM 32 MiB, três FBs/180°/TRIPLE_PARTIAL e
+  SW_AGGR 15.872 B nas duas direções. C6 e eFuses não foram gravados; hash do
+  C6 instalado e inspeção completa de PCB/BOM não foram obtidos nesta entrega.
+- A pilha do app_loop passou de mínimo de 1.572 B para 2.276 B ao retirar seu
+  evento normalizado da pilha e alocá-lo em PSRAM. Não foi ampliada a pilha.
+  Na amostra final de 91 s, heap interno livre 47.839 B, maior bloco 23.552 B,
+  PSRAM livre 15.504.432 B. A margem SRAM/TLS continua aberta e a admissão
+  bloqueia Google. Conta Cloud/consentimento, interação tátil, som de lembrete,
+  persistência física/cortes e sincronização real permanecem pendentes.
+- Testes host passaram: domínio, barramento/fila cheia/ownership, parser,
+  HTTP simulado (conflito, POST perdido, excesso de corpo/chunked, truncamento,
+  timeout e memória), storage de duas gerações/falhas/CRC, vault OAuth e
+  helper PKCE/state, tela LVGL e 100 ciclos sem perda de memória após warm-up.
+  Build e boot não encerram G2/G3/G4/G6 nem qualificam release.
+
+## 20/10/2026 — SRAM e Google Agenda, ADR-095
+
+P4 Waveshare v1.3 (revisão 103), flash/PSRAM 32 MiB, IDF 5.5.4, base
+`777abde7069c91cfb6aeb915891cf00bc249f9df` com working tree modificado.
+Build limpo inicial em `firmware/build/agenda-memory-20261019` e incrementais
+finais; app-flash COM8/460800 em `0x20000`, hash de gravação verificado.
+Sem troca de dependências, partições ou C6; C6 consultado por RPC: 3.0.6,
+hash instalado não obtido. Configuração efetiva mudou apenas BSS externa
+(opção explícita e derivada). XiP, três FBs, RGB565/180°/TRIPLE_PARTIAL mantidos.
+
+ELF final: redução estática interna de 133.696 B e BSS externa de 125.640 B;
+capacidade útil LVGL preservada em 194.596 B. Rede ampliada de 8 para 12 KiB
+após medir somente 112 B livres na primeira leitura. Corpo de escrita Google
+de 1 KiB permanece no workspace interno transitório. Envelope TLS calibrado
+em 48 KiB após medir pico total de 51.956 B, mantendo piso de 80 KiB e bloco
+mínimo de 32 KiB. Testes cobrem fronteiras da admissão sem iniciar HTTP.
+
+Leitura real Google HTTP 200; evento criado pelo responsável na UI foi lido
+de volta após reboot. DELETE do teste retornou HTTP 204. Mínimo interno final
+123.767 B, maior bloco 100.352 B, heap íntegro, rede com 4.216 B livres/12 KiB,
+app_loop com 2.284 B/8 KiB. Ao final: um item, conta vinculada, sync OK e sem
+salvamento pendente. Porta serial liberada; nenhum token/body/ID foi exportado.
+
+P4 bin SHA256 `3648E14AAA4C98E8C3D4EE659D8CEB3E06816CC92F88669F550647F780F00E45`;
+ELF `1C9444876EEE5C822C2B330B14D9958062EA789159EB8AB389EA09828EAC8896`;
+sdkconfig `8CC2CF3B76F9E1B51BF63AD2F40E0BAF8FBB7D62703F638EF95B2BC4675663CA`.
+Manifesto público de 48 fontes e comandos em
+[AGENDA-MEMORY-VALIDATION.md](AGENDA-MEMORY-VALIDATION.md).
+
+Passaram testes host de agenda/codec, barramento, sync/vault/storage simulados,
+100 lifecycles LVGL e alocação/liberação dos buffers transitórios. O teste antigo
+de filesystem cheio falha no caso de snapshot de domínio com assert LittleFS,
+reproduzido também com fonte do HEAD anterior. Não é declarado aprovado, e
+nenhum teste destrutivo de storage ocorreu na placa. Esses resultados não
+fecham gates de render, cadeia TLS futura/carga máxima, cortes, soak ou release.
+
+## 20/10/2026 — feedback de salvamento da Agenda
+
+Corrigido rótulo do editor que mantinha “Salvamento pendente” após storage
+confirmado: agora acompanha pendência, falha/retry e sucesso da projeção.
+Teste LVGL host passou, incluindo erro, retry, ausência de confirmação,
+mensagens de interação e 100 lifecycles. As transições de texto do rótulo foram
+verificadas no host; a captura serial verifica boot/estado, não pixels físicos.
+
+Mesma placa Waveshare P4 v1.3, flash/PSRAM 32 MiB, base `777abde7069c91cfb6aeb915891cf00bc249f9df`
+com alterações no working tree. Build incremental IDF 5.5.4/esp32p4 sobre o
+build limpo da campanha; `app-flash` COM8/460800 em `0x20000`, 3.505.472 B,
+58% da partição livre, hash de gravação verificado. Boot: agenda pronta,
+um item, `pending=0`, conta vinculada e sync OK. Sem troca de configuração,
+partições, dependências ou C6; hash instalado C6 continua não obtido.
+
+P4 bin SHA256 `245F3200E987BA0F86C2139B2184F69E25D077D4E1B5A5942E8C333FFC7FC61E`;
+ELF `27712ABF2B5F2CC77119D0FD83BDCC7D6F0C1C248C64D51339C22CF4AD0E08F9`.
+Logs sanitizados, manifesto e hashes de configuração/partições em
+[AGENDA-MEMORY-VALIDATION.md](AGENDA-MEMORY-VALIDATION.md). O layout de memória
+passou sem crescimento estático. Gates e limitações anteriores permanecem.
+
+A sincronização automática desta imagem retornou HTTP 200/resultado 0;
+C6 reportou 3.0.6, mínimo interno 124.043 B, maior bloco 102.400 B,
+rede com 4.208 B livres e heap íntegro. Nenhum novo evento de teste foi criado.
+
+## 20/10/2026 — revisão visual e fluxo da Agenda, ADR-096
+
+Mesma Waveshare P4 v1.3/revision 103, flash/PSRAM 32 MiB, base `777abde7069c91cfb6aeb915891cf00bc249f9df`
+com working tree modificado. Lista de quatro linhas, filtros e ordenação local,
+seleção explícita e editor contextual no design system existente. Testes LVGL
+host e 100 lifecycles passaram, incluindo identidade após ordenar, rascunho,
+feedback de storage e campo de término acima do teclado. Renders inspecionados
+com dados fictícios; inspeção visual/tátil física não foi substituída por eles.
+
+Build limpo novo em `firmware/build/agenda-ux-20261020`, IDF 5.5.4/esp32p4,
+sem warnings; configuração e tabela de partições idênticas por SHA256.
+Gravado app P4 em COM8/460800, 3.509.408 B em `0x20000`, hash verificado,
+58% da partição livre. Boot: um item, conta vinculada, sem salvamento pendente.
+SRAM estática sem crescimento; BSS externa +48 B. C6 não gravado; hash instalado
+continua não obtido. Nenhum novo evento foi criado para esta validação visual.
+
+Bin SHA256 `B18A3A14E07CD1C96AC0AF3D785273AC4DF8F787CD3A0683D1A622FE4E91EA43`;
+ELF `F3B143A229EF5EE4B74D3DDD1A39A5AA09DC95942EAD8E5E6E8E6F4602CAD00E`.
+Comandos, hashes, renders e limites em
+[AGENDA-UX-VALIDATION.md](AGENDA-UX-VALIDATION.md). Gates físicos permanecem abertos.
+
+Sync automático após esse boot: HTTP 200 em token/Calendar/Tasks, resultado 0,
+C6 3.0.6, mínimo interno 124.163 B, maior bloco 98.304 B, pilha de rede livre
+4.212 B e integridade 1. Comandos de leitura, sem criar outro evento de teste.
+
+## 20/10/2026 — Agenda em tela inteira com modais do sistema
+
+Correção da direção de UX solicitada pelo responsável: informação em toda a
+largura, etiquetas/ícones Evento/Tarefa e formulários no `np_modal` existente.
+Modal lazy, cancelar sem comando, fechar em voo preservando ACK e resultado
+de persistência visível na lista. Host passou CRUD, tipos/filtros, identidade,
+X/cancelar/teclado e 100 lifecycles, incluindo destruição com teclado aberto.
+Lista construída: 28.680 B no host; modal acrescenta 20.304 B no primeiro uso;
+agregado 48.984 B dentro do orçamento explícito de 48 KiB para lista+modal.
+Sem ampliar pool do produto. Renders de fixtures foram inspecionados.
+
+Mesma placa P4 v1.3/revision 103 e flash/PSRAM 32 MiB, base `777abde7069c91cfb6aeb915891cf00bc249f9df`
+com working tree modificado. Build limpo em `firmware/build/agenda-modal-20261020`,
+IDF 5.5.4/esp32p4, sem warnings. Configuração/partições iguais por SHA256.
+Gravados 3.511.168 B em `0x20000` por COM8/460800, hash verificado, 58% livre.
+Boot: um item, conta vinculada e `pending=0`. SRAM estática preservada, BSS
+externa +80 B sobre a revisão inicial de UX. C6 não gravado/hash não obtido.
+
+Bin SHA256 `49474FE7B8D35D933927F0E2606F6F1A82E4B4C7F5683CC6965FCBA8FFBF3E14`;
+ELF `FED4BDEE2A0787AC706E6F52E7814955BB6A0C049001C16A497FEF9B11AE15F1`.
+Comandos, manifesto e limites em [AGENDA-UX-VALIDATION.md](AGENDA-UX-VALIDATION.md).
+Nenhum novo evento foi criado. Inspeção completa de PCB/BOM, interação física,
+tearing e soak não são declarados concluídos por esses renders e pelo boot.
+
+Google automático desta imagem: C6 3.0.6, token/Calendar/Tasks HTTP 200,
+resultado 0, mínimo interno 124.071 B, maior bloco 79.872 B, margem de pilha
+de rede 4.208 B e heap íntegro. Sem criação de outro evento de teste.
+
+## 21/10/2026 — Agenda compacta, autorização contextual e diagnóstico
+
+ADR-097: seis linhas de 56 px e todos os controles no cabeçalho, sem rodapé;
+conectar/sincronizar por ícone, conectar oculto com autorização válida.
+Resultado sanitizado de autorização e booleano transitório no app_loop;
+sem mudança do registro durável. Status Google abre diagnóstico no mesmo
+modal e permite o gesto USB de confirmação do commit, sem relaxar a janela.
+Tarefas têm modal menor, e ações de conflito reutilizam os botões existentes.
+
+Host UI, 100 lifecycles, 12 registros em duas páginas, autorização/avisos,
+rotas de conflito, Google/USB/retorno ao formulário e teclado passaram.
+HTTP/vault/storage simulados, cinco testes do helper e barramento com 8.000
+snapshots também passaram. Construção lista+modal no host: 48.680 B,
+mantendo o teto agregado de 48 KiB e o pool do produto. Renders são fixtures.
+
+Mesma P4 Waveshare v1.3/revision 103, flash/PSRAM 32 MiB, base
+`777abde7069c91cfb6aeb915891cf00bc249f9df` com working tree modificado.
+Build novo iniciado limpo e retomado antes de gravar, IDF 5.5.4/esp32p4,
+sem warnings. Configuração e partições idênticas por SHA256; SRAM estática
+sem crescimento, BSS externa +48 B sobre a versão modal anterior.
+App-flash COM8/460800 gravou 3.512.768 B em `0x20000`, hash verificado,
+58% da partição livre. C6 não gravado, reportou 3.0.6; hash instalado desconhecido.
+
+Boot: um item, conta vinculada e sem pendência. Sync real HTTP 200/resultado 0,
+mínimo interno 124.199 B, maior bloco 102.400 B, rede livre 4.208 B e integridade 1.
+Bin SHA256 `8E30EA9C7360BD07A2624300617609A8B38642A5FB85542EBA24D008D326CFFB`;
+ELF `B273E71D73DC8C39427BA35FFB842CFD449F330950A27FCF500E0AF20A784678`.
+Comandos, configuração, manifesto e limites em
+[AGENDA-UX-VALIDATION.md](AGENDA-UX-VALIDATION.md). Não houve revogação da conta
+nem criação de outro teste no Google. Gates físicos e limite de filesystem
+cheio preexistente permanecem abertos.
+
+## 2026-10-21 — Agenda mensal, 64 itens e migração do registro
+
+Mesma placa Waveshare P4 v1.3/revision 103, flash/PSRAM 32 MiB, base
+`777abde7069c91cfb6aeb915891cf00bc249f9df` com working tree modificado.
+Build novo IDF 5.5.4/esp32p4, configuração e partições conferidas por hash,
+sem warnings; aplicação 3.514.880 B, 58% livres. App-flash COM8/460800 em
+`0x20000`, hash verificado, sem tocar C6, vault ou tabela de partições.
+
+Boot restaurou dois itens; após consulta mensal real, quatro itens e nenhuma
+pendência. Token/Tasks/Calendar HTTP 200, resultado 0. Mínimo interno
+121.127 B, maior bloco 102.400 B, pilha de rede 4.192 B, app_loop 2.280 B,
+integridade 1; estado saudável ainda em 94,3 s. Coleta de 100 s encerrou e
+liberou COM8. C6 reportou 3.0.6, hash instalado desconhecido/não regravado.
+
+Bin SHA256 `6A4A678729C67F0CD98E5882A76008E949355F7646D3EAC0A7955736A0B5DEF4`;
+ELF `3A579B16E801962835945F266457A7967FFB338BBB9310E2CE2E411799D85540`.
+Testes de mês/fuso, paginação/overflow, migração v1→v2, ownership do snapshot
+de flash, UI/100 lifecycles e barramento passaram. Procedimento, hashes e
+limites em [AGENDA-MONTH-VALIDATION.md](AGENDA-MONTH-VALIDATION.md).
+Sem novos testes destrutivos ou fechamento dos gates físicos preexistentes.
+
+## 2026-10-21 — Melodias de notificações, alarmes e inicialização
+
+Mesma Waveshare P4 v1.3/revision 103, flash/PSRAM 32 MiB e base
+`777abde7069c91cfb6aeb915891cf00bc249f9df` com working tree modificado.
+Build novo IDF 5.5.4/esp32p4, sem warnings; app 3.517.680 B, 58% livres.
+Configuração e partições conferidas por hash; app-flash COM8/460800 em
+`0x20000` com hash verificado. C6 não regravado, reportou 3.0.6;
+hash instalado desconhecido. Volume salvo conservado.
+
+Boot de 100 s: codec concluiu startup e notificação, ambos com resultado 0.
+Google real HTTP 200 e sync 0; quatro itens restaurados, sem pendências
+em 93,8 s. Mínimo interno 120.883 B, maior bloco 102.400 B, rede livre
+4.192 B, app_loop 2.280 B, integridade 1 e nenhum fault capturado.
+Porta liberada ao fim. Ainda sem ensaio analógico/audição instrumental.
+
+Bin SHA256 `9CDA778B0F150B872A80EA26349CC9099AB0A50780689E1DD1A108D252DF137A`;
+ELF `7E5FAAAEBD98D48ADF45CAA91C1001EF06A74A542AB4AFFC5839054AE636E056`.
+Síntese, fila/limites/mute, persistência v1/v2, preferências em voo, UI/100
+lifecycles e regressões passaram. Comandos, hashes, renders, prévias e
+limites em [SOUNDS-VALIDATION.md](SOUNDS-VALIDATION.md). Sem fechamento de
+gates de render/flash, recuperação, áudio em gabinete ou soak.
+
+## 2026-10-22 — Quadro de fotos do SD e widgets independentes
+
+Mesma Waveshare P4 v1.3/revision 103, NOR/PSRAM 32 MiB, base
+`777abde7069c91cfb6aeb915891cf00bc249f9df` com working tree modificado.
+Build novo IDF 5.5.4/esp32p4, sem warnings; app 3.531.216 B, 58% livres.
+Configuração e partições conservadas por hash, TRIPLE_PARTIAL/3 FB/RGB565
+e rotação 180°. App-flash COM8/460800 somente em `0x20000`, hash verificado.
+C6 não regravado, reportou 3.0.6; hash instalado desconhecido.
+
+Paisagem NPFP de 1.228.824 B copiada para `np2/photos/photo001.npf` no SD
+FAT32 de 500.137.984 B, SHA256 de origem/destino conferido. Worker publicou
+1.228.800 B de pixels em PSRAM; interno livre 183.583 B e PSRAM livre
+14.079.980 B nesse ponto. Usuário confirmou foto e widgets na prévia e
+retorno pelo toque. Também confirmou a abertura automática; log registrou
+reentrada 60,2 s após a saída anterior, compatível com a opção de 1 minuto.
+O padrão de 5 minutos não foi cronometrado nessa captura. Captura encerrada
+sem marcador de panic/assert/watchdog, com COM8 liberada.
+
+Google real com foto carregada: token/Tasks/Calendar HTTP 200, resultado 0,
+quatro itens, sem pendência. Mínimo interno 120.475 B, maior bloco 90.112 B,
+rede livre 4.204 B, app_loop 2.176 B e integridade 1. Host: validação de
+arquivo/CRC, leases/backpressure, falhas e migração NVS passaram; fixture
+LVGL com 100 ciclos e regressões de Agenda/som/eventos também passaram.
+
+Bin SHA256 `C0799670EA10040F3D94693214CC628B7AE807C4955254787B50155067EC59B1`;
+ELF `51437ED1DA231975B48A677FD22E77B7B2FFE1F5C2600012E206511F6105A9CC`.
+Comandos, demais hashes, limites e resultados em
+[PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md), ADR-100. Sem
+fechamento de qualificação SD concorrente, remoção a quente, render ou soak.
+
+### 2026-10-22 — Bitcoin acompanha o tamanho do relógio
+
+Ajuste visual solicitado: ambos usam a mesma fonte 32/48 px, inclusive
+com preferências antigas divergentes. Teste LVGL de seis dígitos sem quebra,
+64 combinações, modal e 100 ciclos passou. Build em diretório novo
+`photo-btc-20261022`, final sem warnings; 3.531.232 B (+16 B). Configuração,
+partições e memória estática idênticas à rodada anterior. Mesma placa/base
+Git acima; app-flash COM8/460800 somente `0x20000`, hash verificado e reset.
+C6 não gravado, reportou 3.0.6, hash instalado desconhecido.
+
+Foto publicada após boot. Google HTTP 200/resultado 0; mínimo interno
+120.599 B, maior bloco 102.400 B, rede livre 4.200 B, app_loop 2.256 B,
+integridade 1, quatro itens e nenhuma pendência.
+Bin SHA256 `616254251DCFD640AD176442E04F48A3ED3DA32A3A7C52657A404D364488ED62`;
+ELF `F4E307CD1B6E2D35BCC648F70CB9330440DAD51BDAF1D5CF5F4B1EAF38211418`.
+Manifesto, comandos e limites no ajuste de
+[PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md).
+Quadro abriu em 77,4 s da captura; coleta de 105 s sem marcador de fault,
+encerrada com COM8 liberada.
+
+### 2026-10-22 — Remoção do wallpaper de Mercado
+
+A pedido do responsável, fotos restritas ao quadro de inatividade e à
+prévia manual; UI e caminho de wallpaper removidos. Perfis antigos continuam
+legíveis com o bit reservado ignorado. Testes host de serviço/storage e
+fixture LVGL/100 ciclos passaram. Build limpo IDF 5.5.4/esp32p4 em
+`photo-idle-only-20261022`, sem warnings; app 3.530.704 B, 58% livres.
+Configuração/partições iguais por bytes, SRAM estática sem aumento e
+BSS externa -32 B. Mesma base Git e placa prevista das rodadas anteriores.
+
+Bin SHA256 `A20AB13AF4EA4E5899CC150447BC5058E45F641D34DC659F317156A82132E2B0`;
+ELF `00143FFA8FC42FE9BC9AE9577524B1E99E022A42D23B8472B4C4E37F9261E89F`.
+Primeira tentativa de app-flash impedida por COM8 ausente. Após reencaixe
+do cabo confirmado pelo usuário, COM8 reapareceu: retry gravou apenas o app
+em `0x20000`, 3.530.704 B, hash verificado, reset confirmado. Mesma P4
+v1.3/revision 103, NOR/PSRAM 32 MiB; C6 não regravado.
+Detalhes e artefatos em [PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md).
+
+Boot de 105 s: foto publicada, catálogo com nove arquivos; startup e
+notificação concluídos. Google HTTP 200/resultado 0, mínimo interno
+120.555 B, maior bloco 90.112 B, rede livre 4.200 B, app_loop 2.256 B,
+integridade 1. Quatro itens, nenhuma pendência. C6 3.0.6, hash instalado
+desconhecido. Sem marcador de panic/assert/watchdog; COM8 liberada. Layout
+Mercado conferido no fixture; sem novo fechamento de gates físicos.
+
+### 2026-10-22 — Tela própria do quadro, miniaturas e seleção persistente
+
+ADR-101: Preferências → Quadro de fotos, quatro miniaturas/página,
+habilitação individual de 64 IDs, idle 30 s–1 h, troca 10 s–1 h, fonte
+48/64 px. Header/componentes/modal existentes e Mercado sem wallpaper.
+Payload de controles 16 B/registro 40 B, leitura 2/3/4/6 B sem escrita no
+restore. Dois slots de página em PSRAM (até 344.064 B), worker SD existente,
+I/O limitado e leases imutáveis; sem escrita no cartão ou nova task.
+
+Mesma Waveshare P4 v1.3/revision 103, NOR/PSRAM 32 MiB, base
+`777abde7069c91cfb6aeb915891cf00bc249f9df`, working tree modificado.
+Build em diretório novo IDF 5.5.4/esp32p4 e retomada de ajustes locais,
+final sem warnings. App 3.539.072 B, 58% livres. SRAM estática 63.936 B,
+BSS externa 136.328 B; regiões aprovadas no checker. Configuração/partições
+iguais por bytes às anteriores. App-flash COM8/460800 somente `0x20000`,
+hash verificado e reset, inclusive no ajuste final de galeria oculta.
+C6 não regravado, reportou 3.0.6; hash instalado desconhecido.
+
+Host: seleção vazia/bit63/durante leitura, miniaturas/páginas/leases,
+falhas/remoção, migração 2/3/4/6→16 B, NVS/CRC, edição em voo e retry
+passaram. UI: galeria, página final ID64, seletores, modal e 100 ciclos sem
+perda passaram. Regressões Agenda/eventos/notificações/som passaram.
+Usuário confirmou miniaturas, seleção e relógio maior na placa. Primeiro
+log: nove fotos, miniaturas e slideshow de índices 2/3/4, escrita da seleção
+resultado 0. Google HTTP 200/resultado 0, mínimo interno 119.647 B,
+maior bloco 98.304 B, rede livre 4.168 B, app_loop 2.252 B, integridade 1;
+PSRAM em regime 12.630.888 B com os dois buffers e miniaturas.
+
+Boot final restaurou tempos editados (idle 30 min/troca 1 min) e a última
+seleção (63 IDs permitidos). Brilho/volume preservados; foto carregada,
+Google HTTP 200/resultado 0, mínimo interno 120.347 B, maior bloco 79.872 B,
+rede livre 4.228 B e integridade 1. Quatro itens de Agenda, sem pendência.
+
+Bin final SHA256 `BD175E6CFAED4088BF388A42CEBB3DBA8FB6C58715D1C23A4BC6BDD3AD27D13E`;
+ELF `B8232036142973E0650A5AD447ABB57662552F0D631622A8A5DFCC868E110753`.
+Manifesto dos 88 fontes, demais hashes, comandos e logs em
+[PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md). Sem fechamento de
+render/SD concomitante, power cuts ou soak.
+Captura final de 120 s encerrada sem marcador de fault, COM8 liberada.
+
+
+### 2026-10-22 — Timer de retorno do quadro de fotos
+
+ADR-102: Voltar após, opcional (padrão Não sair), 30 s–1 h; duração da
+sessão independente da troca de fotos. Retorna à página anterior e reinicia
+a inatividade. Perfil de controles 24 B/registro 48 B, reservados zero,
+migração 2/3/4/6/16 B sem escrita no restore; seleção e tempos preservados.
+
+Mesma Waveshare P4 v1.3/revision 103, NOR/PSRAM 32 MiB, base Git
+`777abde7069c91cfb6aeb915891cf00bc249f9df`, working tree modificado.
+Build limpo IDF 5.5.4/esp32p4 em `photo-exit-timer-20261022`, sem warnings.
+App 3.540.176 B, 58% livres. SRAM estática 63.952 B (+16), BSS externa
+136.336 B (+8); regiões aprovadas. Configuração/partições idênticas à galeria.
+App-flash COM8/460800 somente aplicação em 0x20000: 18,3 s, hash verificado,
+reset. C6 não regravado; hash instalado desconhecido.
+
+Host: durações/limites/wrap do timer, migração de perfil instalado 16 B,
+CRC/commit falho, edição de timer em voo, LVGL/100 ciclos, eventos,
+notificações e Google/Agenda passaram. Cena LVGL 39.416 B, com modal
+57.176 B (host). Render conferido sem alterar as miniaturas.
+
+Boot: em 3,3 s restaurou idle 30 min, troca 1 min, seleção de 63 IDs e
+retorno desativado (0 ms); brilho 26%/volume 100% preservados. Catálogo com
+nove arquivos, foto publicada em 13,3 s. Usuário confirmou retorno após 30 s na prévia. Log: abertura 136,5 s,
+troca de imagem 142,5 s, timeout/fechamento 166,6 s (30,1 s), sem reabertura
+imediata. Salvamento do timer resultado 0; última escolha do usuário ficou
+idle 1 min/troca 1 min/saída 30 s, seleção preservada. Entrada automática
+com saída e durações longas ainda não exercitadas nesta rodada.
+Google HTTP 200/resultado 0, mínimo interno 120.455 B, maior bloco
+102.400 B, rede livre 4.156 B, app_loop 2.224 B e integridade 1.
+C6 reportou 3.0.6. Resultado e limites em PHOTO-FRAME-VALIDATION.md.
+
+Bin SHA256 `C3575FD8CF4EECD0617AB8C60E8A5351A8D7F25FD0248BECA24A8459B3592B67`;
+ELF `B80B5B77ABB0BC9CF0609102D9EB6D1FA83CFA1BBA566AAAF98D0B7BADF3DF67`.
+Manifesto dos 88 fontes, demais hashes, comandos e logs em
+[PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md). Sem fechamento dos
+gates de render/SD concorrente, power cuts ou soak.
+
+Captura sanitizada de 180 s concluída sem marcador de panic/assert/watchdog;
+COM8 liberada ao fim da coleta.
+
+
+### 2026-10-22 — Ensaio de compilação Spotify nativo, sem bancada
+
+Preferência confirmada: áudio no próprio NovaPanel e conta Premium.
+ADR-103 delimita o ensaio separado em tools/spotify_native_probe. cspot
+99e5c95/Bell 46a4a8f compilaram em diretório limpo para esp32p4 com IDF
+5.5.4: 996 etapas, zero erros e 45 warnings externos registrados. Somente
+bibliotecas; não houve link/execução de player, flash, reset ou acesso à COM.
+Nenhuma nova medição P4/C6. Helper de cliente no PC passou três grupos de
+testes offline de limites, falhas e ausência de segredo na saída.
+
+Persistem gates de HTTPS único, TLS obrigatório, parser/tamanho de resposta,
+decoder, arbitragem do áudio e testes reais. Credenciais locais de app ainda
+são pré-requisito do teste autenticado. O arquivo modelo fica no diretório
+credentials ignorado. Hashes/pins, comandos, limites e fontes externas em
+[SPOTIFY-NATIVE-INVESTIGATION.md](SPOTIFY-NATIVE-INVESTIGATION.md).
+
+
+Não declarar Spotify instalado ou reprodução comprovada por esse ensaio.
+
+
+### 2026-10-22 — Credencial do app Spotify validada no PC
+
+Responsável confirmou preenchimento do arquivo privado local. Helper
+check_spotify_client.py retornou HTTP 200/código 0 no endpoint oficial de
+token; nenhuma credencial/token impresso ou salvo. Arquivo não enviado à
+placa. Sem flash, reset ou nova medição P4/C6. É validação do app por client
+credentials, não de login Connect/reprodução; gates de integração seguem
+abertos em SPOTIFY-NATIVE-INVESTIGATION.md.
+
+### 2026-10-22 — Ponte HTTPS Spotify e regressão do painel
+
+ADR-104: ponte privada de um slot para o executor existente, buffers internos,
+prazos/referências e validação de endpoints/ranges. Parser HTTP limitado a
+8 KiB de cabeçalhos. O produto ainda não vincula as bibliotecas do player,
+não inicia requests Spotify, não anuncia Connect e não contém a credencial
+do app. No ensaio separado, HTTP/TLS e respostas foram adaptados e leituras
+de CDNAudioFile receberam guards. Bibliotecas P4 compilaram; avisos externos
+de decoder continuam abertos. Testes host de política/parser/codec, timeout
+e conclusão tardia, CDN (cifra identidade) e regressões da agenda passaram.
+
+Build limpo P4 IDF 5.5.4/target explícito em spotify-transport-20261022,
+2.207 etapas/zero warnings no produto; incremental final e app-flash na COM8
+a 460800, apenas aplicação 0x20000, hash verificado. Base 777abde com árvore
+local preservada; P4 v1.3/rev103/NOR e PSRAM32MiB, C6 reportado3.0.6 sem
+alteração de imagem (SHA instalado desconhecido). Configuração/partições
+preservadas; três FB/TRIPLE_PARTIAL e auto-suspend desabilitado. Bin3.542.608B,
+SHA `F7772D75BDE5F922E5CCF7EE6CC839B374ECE510979717813236CF7F393694BD`;
+ELF `16DDB986DEE9EADC305EDFF4B3AC81483F6453952F06F0D916684CA99ED07AE7`.
+Dados estáticos internos64.024B/BSS externa136.336B, checker passou.
+
+Boot sanitizado180s sem marcador de panic/assert/watchdog, COM8 liberada.
+Nove fotos SD, foto publicada e melodias resultado0. Open-Meteo/BCB/
+Alternative.me/brapi HTTP200; ciclo BTC sem chamada CoinGecko registrada.
+Google token/Tasks/Calendar200, sync0, mínimo interno120.375B, depois174.615B,
+maior bloco102.400B, rede livre4.152B, app_loop2.224B, integridade1.
+Não é teste físico do transporte Spotify ou decoder; pareamento, música,
+throughput/PCM/arbitragem e gates anteriores permanecem abertos. Pins,
+comandos, hashes, manifesto público e limites detalhados em
+[SPOTIFY-NATIVE-INVESTIGATION.md](SPOTIFY-NATIVE-INVESTIGATION.md).
+
+### 2026-10-22 — Entrada PCM no owner do ES8311, sinal físico aprovado
+
+ADR-105: conversão estéreo44.100Hz para mono22.050Hz com FIR Q15, fila
+PSRAM256KiB limitada/gerações/backpressure e prioridade dos alertas, mantendo
+o dono/pinos/formato do codec. Sem consumidor Spotify ativo. Build limpo
+P4/IDF5.5.4 em music-owner-bench-20261022, 2.210 etapas, sem warnings
+registrados. Imagem de laboratório opt-in gravada em COM8/460800, apenas
+aplicação0x20000, hash verificado. Mesmo P4v1.3/rev103/NOR e PSRAM32MiB,
+base777abde/árvore local preservada; C6reportado3.0.6 sem regravação/SHA
+instalado desconhecido. Baseline/Kconfig/partições preservados.
+
+Probe resultado0, 66.150 amostras, pico50.944 na fila, PSRAM262.148B
+alocada/liberada para buffer262.144B. PSRAM antes/depois14.024.544B, mínimo
+interno observado por amostragem172.879B, stack manutenção3.432B,
+integridade1. Responsável confirmou audição normal. Prova120s sem marcador
+de fault; Google terminou antes do sinal, não houve prova de TLS concorrente.
+
+Recompilada/regravada imagem normal com NP2_MUSIC_AUDIO_BENCH=OFF;
+símbolo de probe ausente do ELF. Captura100s sem fault/autoteste, COM8
+liberada. Bin3.543.760B SHA642C9BF00FEF2C051B0B965A44E88B2774C144F3E6919D507456101A1AFCD35E;
+ELF SHA A2BF5DC548CDDB686193B7D74394A6E82EB97AF83CF05B54DBB2B265DDAE9ADA.
+Interno estático64.032B/BSS externa136.336B, checker passou; Google200/sync0,
+mínimo120.367B, depois174.607B, maior bloco102.400B, rede4.208B,
+app_loop2.228B, integridade1. Ainda não há faixa/decoder/Connect no painel.
+Demais hashes, testes, manifesto e limites em
+[SPOTIFY-AUDIO-PIPELINE.md](SPOTIFY-AUDIO-PIPELINE.md).
+
+### 2026-10-23 — Firmware completo com laboratório Connect de pareamento
+
+ADR-106, base777abde7069c91cfb6aeb915891cf00bc249f9df/árvore local preservada.
+P4v1.3/rev103, NOR32MiB/PSRAM32MiB; IDF5.5.4, BSP3.0.1, LVGL9.5.0,
+adapter0.6.4, três FB/TRIPLE_PARTIAL/180°, auto-suspend/AES hardware OFF.
+C6reportado3.0.6, sem flash; SHA instalado ainda não recapturado. Sem alteração
+de locks/partições/rede Hosted, NVS/eFuses ou preferências do usuário.
+
+Build separado spotify-pairing-20261023, opt-in NP2_SPOTIFY_PAIRING_BENCH=ON,
+probe PCM OFF. Configuração só de laboratório habilita exceções C++ e pool
+emergencial2048B. Primeiro build limpo de2.321 etapas interrompido por dois
+erros de indentação no novo serviço; corrigido e concluído. Nova compilação
+e app-flash após liberar workspace JSON antes da criação do worker. Porta
+COM8 validada USB VID303A/PID1001/MI00/instância9&67A3341&0&0000;460800,
+apenas app0x20000, verificação de hash e reset pelo esptool concluídos.
+
+Comando: tools/run_spotify_pairing_bench.ps1 -Flash -Port COM8.
+Bin3.878.960B, SHA b4dbe0341e65a62c5b6cce31f44d75174d41665a98448b949f328de57dcbdcb1;
+ELF SHA bfe9b9cdec8028550a6d354efc42537b8e20e6a36f5f9209cf08b2fb73022c3f;
+sdkconfig SHA18aeaa063e3d10b15e8ae5c1009aa45c2d4247c2a09f38e3728ef84d2ee232fb;
+partition-table SHA66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23.
+Estáticos internos70.792B/BSS externa136.336B, checker passou. ELF contém
+LoginBlob/APverify, sem TrackPlayer/ov_read/probe sintético. Manifesto público
+sources.sha256 e artifact-hashes.json no diretório ignorado do build.
+
+Captura filtrada após reset USB75s, reset-boot-sanitized.log: ready3,4s,
+SD9fotos, controles brilho71/volume100, idle1800000ms/swap60000ms/exit1800000ms/
+mask63 restaurados. Sem marcador de fault. Clima, BCB, Alternative.me e três
+brapi200; CoinGecko sem HTTP observado no intervalo. Google token/Tasks/
+Calendar200, sync0, mínimo interno111.207B, após165.395B, maior96.256B,
+rede4.148B/app_loop2.232B, integridade1. Estes números são da regressão de
+boot, ainda sem pareamento/criptografia Spotify em execução.
+
+Host: pacotes20mil mutações, formulários/JSON, helper3grupos com descarte de
+entrada privada, HTTP/parser/codec, ponte com busy/backpressure/prazos/refs,
+CDN cifra-identidade, buffers transitórios e UI Sistema normal/laboratório
+(100ciclos) passaram. Bibliotecas externas continuam com warnings conhecidos.
+
+Pareamento requer botão físico Preferências→Sistema→ParearSpotify, app local
+pela USB e seleção do receiver no Spotify do operador. Janela180s, seisPOSTs,
+4KiB, um ensaio/boot, limpeza ao fim; não inicia player/decoder. Fases2–6
+ainda pendentes de interação. Não declarar música reproduzida, fluxo contínuo,
+recuperação/estabilidade ou integração concluída. Procedimento e exclusões em
+[SPOTIFY-PAIRING-VALIDATION.md](SPOTIFY-PAIRING-VALIDATION.md).
+
+Espera inicial do helper USB300s encerrada sem aceite/fase Spotify; apenas
+resumo Google mode10/ESP_OK observado. Sem segredo em saída. COM8 fechada e
+payload PC limpo; aguarda confirmação do toque físico para retomar envio.
+
+Retomada após confirmação do operador: SPOTIFY_PAIR aceito por USB armada.
+Fase1 interno166.467B; app validado0,6s/interno166.135B; AP com assinatura
+verificada1,8s/interno164.195B; anúncio mDNS fase4/interno160.147B. Maior
+bloco96.256B, stack mínima do worker9.244B, integridade1 nas quatro fases.
+Resolve/token pelo executor único, DNS/NTP/HTTPS ESP_OK,543ms/515ms. Não
+mediu mínimo interno durante cada operação, apenas amostras nos checkpoints.
+Aguarda seleção do receiver no celular para blob/conta; sem prova de áudio.
+
+Continuação do mesmo ensaio: operador confirmou receiver visível/selecionado.
+Blob recebido164,8s, interno165.923B; conta autenticada166,0s,
+interno162.907B. Ambas com maior96.256B, worker9.244B, integridade1.
+Fases5–6 passaram na placa. O laboratório encerrou sem iniciar player;
+autenticação não é evidência de música reproduzida.
+
+### 2026-10-23 — Variante opt-in com decoder e saída nativa
+
+Primeira imagem streaming4.101.584B, SHA256
+5e00042f154bd1e2521fb8e8ad36288c5353540020c690c4ba52762199cbccf1;
+ELF9427c0c7a86fa71394b172f134643ac77bd8610b73e8f44ed0472072bd70038d.
+Config18aeaa063e3d10b15e8ae5c1009aa45c2d4247c2a09f38e3728ef84d2ee232fb;
+partições66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23.
+AmbosflagsSpotifyON, semprobePCM; TrackPlayer/ov_read/guard/fixture noELF.
+SRAM70.880B/BSSexterna136.336B; placementpassou. App-flashCOM8 verificado,
+P4rev103/32MiBPSRAM, C6reportou3.0.6 preservado, hashC6não recapturado.
+Boot75s semfault, Google200/token/tasks/calendar, min110.895B/after165.259B,
+maior83.968B, rede4.148B/app2.236B/integridade1; provedores habituais200.
+
+Após botão físico, fixtureVorbis noP4:529.200BPCM/66.150mono, codec31.356B,
+100blocos, stack38.808B, pico611/crossings5987, resultado0/integridade1.
+App/AP validados e anúncioLAN passou. Blobrecebido113,1s, stack38.676B,
+interno165.343B/integridade1. SegundoAPresolve recusado antesTLS por SRAM:
+154.619B disponíveis contra155.648B exigidos, ESP_ERR_NO_MEM. SemPCM/crash.
+Operador observou receiver conectando e depois desaparecendo, coerente com
+encerramento fase8. Respostasresolve/token reduzidas de8para4KiB, sem baixar
+piso80KiB/envelopeTLS64KiB; testes host passaram incluindo limiar151.552B.
+Detalhes e continuação em SPOTIFY-PLAYBACK-VALIDATION.md. Música ainda pendente.
+
+Continuação23/10: resolve/token4KiB permitiram conta/Connect ativos; token
+de mídia continuou recusado antesTLS. Listas URI/context/PCM passaram a
+PSRAM. Bin9528448dbdc7d52db907b59583ba1ae69c28ec35902b8dc5f1584b2cb564e57c
+teve boot50/60s e Google200; receiver selecionado, conta/sessãofases6/9,
+operador viu“tocando” no app, mas PCM0 em120s. Interno151.647–153.999B em
+steady, maior86.016B, worker38.676B/integridade1. Token foi recusado antesTLS,
+sem crash. Não houve confirmação de música audível.
+
+Nova imagem: jobHTTP reserva tamanhos exatos dos argumentos limitados,
+todo o bloco em SRAM interna; GID público de faixa emPSRAM. Piso80KiB e
+envelopeTLS64KiB preservados. Hostponte/prazos/refs, roundtripprotobuf20faixas
+com allocator distinto e CDN passaram. Bin4.106.240B/SHA256
+4b8bcb47648c2a044207eb70840d7a56167b3c58376edf96804f9599a34f5cbf;
+ELFd97ac55e2ddb95c587e797d83fc45c347a7e92a8e18172762b1a4fe09519a75a.
+App-flashCOM8/P4 verificado, semC6/NVS/partições. Config/partições mantêm
+hashes anteriores; placement70.880B/136.336B passou. Ensaio de mídia pendente.
+
+Continuação: conta/Connect e token200 passaram na imagem seguinte. SemPCM.
+Diagnóstico de mídia então confirmou metadata200/1.090B/4arquivos, formatos
+96/160/320Vorbis+AAC24 (máscara263), Load10faixas e falha do AP na chave de
+arquivo96kbps (payload6B), filaFAILED. Semstorage/CDN; operador confirmou
+“tocando” no app, semsom. Nenhuma evidência de áudio real no ES8311.
+Player tinha espera5s incompatível com request20s/backoff30s; alterada para
+60s interrompíveis. Janela semprimeiroPCM do ensaio120→300s.
+
+Teste limitado preparado preferindo160kbps e emitindo só código numérico da
+recusa, sem chave/IDs. Bin4.107.776B/SHA256
+2bc7c40cb52074c403974d9406c56c69c125729311d4dfb84c5052a164d31b4b;
+ELFa55008b98d799b3b498b92fb351494eb9805eabd7a498a1d1563e91ccc69d16c.
+App-flashP4/COM8 verificado. Config/partições/C6/NVS preservados, layout
+70.880B/136.336B passou. Segundo boot55s: IP7,8s, provedores/Google200,
+min116.587B/after170.863B/maior88.064B/rede4.148B/app2.232B/integridade1.
+Capacidade160kbps e liberação da chave ainda não demonstradas. Detalhes e
+fontes primárias dos relatos de compatibilidade em SPOTIFY-PLAYBACK-VALIDATION.md.
+
+Resultado160kbps: conta/Connect130,3s; duas faixas receberam metadata200
+(1.090B e779B), com formatos96/160/320Vorbis+AAC24. Em132,0s e146,3s,
+AP recusou chave com código00 01; filaFAILED. Nenhum requeststorage/CDN
+nem PCM. Token200/199B/541ms, antes153.143B/min127.679B/rede4.148B;
+worker38.676B, maior88.064B, integridade1. Operador confirmou semsom.
+Investigação atual bloqueada nessa resposta do servidor, sem correção
+validada para o candidato. Sem novo pedido de pareamento. Não declarar
+reprodução nativa, integraçãoSpotify ou gatesG3/G6 concluídos.
+
+Ensaio encerrado: helperPC fechado e somenteP4 reiniciado para encerrar
+sessãoRAM. Bootfiltrado55s: associação Wi-Fi recusada inicialmente com
+reasons2/205, recuperação automática comIP23,8s, provedores eGoogle200.
+Googlemin111.015B/after165.331B/maior81.920B/rede4.152B/app2.236B,
+integridade1, semfaultregistrado. SD9fotos/preferências preservadas. Sem
+anúncio/sessãoSpotify iniciado nesse boot; flags seguem só laboratoriais.
+HashC6 instalado não recapturado; semflashC6/NVS/partições. Resultado não
+constitui estabilidade/recuperação genérica. Detalhamento e hashes atuais
+em SPOTIFY-PLAYBACK-VALIDATION.md e manifesto ignorado do build.
+
+
+## 2026-10-24 — Spotify remoto e área de widgets na Home (ADR-109/110)
+
+Responsável encerrou a investigação de reprodução nativa e escolheu controle
+remoto. Em seguida pediu substituir o card de clima por área Clima/Spotify,
+com alternância manual e último widget persistido. A implementação final
+não acrescenta tela Spotify: player no card560×376, saídas/volume/vínculo em
+modal. Backend oficial, PKCE, rotação persistida pelo FlashCoordinator,
+HTTPS no executor global e polling5s somente com widget visível.
+
+Bancada: mesma Waveshare ESP32-P4-WIFI6-Touch-LCD-7B v1.3, silício103,
+32MiB NOR/PSRAM, porta COM8 USB VID303A/PID1001, serial terminado8F42.
+HEAD777abde7069c91cfb6aeb915891cf00bc249f9df com trabalho local não commitado.
+IDF5.5.4, P4 explícito, Hosted/C6 3.0.6/RPCv2/SW_AGGR conservados. C6 não
+foi regravado e seu hash instalado não foi recapturado. Sem mudança de
+partições, NVS anterior, eFuses, display180°/RGB565/trêsFB/TRIPLE_PARTIAL.
+
+Comandos: `tools/run_spotify_remote.ps1 -Flash -Port COM8` e captura via
+`tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds50`.
+Build inicialmente limpo em `firmware/build/spotify-remote-20261024`, seguido
+de incrementos da integração do card e do limite HTTP. Flags
+NP2_SPOTIFY_PAIRING_BENCH, NP2_SPOTIFY_PLAYBACK_BENCH, NP2_MUSIC_AUDIO_BENCH
+OFF. ELF sem TrackPlayer/runtime nativo; access/vault internos e projeções,
+slots/decoder visual em PSRAM. Estáticos internos67.048B, BSS externa169.264B.
+A primeira captura65s restaurou9fotos/4itens da agenda, preferências e Wi-Fi;
+Google token/tasks/calendar200, mínimo interno117.363B, stackworker4.136B,
+integridade1; appmínimo2.208B. Uma admissão de Spotify com corpo16KiB ficaria
+apertada após a agenda, então o corpo final foi limitado a8KiB, conservando
+piso80KiB e envelopeTLS64KiB. Hashes abaixo identificam essa imagem final.
+
+- np2_p4.bin: `6a32c10f6cd0a9600b320c1f86a058d718570c624ee950cb19a7b7c4bbc097cf`.
+- np2_p4.elf: `00bd16bebdcbe6cc630689b56c22701e7e7beaac6b95031ca94d508c2720634e`.
+- sdkconfig: `8cc2cf3b76f9e1b51bf63ad2f40e0baf8fbb7d62703f638ef95b2bc4675663ca`.
+- partition_table/partition-table.bin: `66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+Imagem P4 final3.569.168B,58% livre no slot8MiB. Artefatos, build/flash logs,
+boot-sanitized.log e final-boot-sanitized.log são locais/ignorados. Manifesto
+artifact-hashes.json e sources.sha256 permitem identificar o trabalho dirty.
+Warnings externos de componentes e PkgConfig ausente foram preservados nos
+logs; build terminou, sem warning novo do código remoto identificado.
+
+Host: serviço HTTP/token/parser/204/401/429/backoff/admissão; vault com
+rotação/retry/commit/CRC; preferência Home com restauro/commit falho/CRC;
+TJpgDec limitado8KiB,64px, leases, RGB565 e10mil entradas inválidas; LVGL real
+com100ciclos/ações/modal/estados; EventBus com8mil snapshots concorrentes.
+O teste OAuth local verificou PKCE/state, callback400/200, scopes e ausência
+de segredo na saída; não acessou Spotify. A cópia TJpgDec do LVGL emiteBGR888,
+convertido explicitamente paraRGB565, confirmado pela fixture de cor.
+
+Pendente neste ponto: autorização real do controle remoto, comandos físicos,
+leitura de capa Spotify e reboot com refresh token rotacionado. Testes host
+e boot não fecham esses aceites, nem G5/G6/G7, estabilidade gráfica, falhas
+de rede/energia ou segurança em produção. Procedimento: SPOTIFY-REMOTE.md.
+
+Captura final50s após a última gravação: P4rev103/PSRAM33.554.432B,
+9fotos,4itens agenda sem pendências, brilho71/volume100 restaurados, IP7,7s.
+Google token/tasks/calendar200; mínimo interno122.815B, após177.107B,
+maiorbloco98.304B, stackworker4.132B, integridade1. Appmínimo2.220B.
+Sem marcador de panic/WDT/stackfault na whitelist dessa janela.
+A autorização OAuth real foi então aberta pelo helper local; o procedimento
+aguarda consentimento e toque físico, sem registrar tokens/URLs de callback.
+
+
+Vinculação real concluída: helper validou consentimento/scopes e teste GET
+no PC; após toque físico, recebeu ACK e confirmação de commit do vault.
+Em `remote-linked-sanitized.log`, painel executou leitura204/200, transferência
+(action8)204 e reproduzir(action1)200; metadados3.057B e capaJPEG3.147B200.
+Operador confirmou que capa e controles de reproduzir/pausar/próxima
+funcionaram com som no dispositivo externo. Consultas de leitura ocorreram
+aproximadamente a cada6s, sem recarregar a capa a cada poll. Menor interno
+observado123.743B, maiorbloco77.824B, stackworker4.132B, integridade1;
+retorno de heap aproximadamente170.099B em estados equivalentes observados.
+Esse intervalo65s não caracteriza soak nem prova ausência geral de vazamento.
+
+Após esse aceite foi acrescentado guard de transferência: ao aceitar a troca,
+invalidar o alvo antigo até a leitura subsequente, impedindo enviar o próximo
+toque ao aparelho anterior. Teste host cobre essa transição. Nova gravação
+P4 com app-flash foi solicitada para validar também restauro sem pareamento.
+
+
+Imagem final com guard de transferência: P43569296B;
+SHA256 `132c4a0f16f9f7782d48fa591d2a28a7952d3498aad9e0066a220fde2dd6fccc`.
+ELF `ae45be948007770adef9e60bccefd9edaa02c5d4f5ab4ae0be73f940212ecd7f`.
+Configuração e partições conservaram os hashes acima. Build/app-flash
+concluídos; captura `reboot-linked-sanitized.log` iniciou com reset explícito,
+sem helper de autorização ativo. Após IP7,7s, o painel renovou access token
+no próprio worker (token200/360B), consultou faixa200/3.058B e capa200/3.147B
+em18,8–20,3s, sem nova autorização USB/browser. A preferência Spotify já
+persistida foi projetada na Home. Google token/tasks/calendar200, mínimo
+interno122.467B/worker4.196B/integridade1. Spotify teve mínimo125.127B até a
+amostra36,3s e integridade1. Os polls posteriores reutilizam o access token
+e a capa corrente; agenda e Spotify não criam conexões HTTPS simultâneas.
+
+Este ensaio comprova vínculo utilizável após reboot e renovação de access
+por refresh token persistido. Não afirmar que o servidor retornou um novo
+refresh token nessa resposta: esse campo é opcional e não foi exportado.
+A substituição/persistência quando ele vier foi exercitada com fixture host.
+Ainda faltam expiração real após1h, revogação, soak, cortes no commit de uma
+rotação real e campanha física de falhas/latência/render. Nenhum gate global
+foi encerrado por esta entrega. O receiver nativo permanece fora da imagem.
+
+
+### 2026-10-24 — Home proposta 1 e widgets por deslize (ADR-111)
+
+Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, P4rev103, flash/PSRAM32MiB,
+C6 ESP-Hosted3.0.6 sem alteração; hash da imagem instalada C6 não recapturado.
+HEAD777abde7069c91cfb6aeb915891cf00bc249f9df, árvore suja preservada.
+Build limpo em `firmware/build/spotify-widget-20261024` com IDF5.5.4 target
+esp32p4, cópia da configuração já qualificada, BSP3.0.1/LVGL9.5/adapter0.6.4,
+TRIPLE_PARTIAL e três framebuffers. Ensaios nativos Spotify/música OFF.
+
+Comandos: `tools/run_spotify_remote_ui_host_test.ps1`,
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/spotify-widget-20261024 -Flash -Port COM8`,
+`python tools/check_agenda_memory_layout.py firmware/build/spotify-widget-20261024/np2_p4.elf`,
+`python tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds 70 --output firmware/build/spotify-widget-20261024/boot-widget-sanitized.log`.
+App-flash somente P4/offset0x20000; NVS, tabela e C6 preservados.
+Build sem warning de compilador encontrado. P4bin3569904B, SHA256
+`37496be9f8a0bbabf92d1c23bf1c3f05b5a0c9e3b9498315b52871feb38cb1e0`;
+ELF `c3c7dcb86f7658ed9b2b8984425c84451880be9dc43f4bde5b095936a30ff6ee`.
+Config SHA256 `8cc2cf3b76f9e1b51bf63ad2f40e0baf8fbb7d62703f638ef95b2bc4675663ca`;
+tabela `66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+Host LVGL:100 ciclos de criação/destruição, glyphs Material de transporte,
+longos títulos/artistas com limites, controles e modal, estados offline/sem
+vínculo e aviso USB visível na modal. Política compartilhada de gestos testada:
+72px, predominância2:1, slider/transporte/modal protegidos, superfícies Clima/
+Spotify elegíveis, toque fora do card livre para navegação. Render RGB565
+1024×600 inspecionado. Testes host não substituem gesto na placa: confirmação
+visual/tátil recebida do operador: “Layout e deslize funcionaram”.
+
+Static interno67048B, BSSexterno169272B; s_ui16672B (+8B PSRAM),
+sem aumento de estático interno. Vault em SRAM, pool LVGL/estado em PSRAM.
+Boot:IP7,8s, refresh do token200 aos19,4s, faixa200/3936B e capa200/3385B
+até20,3s. Sem nova vinculação. Agenda token/tasks/calendar e commit result0;
+mínimo interno122411B, worker4140B livres, integridade1. Polls Spotify
+continuaram com200 e reaproveitaram capa. Isso confirma boot e consulta,
+sem declarar soak, qualificação gráfica ou todos os gates encerrados.
+
+Na janela de70s, mínimo Spotify127735B/integridade1, sem marcador de
+panic/WDT/stackfault na whitelist. Captura encerrada e COM8 liberada.
+
+
+### 2026-10-24 — Corrigir alinhamento da capa Spotify carregada
+
+Relato físico: placeholder correto, capa deslocada após download. Causa:
+`lv_image_set_scale` ampliava a fonte64px em torno do pivot central padrão.
+Fix local em `np_spotify.c`: pivot (0,0) antes do carregamento, conservando
+TOP_LEFT, escala160px, cache/leases e orçamento de memória. Sem alterar
+arquitetura, superfície ou gesto do ADR-111.
+
+Regressão usa JPEG sintético vermelho64×64 (694B, gerado pelo fixture
+`tools/spotify_cover_fixtures.py`, versionado em `tools/data/spotify-cover-red64.jpg`),
+decoder real, publicação/acquire e render LVGL RGB5651024×600. Antes do fix,
+limites desenhados24,92..159,251: teste falhou. Depois:48,140..207,299,
+exatamente160×160 e mesma posição do placeholder. Teste passou em100 ciclos
+incluindo capa carregada, modal, estados e descarte; render inspecionado.
+
+Build limpo/app-flash P4 em `firmware/build/spotify-cover-alignment-20261024`,
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/spotify-cover-alignment-20261024 -Flash -Port COM8`.
+Mesma placa P4rev103/32MiB NOR/32MiB PSRAM, IDF5.5.4 esp32p4,
+BSP3.0.1/LVGL9.5/adapter0.6.4, três framebuffers/TRIPLE_PARTIAL, Hosted3.0.6
+inalterado no C6 (hash instalado não recapturado). HEAD777abde7069c91cfb6aeb915891cf00bc249f9df,
+árvore suja preservada. Config/partições iguais à entrada anterior; ensaios
+nativos OFF, NVS/C6/tabela preservados, sem warnings de compilador encontrados.
+P4bin3569904B SHA256 `64e8dc7709cb736a3bcd9b3c11bba6f0afe4e9d4371d49a624a31c01c9e1468f`;
+ELF `63d6807c311fae03e9a69f6b2cb2f343d95c01dfff5a6f23d565e6e766fa2efb`.
+
+`check_agenda_memory_layout.py` PASS: interno67048B/external169272B,
+sem crescimento. Captura45s COM8/reset em `boot-cover-sanitized.log`:
+IP9,4s; token20023,4s; consultas Spotify204 (nenhuma reprodução ativa),
+result0/integridade1, mínimo128415B/stack4132B. Nesta janela não houve capa
+real nova: geometria da capa foi validada com fixture e confirmação física
+após fix ainda pendente. Agenda pronta pending0/sync_result0.
+Whitelist registrou um `failed: ESP_ERR_TIMEOUT` aos3,3s sem atribuição;
+bring-up prosseguiu, SD/fotos/preferências/rede operantes. Sem marcador de
+panic/WDT/stackfault na janela; não caracteriza qualificação ou soak.
+
+
+### 2026-10-24 — Capa como fundo do card Spotify (ADR-112)
+
+COVER centralizado560×376, clipping dos cantos do card, preto190/255 por cima,
+labels/controles no primeiro plano. Removida miniatura; superfície de fallback
+sem capa. Mesmo source até64px/8KiB, descriptor/lease e executor; nenhum
+bitmap ampliado permanente, novo request ou blur. Labels de tempo text_2.
+
+Host `tools/run_spotify_remote_ui_host_test.ps1`: pool reduzido de2MiB para
+194592B (4B abaixo dos194596B medidos na placa), 100 ciclos com JPEG carregado,
+shade, cantos/limite do card, modal/gestos e clear/fallback/descarte PASS.
+Render RGB5651024×600 inspecionado; fixture vermelho garante que a imagem
+preenche o card e é atenuada, sem pintar fora ou nos cantos. Sem promessa de
+mesma qualidade da capa do mock: o source continua até64px.
+
+Build limpo/app-flash P4: `tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/spotify-background-20261024 -Flash -Port COM8`.
+Mesma placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B/P4rev103, flash/PSRAM32MiB,
+IDF5.5.4 targetesp32p4, BSP3.0.1/LVGL9.5/adapter0.6.4, RGB565180°/três
+framebuffers/TRIPLE_PARTIAL. Hosted3.0.6 C6 inalterado, hash instalado não
+recapturado. HEAD777abde7069c91cfb6aeb915891cf00bc249f9df, árvore suja preservada.
+Config/partições iguais às entradas anteriores; ensaios nativos OFF, app-flash
+somente0x20000, NVS/C6/tabela preservados. Sem warning de compilador encontrado.
+P4bin3569776B SHA256 `7ce06c295bb981a62888a03ee98ac31ab3448f22207a707df2cf5fcf45ec5095`;
+ELF `ba7469d84230e5fa5b10124615b528bd01f6e2184328ff2c08a8097ea1b0ad9d`.
+
+`check_agenda_memory_layout.py` PASS: interno67048B, externo169272B,
+s_ui16672B, vault em SRAM/pools/estado PSRAM. Sem crescimento de estático.
+Captura `capture_agenda_diagnostics.py --port COM8 --reset --seconds 65 --output firmware/build/spotify-background-20261024/boot-background-sanitized.log`:
+IP7,7s, token20016,8s, faixa200/3002B e capa200/4374B até17,9s.
+Polls posteriores200 sem repetir download. Spotify mínimo124795B,
+stack4132B/integridade1; Google result0/mínimo121975B/integridade1.
+CPU2% em31s/61s (cores3/0), PSRAMlivre13965568B, interno170159B/maior94208B
+em61s. Agenda pending0/sync_result0; fotos/preferências restauradas.
+Sem marcador de panic/WDT/stackfault na janela. Captura encerrada/COM8 livre.
+Operador confirmou na tela física: “Fundo e controles ficaram bons”, após
+pergunta sobre legibilidade e ausência de lentidão. Medição curta não qualifica
+soak, todos os tipos de capa ou estabilidade gráfica global.
+
+
+### 2026-10-24 — Mock4: meia capa, degradê e resolução300px (ADR-113)
+
+Implementado após aprovação do mock4 e pedido explícito de maior qualidade.
+Viewport360×376 emx200, fade horizontal para a área sólida de texto à esquerda,
+fade vertical para controles, título224px/duas linhas, artista240px. Viewport
+corrige vazamento de8px observado no render de fonte64px com COVER; regressão
+varre a faixa de texto para impedir pixels de arte fora do recorte. Descriptors
+de gradiente vivem na view final. Mesmo fluxo de modal, gestos e persistência.
+
+Capa preferida até300×300/32KiB JPEG, fallback64px, slots360016B em PSRAM,
+pool TJpgDec8KiB. Extensão JPEG em SRAM somente após headers/TLS e reserva80KiB;
+liberada ao terminar/falhar/trocar. JSON8KiB/512tokens e executor único mantidos.
+Cache de identidade preferida evita retentar a grande a cada poll após fallback.
+
+Testes: `run_spotify_remote_host_test.ps1` (seleção300px fora de ordem,
+allowlist/noBearer, fallback64 real/cache, corpo10000B fragmentado, tamanho
+>32KiB recusado, header sem tamanho, reserva80KiB e balanço de alocações, além
+de vault/controle existentes); `run_spotify_cover_host_test.ps1 -FixturePython
+C:/Users/Tauser/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe`
+(300px aceito,301px/progressive/truncated recusados, leases e10000 malformados);
+`run_spotify_remote_ui_host_test.ps1` (pool194592B,100 ciclos, recorte/fades,
+texto/cantos, clear/fallback, modal/gesto/descarte), todos PASS. Render RGB565
+inspecionado antes da gravação.
+
+Build limpo + app-flash somente P4 em
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/spotify-gradient-hq-20261024 -Flash -Port COM8`.
+Placa Waveshare ESP32-P4-WIFI6-Touch-LCD-7B/P4rev103, NOR/PSRAM32MiB,
+IDF5.5.4 targetesp32p4, BSP3.0.1/LVGL9.5/adapter0.6.4, RGB565180°,
+três framebuffers/TRIPLE_PARTIAL, Hosted3.0.6 C6 inalterado (hash instalado não
+recapturado). HEAD777abde7069c91cfb6aeb915891cf00bc249f9df, árvore suja preservada.
+Sem warnings de compilador encontrados; config/partições com os hashes das
+entradas anteriores. Nativos Spotify/música OFF, NVS/C6/tabela preservados.
+P4bin3571376B SHA256 `c87826ddf60fff8d2bce4a2202046f799232a4f15905afb7d0e5ff7daebdbd1c`;
+ELF `5e334861f6611683459777aa547a0a8158fb3f30a3a3036c412a41994d54d31a`.
+Memory placement PASS: interno67048B (inalterado), externo512992B (+343720B),
+s_ui16776B (+104B), slots maiores respondem por343616B. Sem mover corpo HTTP,
+JSON ou TLS para PSRAM.
+
+Primeira captura80s `boot-gradient-hq-sanitized.log`: boot com aviso genérico
+`failed: ESP_ERR_TIMEOUT` aos3,4s, bring-up prosseguiu; capa64×64/3147B,
+fallback1. Causa específica do fallback não ficou registrada nessa whitelist.
+Operador interagiu com modal/transferência; API/controle concluíram result0.
+CPU43% no intervalo de carga/interação e8% em63s; sem marcador de falha fatal.
+
+Nova captura65s com reset em `retry-gradient-hq-sanitized.log`, sem reautorizar:
+Wi-Fi teve desconexões reason2/205 e recuperou IP23,4s. Token20035,4s,
+metadata200/3027B36,0s e imagem200/32425B36,5s. Diagnóstico numérico confirma
+**width300 height300 fallback0**, decode/publicação36,6s. Menor interno92635B
+na carga, acima81920B; worker4136B/integridade1. Leituras posteriores200,
+sem redownload da capa; Google result0/mínimo116767B/stack4136B/integridade1.
+CPU47% durante inicialização/rede, depois3% (cores6/0) em61s com imagem carregada;
+PSRAMlivre13621212B, interno170535B/maior88064B. Agenda pending0/sync_result0,
+fotos/preferências restauradas. Sem marcador de panic/WDT/stackfault nas duas
+janelas; não equivale a soak ou estabilidade gráfica global. COM8 liberada.
+Aceite visual de nitidez/degradê solicitado ao operador, pendente.
+
+
+### 2026-10-24 — Voltar à capa integral e corrigir exibição300px (ADR-114/115)
+
+O responsável rejeitou o resultado com degradê/relatou imagem ausente e pediu
+retornar à imagem anterior, melhorando apenas a qualidade. Restaurado COVER
+560×376 com preto190/255 e texto512px, sem gradientes/viewport lateral;
+mantidos JPEG300px/32KiB, reserva80KiB e antialias. Fallback64 pode tentar
+melhorar no máximo uma vez por minuto, sem apagar a imagem atual. Testes
+cobrem falha de melhoria mantendo geração/lease, upgrade64→300, cache posterior
+e retomada após204; Retry-After429 sobrevive a204 e continua respeitado.
+
+Build limpo inicial em `firmware/build/spotify-full-hq-20261024` via
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/spotify-full-hq-20261024 -Flash -Port COM8`,
+seguido de recompilações e app-flash das correções reproduzidas abaixo.
+A imagem preliminar conseguiu baixar300×300/32425B, mas o operador informou
+que não desenhou. Registro de95s `boot-full-hq-sanitized.log` também mostrou
+204 após capa carregada e retomada200 aguardando até81s: guard de tentativa
+antiga podia bloquear a foto quase60s após retomar. Corrigido/resetado em204,
+com exceção explícita de429. `resume-fixed-sanitized.log` registrou decode300
+sem fallback e mínimo102995B, mas isso isoladamente não validava o desenho.
+
+Causa da ausência de imagem reproduzida: firmware usa stride/alinhamento64,
+e o teste host antigo usava o padrão. Sem padding,300px gerava stride600B;
+LVGL tentava copiar para stride640B (192000B), acima do maior bloco do pool
+LVGL da placa. Ajustar o host para LV_DRAW_BUF_STRIDE_ALIGN=64 e
+LV_DRAW_BUF_ALIGN=64, pool194592B, reproduziu:64px passava,300px falhava nos
+pixels visíveis (`alignment-before-fix.log`). Esse foi um limite real do
+teste anterior, não falha de download.
+
+Fix: pixels e slots alinhados64B, stride preenchido desde TJpgDec, descriptor
+usa stride/tamanho reais;300px usa640B/linha. Dois slots192064B em PSRAM,
+total384128B. Padding zerado. Assert de compilação garante offset/tamanho;
+ELF confirmou endereço de s_slots múltiplo64 e tamanho384128B em PSRAM.
+Render final testa64 e300px (100 ciclos cada), verifica pixels/recorte/antialias
+mais abertura do decoder com ponteiro idêntico ao source: zero cópia/repack.
+Decoder valida gradiente300px nos cantos/linhas finais, limites/progressive/
+truncamento e10000 malformados. Remote/vault/qualidade/backoff também PASS.
+Comandos host: `run_spotify_remote_ui_host_test.ps1`,
+`run_spotify_cover_host_test.ps1 -FixturePython C:/Users/Tauser/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe`,
+`run_spotify_remote_host_test.ps1`. Sem mudar Kconfig/alinhamento global.
+
+Imagem final P4bin3570992B SHA256
+`19cc26b07f3c6dbabbe29a1dc9b3b0b4f5a64a134fb7846b64ca9914d212d4fa`;
+ELF `7ccd94d4ef8a1be96cbbaaf9bf7331900bd63ef8fb89ae06ad33ae356acb0658`.
+Mesma Waveshare ESP32-P4-WIFI6-Touch-LCD-7B/P4rev103, NOR/PSRAM32MiB,
+IDF5.5.4/esp32p4, BSP3.0.1/LVGL9.5/adapter0.6.4, RGB565180°,
+três framebuffers/TRIPLE_PARTIAL, Hosted3.0.6 C6 inalterado (hash instalado
+não recapturado). HEAD777abde7069c91cfb6aeb915891cf00bc249f9df, árvore suja
+preservada. Config/partições iguais às entradas anteriores, nativos OFF,
+app-flash somente0x20000; NVS/C6/tabela preservados. Sem warnings encontrados.
+Memory placement PASS: interno67056B, externo537024B; s_ui16672B. Em relação
+à versão sem padding, mais24136B de BSSexterno (24112B nos slots, resto
+alinhamento), nenhum aumento do pool LVGL. HTTP/JSON/TLS continuam em SRAM.
+
+Captura final65s com reset `aligned-cover-sanitized.log`: Wi-Fi recuperou
+reason2/205 e IP23,7s; metadata204 enquanto não havia reprodução ativa.
+Google result0/mínimo116863B/stack4132B/integridade1; fotos/preferências/agenda
+restauradas, pending0/sync_result0. Acompanhamento sem reset80s em
+`aligned-live-sanitized.log` registrou metadata200 após iniciar música,
+mínimo124363B nas amostras Spotify/stack4132B/integridade1. CPU7%,5%,13%
+respectivamente em122s/152s/182s, com interação do operador. Sem marcador de
+panic/WDT/stackfault nas janelas; não caracteriza soak/qualificação global.
+Capturas encerradas e COM8 liberada.
+
+**Aceite físico recebido após a correção de alinhamento:** “Apareceu e ficou
+mais nítida”, em resposta à pergunta sobre a capa no fundo inteiro. A validação
+visual final confirma imagem desenhada, não apenas recebida/decodificada.

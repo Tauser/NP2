@@ -393,6 +393,33 @@ cortes em cada estado e nenhum caminho por USB/UART para gravar C6.
 
 ## Checkpoints obrigatórios
 
+Incremento de produto em 22/10/2026: quadro de fotos do SD, widgets
+independentes de Bitcoin/data/hora. O wallpaper de Mercado foi removido
+depois, no mesmo dia, por preferência explícita do responsável.
+Build e app-flash concluídos; prévia, retorno por toque e abertura automática
+confirmados pelo usuário. Testes host de buffers/arquivos/NVS e UI passaram. Evidências e
+limites em [PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md), ADR-100.
+Não fecha qualificação SD concorrente, remoção a quente, render ou soak.
+
+Evolução de 22/10/2026: tela própria Preferências → Quadro de fotos,
+miniaturas paginadas/seleção de 64 IDs, tempos ampliados e fonte 48/64 px.
+Migração do perfil de controles para 16 B, sem escrita no restore; ADR-101.
+Usuário confirmou galeria, seleção e relógio na placa. Evidência detalhada
+em [PHOTO-FRAME-VALIDATION.md](PHOTO-FRAME-VALIDATION.md).
+
+Incremento de produto em 19/10/2026: agenda local com eventos/tarefas e
+lembretes integrada ao centro de notificações, mais caminho Google Calendar /
+Tasks de capacidade limitada. Procedimento OAuth, limites e evidências em
+[AGENDA-GOOGLE.md](AGENDA-GOOGLE.md), ADR-094. Em 20/10, a conta já vinculada
+foi restaurada após reboot e a leitura Google passou na placa: HTTP 200.
+Evento criado na UI foi confirmado no Google após reboot; sua exclusão
+explícita retornou HTTP 204. Heap íntegro e mínimo interno de 123.767 B;
+pilha de rede corrigida para 12 KiB, com 4.216 B livres. ADR-095 e
+[AGENDA-MEMORY-VALIDATION.md](AGENDA-MEMORY-VALIDATION.md) registram a
+realocação BSS e os limites. Matriz completa de interação/alarme, carga máxima
+e soak seguem em validação; o teste host antigo de filesystem cheio tem falha
+reproduzida também no baseline. Não constitui fechamento de G2/G3/G4/G6.
+
 1. **Antes de iniciar uma fase:** confirmar dependências, configuração efetiva,
    dono de cada recurso e critério mensurável de saída.
 2. **Antes de trocar configuração ou dependência:** registrar ADR, motivo,

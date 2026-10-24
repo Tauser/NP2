@@ -28,7 +28,7 @@ output = repo / "firmware/main/ui/fonts/ui_font_np_material_system_24.c"
 # storage, memory (CPU), sd_card, memory_alt (RAM), power_settings_new.
 subprocess.run([
     "node", str(converter), "--bpp", "4", "--size", "24", "--no-compress",
-    "--font", str(static_path), "--range", "0xe1db,0xe322,0xe623,0xf7a3,0xf8c7",
+    "--font", str(static_path), "--range", "0xe044,0xe045,0xe1db,0xe322,0xe623,0xf7a3,0xf8c7",
     "--format", "lvgl", "--output", str(output),
     "--lv-font-name", "ui_font_np_material_system_24", "--lv-include", "lvgl.h",
 ], check=True)

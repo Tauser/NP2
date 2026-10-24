@@ -1,8 +1,9 @@
-param([string]$OutputDirectory = (Join-Path $env:TEMP 'np2-cache-full-probe-test'))
+param([string]$OutputDirectory = (Join-Path $env:TEMP 'np2-cache-full-probe-test'), [string]$SourcePath)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$source = Get-Content -Raw (Join-Path $repo 'firmware/main/flash_coordinator.c')
+if (-not $SourcePath) { $SourcePath = Join-Path $repo 'firmware/main/flash_coordinator.c' }
+$source = Get-Content -Raw -LiteralPath $SourcePath
 function SourceRange([string]$Start, [string]$End) {
     $first = $source.IndexOf($Start, [StringComparison]::Ordinal)
     $last = $source.IndexOf($End, $first + $Start.Length, [StringComparison]::Ordinal)
@@ -12,6 +13,13 @@ function SourceRange([string]$Start, [string]$End) {
 # Compile the actual production routines against the pinned LittleFS core.
 # Only ESP-IDF status/clock and POSIX-to-LittleFS adapters are replaced.
 $parts = @(
+    $(
+        $publicHeader = Get-Content -Raw (Join-Path $repo 'firmware/main/flash_coordinator.h')
+        $first = $publicHeader.IndexOf('#define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES')
+        $last = $publicHeader.IndexOf('} onboarding_profile_t;', $first) + '} onboarding_profile_t;'.Length
+        if ($first -lt 0 -or $last -le $first) { throw 'Flash public definitions missing' }
+        $publicHeader.Substring($first, $last - $first)
+    ),
     (SourceRange '#define FLASH_COORDINATOR_QUEUE_LENGTH' 'typedef struct {'),
     (SourceRange 'static bool make_full_probe_proposal_path' 'static esp_err_t read_selected_offline_data'),
     (SourceRange 'static esp_err_t write_all' 'static esp_err_t select_latest_cache'),

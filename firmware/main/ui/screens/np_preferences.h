@@ -3,7 +3,7 @@
 
 #include "np_components.h"
 
-#define NP_PREFERENCES_ITEM_COUNT 5U
+#define NP_PREFERENCES_ITEM_COUNT 6U
 
 typedef struct {
     lv_obj_t *root;

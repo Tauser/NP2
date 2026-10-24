@@ -1,6 +1,7 @@
 /* Shared construction; product_ui owns callbacks and services. */
 #pragma once
 #include "np_components.h"
+#include "np_modal.h"
 typedef struct {
     lv_obj_t *brightness_slider;
     lv_obj_t *brightness_value;

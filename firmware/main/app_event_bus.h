@@ -7,6 +7,8 @@
 #include "offline_data_model.h"
 #include "user_profile.h"
 #include "pomodoro_service.h"
+#include "agenda_service.h"
+#include "spotify_remote.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +27,10 @@ typedef enum {
     APP_EVENT_SONOFF_SWITCH_REQUEST,
     APP_EVENT_NOTIFICATION_MARK_READ,
     APP_EVENT_NOTIFICATION_MARK_ALL_READ,
+    APP_EVENT_AGENDA_COMMAND,
+    APP_EVENT_AGENDA_SYNC,
+    APP_EVENT_SPOTIFY_REMOTE,
+    APP_EVENT_HOME_WIDGET,
 } app_event_type_t;
 
 typedef struct {
@@ -34,6 +40,9 @@ typedef struct {
     pomodoro_command_t pomodoro_command;
     uint16_t pomodoro_value;
     uint32_t notification_id;
+    agenda_command_t agenda_command;
+    spotify_remote_command_t spotify_command;
+    uint8_t home_widget;
     char onvif_address[16];
     char sonoff_device_id[32];
     uint8_t sonoff_channel;
@@ -60,9 +69,15 @@ esp_err_t app_event_bus_post_sonoff_switch_request(const char *device_id,
                                                     bool enabled);
 esp_err_t app_event_bus_post_notification_mark_read(uint32_t id);
 esp_err_t app_event_bus_post_notification_mark_all_read(void);
+esp_err_t app_event_bus_post_agenda(const agenda_command_t *command);
+esp_err_t app_event_bus_post_agenda_sync(void);
 esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms);
 void app_event_bus_get_status(app_event_bus_status_t *out_status);
 
 #ifdef __cplusplus
 }
 #endif
+
+esp_err_t app_event_bus_post_spotify(const spotify_remote_command_t *command);
+
+esp_err_t app_event_bus_post_home_widget(uint8_t widget);

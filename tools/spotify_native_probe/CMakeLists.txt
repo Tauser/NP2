@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.16)
+# Compile-only investigation. This project is never an image for the panel.
+if(NOT IDF_TARGET STREQUAL "esp32p4")
+    message(FATAL_ERROR "Spotify probe requires explicit -DIDF_TARGET=esp32p4")
+endif()
+if(NOT DEFINED NP2_CSPOT_DIR OR NOT EXISTS "${NP2_CSPOT_DIR}/cspot/CMakeLists.txt")
+    message(FATAL_ERROR "Set NP2_CSPOT_DIR to the pinned investigation checkout")
+endif()
+get_filename_component(NP2_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+list(APPEND EXTRA_COMPONENT_DIRS "${NP2_ROOT}/firmware/managed_components/espressif__mdns")
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(np2_spotify_compile_probe)

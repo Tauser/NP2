@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "sound_melody.h"
 
 /* A lock-protected snapshot consumed by app_loop. The service owns mutation
  * and persistence coordination; the LVGL task only submits preferences. */
@@ -12,6 +13,7 @@ typedef struct {
     bool general_enabled;
     bool sound_enabled;
     bool system_alerts_enabled;
+    uint8_t melodies[SOUND_CATEGORY_COUNT];
     bool persistence_pending;
     uint32_t generation;
     uint32_t persisted_generation;
@@ -26,4 +28,8 @@ esp_err_t notification_service_set_system_alerts_enabled(bool enabled);
  * preferences allow it. Notification producers and the Settings preview use
  * this API; neither accesses audio hardware directly. */
 esp_err_t notification_service_request_alert_sound(void);
+esp_err_t notification_service_set_melody(sound_category_t category, uint8_t variant);
+esp_err_t notification_service_preview_melody(sound_category_t category);
+esp_err_t notification_service_request_alarm_sound(void);
+esp_err_t notification_service_request_startup_sound(void);
 void notification_service_get_status(notification_service_status_t *out_status);
