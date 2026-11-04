@@ -2969,3 +2969,88 @@ pixels, sem repack. Assert de compilação garante offset/tamanho alinhados.
 **Motivo:** o objetivo inclui imagem desenhada, não apenas download/decodificação
 concluídos. Preservar o fundo integral pedido e permitir a maior resolução
 sem crescimento grande do heap LVGL nem alterar configuração global.
+
+## ADR-121 — Ensaio de decoders H.264 Main/CABAC para a Tapo C200
+
+**Estado:** ensaio de laboratório; nenhum decoder foi adotado no produto.
+
+**Contexto:** `/stream2` da C200 é H.264 Main, CABAC, 640×360, progressivo, sem
+weighted prediction (`entropy_coding_mode_flag=1`, medido com FFmpeg). O
+TinyH264 do `esp_h264` aceita somente Constrained Baseline. Trocar o
+`profile_idc` no SPS não resolve, porque os slices continuam em CABAC.
+
+**Decisão:** comparar `edge264` e Sub0h264 antes de alterar
+`camera_stream_service.c`. O Sub0h264 entra em `firmware/components/sub0h264`,
+fixado no commit `15421eeade48774929bc0221ea0418a25462c222` (MIT), e só compila
+com `-DNP2_H264_DECODE_BENCH=ON`. Com a flag OFF o componente fica vazio. O ensaio
+decodifica uma amostra embutida, fora do Git, uma vez após o boot, com LVGL e rede
+ativos, sem câmera, credencial ou persistência. Ele registra tempo por slice,
+conversão RGB565, memória e MD5 dos quadros para comparar com o FFmpeg.
+
+**Limites conhecidos do candidato:** sem B-frames, I_PCM CABAC e
+`disable_deblocking_filter_idc=2`; sem ocultação de erro; `std::vector` dentro de
+`noexcept` aborta sem memória, contrariando a política de falha recuperável; sem
+fase de robustez a streams malformados. O número publicado de 30,2 fps vem de uma
+amostra de 27.190 B em 119 quadros (cena quase parada), com a aplicação de teste
+isolada. Isso não vale para a C200 nem para o painel.
+
+**Gate para adoção:** C200 real com MD5 igual ao FFmpeg, fps sustentado acima do
+fps da câmera na UI máxima, sem regressão de render (G2), piso interno preservado
+e teste de stream corrompido. Se nenhum decoder passar, as alternativas são
+decodificar só IDR ou usar um bridge na LAN. Qualquer delas exige novo ADR.
+
+**Resultado de 2026-11-04 (ver BRINGUP-EVIDENCE):** `edge264` descartado, com 1,58 fps
+na amostra de 512 kbit/s. Sub0h264 fica como candidato **não adotado**: 26,5 fps e MD5
+igual na amostra C110 quase estática, mas corrupção silenciosa em streams x264, inclusive
+Baseline/CAVLC, com causa não determinada. Só a amostra real da C200 com movimento decide.
+A conversão RGB565 custa cerca de 55 ms por quadro e precisa de solução própria, seja qual
+for o decoder.
+
+**Atualização de 2026-11-04, amostra real da C200:** a corrupção anterior era um defeito de
+wrap de `frame_num` no DPB, com causa raiz identificada e corrigida pelo patch
+`firmware/components/sub0h264/patches/0001-frame-num-wrap.patch`, que substitui a conclusão
+acima de causa não determinada. Com ele, a C200 fica com MD5 igual ao FFmpeg no PC e na placa,
+a 23,03 fps de decode com vetores em PSRAM, contra cerca de 14,4 fps da câmera. Estado dos gates:
+MD5 da amostra aprovado; fps da cadeia completa **reprovado** (10,06 fps com RGB565); vetores em
+SRAM reprovados no piso interno; G2, stream corrompido e OOM não testados. Sub0h264 segue
+**não adotado**, porém é o único candidato viável. Riscos a resolver ou limitar antes da adoção:
+QP abaixo de cerca de 17 diverge em silêncio, com causa não determinada; vários slices por quadro
+e predição ponderada também divergem, sem ocorrer na C200 medida. Como o patch é local, atualizar
+o commit de origem exige reaplicá-lo ou confirmar que o upstream o substitui.
+
+**Atualização de 2026-11-04, integração:** o Sub0h264 substitui o `esp_h264` em
+`camera_stream_service.c`, ainda como **candidato em bancada, não aprovado para release**.
+Gates pendentes: G2 com vídeo, stream corrompido, soak, QP baixo e aborto por falta de
+memória. A admissão exige 96 KiB internos livres e bloco de 3 MiB em PSRAM. O limite de 640×368
+e 4 referências delimita a alocação. Os vetores ficam em PSRAM pelo patch 0002. A publicação
+foi limitada a 5 fps porque o decode ao vivo oscilou entre 42 e 85 ms por quadro. Com atraso acima
+de 1 s pelo relógio RTP, o serviço pula até o próximo IDR. `esp_h264` e `edge264` seguem no build,
+sem uso pelo serviço, até a remoção em mudança própria.
+
+**Conta da câmera:** salva depois de `PLAY 200` pela tarefa de vídeo, via `FlashCoordinator`,
+em NVS (`np2_camera`) com duas gerações e CRC, vinculada ao IPv4 para não enviar a senha a outro
+host. A UI só consulta se há conta e nunca a lê. Usa a mesma política de retenção do Wi-Fi e do
+Spotify: em `NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION=ON` fica em NVS **sem criptografia**;
+produção exige NVS Encryption com Flash Encryption e sem isso a conta não é salva. Trocar o IP
+da câmera pede a conta de novo.
+
+**Cadastro de câmera (2026-11-04):** uma tela só. O IP é validado primeiro: o painel pede o vídeo sem
+conta; se a câmera responde `401` aparecem usuário e senha, se responde `200` basta adicionar. A conta só
+é salva depois de uma sessão RTSP completa (`PLAY 200`). O cofre guarda até 4 contas, uma por IPv4, e uma
+câmera sem senha fica com conta vazia. A lista de câmeras (endereço e modelo, sem segredo) fica em NVS
+(`np2_camera`, chaves `inv0` e `inv1`) com duas gerações e CRC, escrita pelo `FlashCoordinator` a partir da
+tarefa ONVIF, nunca de callback de toque. O registro compartilhado só aceita `schema_version=1`; a mudança de
+formato do cofre é distinguida pelo tamanho do payload.
+
+**Descoberta:** o multicast WS-Discovery sozinho não achou a C200. A busca varre o /24 do painel por RTSP na
+porta 554 em lotes de 6 (lwIP tem 10 sockets), confirma com um pedido RTSP e marca ONVIF pela porta 2020.
+Tem custo de cerca de 55 s no pior caso e ocupa a tarefa ONVIF; por isso roda só ao abrir o cadastro.
+
+**Pilha do LVGL:** 20 KiB, com folga mínima medida de 4.000 B com vídeo e tela de cadastro; o log de
+recursos passa a trazer `lvgl_stack_min`. A margem é estreita e deve ser acompanhada.
+
+**Layout do visualizador (2026-11-04):** o cartão da câmera não tem cabeçalho; o vídeo ocupa o cartão, e
+reconectar, trocar conta e fechar flutuam sobre a imagem, com fundo translúcido. O modal compartilhado é
+reutilizado (título, subtítulo e divisor são ocultados) para manter o comportamento de fechar e de parar o
+vídeo ao sair. A tela cheia por trás do cabeçalho do painel foi testada e reprovada. O nome da câmera deixou
+de aparecer; se houver várias câmeras, reavaliar.

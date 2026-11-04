@@ -6483,3 +6483,214 @@ Capturas encerradas e COM8 liberada.
 **Aceite físico recebido após a correção de alinhamento:** “Apareceu e ficou
 mais nítida”, em resposta à pergunta sobre a capa no fundo inteiro. A validação
 visual final confirma imagem desenhada, não apenas recebida/decodificada.
+
+### 2026-11-04 — ensaio de decoders H.264 para a Tapo C200 (ADR-121)
+
+Placa: mesma unidade Waveshare P4 v1.3, COM8, serial terminado 8F42, PSRAM 32 MiB,
+360 MHz, display e rede ativos. Base `39bc170` com a árvore de trabalho não
+commitada (Xiaozhi incluso). C6 não regravado; reportado em 3.0.6, hash instalado
+desconhecido. Sem Kconfig, partição ou eFuse alterados. `sdkconfig` efetivo
+`f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`.
+
+Stream da câmera, medido pelo responsável com FFmpeg: `/stream2`, H.264 Main,
+level 3.1, 640×360, `entropy_coding_mode_flag=1`, `frame_mbs_only_flag=1`,
+`weighted_pred_flag=0`, `constraint_set*=0`. Ausência de B-frames e fps/bitrate
+reais ainda não medidos.
+
+Comandos: `tools/run_h264_decode_bench.ps1 -Sample <amostra>`,
+`tools/flash_p4_app_checked.py --build firmware/build/h264-decode-bench --port COM8
+--serial-suffix 8F42 --flash` e `tools/capture_h264_decode_bench.py`. Amostras fora
+do Git: C110 do repositório do Sub0h264, SHA-256
+`e01d4d733df7de6829684834dfc24dcce7df90661fc03df4ea71e3a04007f8d7`, 27.190 B em 119
+quadros; sintética x264 Main/CABAC, 15 fps, 512 kbit/s, ruído, SHA-256
+`a0b135859b5e1ebafdbdd6cd90ad10cf65db0cc2946a693c214a2a7cdcaacd05`, 955.075 B em 225
+quadros. Tarefa com prioridade 3, sem afinidade.
+
+| Amostra | Decoder/vetores | Decode fps | Slice p50/p95/máx (ms) | Com RGB565 fps | MD5 vs FFmpeg | Interno mín. (B) |
+|---|---|---:|---:|---:|---|---:|
+| C110 | Sub0h264/SRAM | 26,54 | 33,9 / 38,3 / 157,8 | 10,69 | igual `7924b70a…` | 78.159 |
+| C110 | Sub0h264/PSRAM | 25,70 | 35,1 / 39,8 / 153,7 | 10,59 | igual `7924b70a…` | 134.851 |
+| Sintética | Sub0h264/SRAM | 6,96 | 135,5 / 226,0 / 284,1 | 5,07 | **diferente** | 67.451 |
+| Sintética | Sub0h264/PSRAM | 6,99 | 136,1 / 226,4 / 285,3 | 5,08 | **diferente** | 133.015 |
+| Sintética | edge264 | 1,58 | 603,0 / 957,7 / 2.278,9 | 1,45 | incompleto, 193/225 | 79.363 |
+
+Imagens de bancada: C110 `f1d375b2fe65dddcee5b512050ed7677538f845fd2573f699aea46a68f87b583`;
+sintética `d3a26590306ac796e67dbb2c51470b7fc5a046ac6fe954305004b8038c23865b`. A linha
+do edge264 vem da imagem `e54842ef5fc1939ade57dda588370dd772f6f6a32d58ea10e560b83ae62e9151`,
+com pilha de 64 KiB e piso de 80 KiB, que interromperam o passe. O SRAM mínimo das
+linhas SRAM fica abaixo do piso de produto de 80 KiB, com 32 KiB da pilha do ensaio
+incluídos; o piso do ensaio foi reduzido a 64 KiB para concluir a medição. Heap
+íntegro e nenhuma falha de runtime nas capturas.
+
+RGB565 mediu cerca de 55 ms por quadro tanto em `-Og` quanto em `-O2`, mais que a
+decodificação da C110, e sozinho limita a cerca de 18 fps. A amostra C110 é quase
+estática (228 B por quadro) e não representa cena com movimento.
+
+Defeito do Sub0h264: `tools/compare_sub0h264_host.py` reproduz no PC o mesmo MD5 da
+placa (`e4cef54d…`; FFmpeg `2f0569f6…`). Na sintética, 157 de 225 quadros diferem a
+partir do quadro 17, com PSNR de luma até 19,4 dB e `errors=0`, ou seja, corrupção
+visível e silenciosa. Com `testsrc2` sem ruído, o quadro 0 já diverge. O defeito
+persistiu com High com e sem 8x8, CAVLC, Baseline, sem deblock, sem mbtree/AQ, sem
+partições e sem trellis, portanto não é específico de CABAC nem de Main. Causa não
+determinada. A compatibilidade com a C200 continua **não comprovada**: não houve
+amostra real da C200 e o vídeo não foi exibido no painel.
+
+Imagem normal restaurada: `firmware/build/h264-normal-20261104`,
+`NP2_H264_DECODE_BENCH=OFF`, nenhum símbolo do ensaio no ELF, SHA-256
+`9f06faa517d4413076f01e63e8ec0429cca292e059ee4c17906e0eae3e54cb24`, 3.826.800 B, 54%
+livres, slot 0 em `0x20000`, hash verificado. Captura de 100 s: IP em 23,7 s, cinco
+ciclos de rede com DNS/NTP/HTTPS `ESP_OK`, sem falha de runtime, heap interno
+169.975 B em regime. Isso não qualifica render, câmera nem soak.
+
+### 2026-11-04 — Sub0h264 corrigido e medido com a amostra real da C200 (ADR-121)
+
+Mesma placa, COM8, serial terminado 8F42; base `39bc170` com a árvore não commitada. C6 não
+regravado, hash instalado desconhecido. Sem Kconfig, partição ou eFuse alterados. Isto corrige
+a seção anterior: a sintética não falhava por limite de CABAC ou Main, e sim pelo defeito abaixo.
+
+Amostra: captura `/stream2` da C200 feita pelo responsável, fora do Git, SHA-256
+`5cda2922f222bf81e43587d803aaab8c3a585a7dfa77a542265c76029c5b5a63`, 539.435 B, 431 quadros em
+cerca de 30 s (cerca de 14,4 fps e 144 kbit/s), 415 P + 16 I, sem B, um slice por quadro,
+`max_num_ref_frames=1`, `slice_qp_delta=4` (QP de slice 30). Uma única cena e condição de luz.
+
+Causa raiz da corrupção: `log2_max_frame_num_minus4=0` faz `frame_num` dar a volta a cada 16
+quadros. Com o DPB de 2 entradas {15, 0}, a evicção removia o menor `frame_num` (0, a referência
+verdadeira) e a lista L0 também não aplicava FrameNumWrap (§8.2.4.1). Correção rastreada em
+`firmware/components/sub0h264/patches/0001-frame-num-wrap.patch`, somente em `dpb.hpp`.
+
+Comparação no PC com `tools/compare_sub0h264_host.py`, quadros diferentes do FFmpeg:
+
+| Amostra | Antes do patch | Depois do patch |
+|---|---:|---:|
+| C200 real | 158/431 (a partir do 17, pior 35,2 dB) | 0/431 |
+| C110 | 0/119 | 0/119 |
+| Sintética com ruído | 157/225 | 0/225 |
+
+Placa, imagem de ensaio `79e07c0bfcb619421ecbdad85afed322311cb3b927a4675816a40e5c94945e24`, 45 s
+após o boot, UI e rede ativas, sem câmera. Log local: `firmware/build/h264-decode-bench/bench-c200.log`.
+
+| Vetores | Quadros | Decode fps | Slice p50/p95/p99/máx (ms) | Com RGB565 fps | RGB565 p50/p95 (ms) | Interno mín. (B) |
+|---|---:|---:|---:|---:|---:|---:|
+| SRAM | 1, parou em `internal-floor` | — | — | — | — | 57.571 |
+| PSRAM | 431, `errors=0`, `unsupported=0` | 23,03 | 36,0 / 46,9 / 203,6 / 222,6 | 10,06 | 54,8 / 59,3 | 130.323 |
+
+MD5 na placa `af8f753b54d7938fb794f5d53489eb47`, igual ao FFmpeg no I420 recortado 640×360.
+Heap íntegro, sem falha de runtime. Pilha mínima livre 27.644 B de 32 KiB; `psram_used` 1.441.352 B.
+
+Conclusão medida: o decode tem folga sobre os cerca de 14,4 fps da câmera, mas a cadeia com RGB565
+não (10,06 fps), e os vetores precisam ficar em PSRAM. Quadros I chegam a cerca de 220 ms. O vídeo
+continua **não exibido** no painel; não há medição com RTSP real nem com render de vídeo (G2).
+
+Defeitos abertos do Sub0h264, por matriz x264 de `testsrc2` e ruído no PC (causa raiz não determinada
+no primeiro item), nenhum presente nesta amostra:
+
+- QP baixo: com QP fixo de 16 ou menos, todos os quadros diferem desde o quadro 0, começando em ±1;
+  QP 18 a 40 ficam iguais. Em ABR 512 kbit/s sem ruído, sem limite de QP, 60/60 diferem com cerca de
+  6 dB; com `qpmin=17`, 0/60. `errors=0`, portanto silencioso. Cena estática, escura ou com outro
+  ajuste de bitrate poderia levar a C200 a essa faixa, o que não foi testado.
+- Vários slices por quadro: cada slice é entregue como um quadro (150 em vez de 30), e a imagem diverge.
+- Predição ponderada explícita (`weightp=2`): diverge a partir do quadro 2. `weighted_pred_flag=0` na C200.
+
+Imagem normal restaurada: `NP2_H264_DECODE_BENCH=OFF`, mesmo SHA-256
+`9f06faa517d4413076f01e63e8ec0429cca292e059ee4c17906e0eae3e54cb24`, hash de gravação verificado, boot
+capturado até `P4 local bring-up ready` em 3,4 s, sem falha de runtime. A captura curta registrou
+desconexões Wi-Fi com novas tentativas (`reason=2` e `205`) e não confirmou o retorno da rede;
+não qualifica render, câmera nem soak.
+
+### 2026-11-04 — vídeo real da Tapo C200 no painel com Sub0h264 (ADR-121)
+
+Mesma placa, COM8, serial terminado 8F42; base `39bc170` com a árvore não commitada. C6 não
+regravado, hash instalado desconhecido. Sem Kconfig, partição ou eFuse alterados. Sessão RTSP real
+em `/stream2`, SPS `profile_idc=77`, `level_idc=31`; o responsável confirmou imagem no painel.
+Captura com `tools/capture_camera_stream.py`, que só grava campos de uma lista permitida.
+
+Crash encontrado e corrigido: a primeira imagem integrada reiniciou logo após `DESCRIBE 200`.
+`parse_sdp_track` mantinha 8 KiB na pilha de 12 KiB da tarefa; a cópia foi removida. Estouro de
+pilha é a causa provável, sem registro do motivo do panic.
+
+| Imagem | Publicação | Sessão | Decodificado | Decode médio | Conversão média | Pilha livre | Interno mín. |
+|---|---:|---|---:|---:|---:|---:|---:|
+| `2ffff9ed…` | 8 fps | 1ª, ~30 s registrados | 8,7–12,4 fps | 57–85 ms | ~39 ms | 4.980 B | 132.287 B |
+| `2ffff9ed…` | 8 fps | 2ª, ≥71 s registrados | ~14,3 fps | 44–47 ms | ~40 ms | 4.980 B | 132.287 B |
+| `ecac3bd8…` | 5 fps | 423 s, encerrada pela regravação | ~14,3 fps | ~42–44 ms | ~38 ms | 4.860 B | 136.203 B |
+
+Na imagem `ecac3bd8…`, a última sessão teve 42 janelas de 10 s, `errors=0`, nenhum fim de sessão e
+nenhuma falha de runtime. Atraso típico de 190–240 ms, máximo registrado de 843 ms, com 113 quadros
+pulados no total. As paradas relatadas nas sessões anteriores ocorreram antes de existir o registro
+do motivo, portanto a **causa não foi determinada** e a limitação a 5 fps é só uma correlação. Sessão
+de 7 minutos não é soak, e G2, stream corrompido e QP baixo seguem sem validação.
+
+Imagem atual com a tela nova de autenticação: `58a2c56df1d928c6c143034266b1eedc94dd9cd33c948ce7a3c478d310b5eaf6`,
+3.860.560 B, hash de gravação verificado, boot até `P4 local bring-up ready` em 3,5 s. Fluxo de conta
+salva e parada ao sair ainda não validados na data deste registro.
+
+Bancada: `tools/i420_rgb565_host_test.c` compara o conversor com a fórmula anterior em todas as
+combinações Y/U/V, e `tools/sub0h264_boundary_host_test.cpp` confirma a C200 com 431 quadros e 640×360
+visíveis, e a rejeição de vários slices e predição ponderada. Conversão na placa: de 54,8 para 34,6 ms
+(p50) no benchmark, com MD5 igual ao FFmpeg (`af8f753b…`) e interno mínimo de 155 KiB.
+
+### 2026-11-04 — cadastro de câmera, persistência e varredura da rede (ADR-121)
+
+Mesma placa, COM8, serial terminado 8F42; base `39bc170` com a árvore não commitada. C6 não
+regravado, hash instalado desconhecido. Sem Kconfig de produto, partição ou eFuse alterados; só a
+pilha da tarefa LVGL passou de 16 para 20 KiB. Captura com `tools/capture_camera_stream.py`
+(lista permitida, sem credenciais). Testes feitos pelo responsável com a C200 real.
+
+Imagens gravadas nesta rodada, todas com `NP2_H264_DECODE_BENCH=OFF`:
+
+| SHA-256 (prefixo) | Conteúdo | Resultado |
+|---|---|---|
+| `58a2c56d` | modal de conta, conta única | conta salva após `PLAY 200` (`save result=0`), 2ª abertura sem senha |
+| `6145d85d` | persistência do inventário | boot ok |
+| `7946d36a` | cadastro em tela única e varredura v1 | **panic**: `Stack protection fault` na tarefa `lvgl` |
+| `fa6514eb` | buffers fora da pilha, pilha de 20 KiB | sem panic |
+| `56214499` | probe do IP em fases e varredura v2 | cadastro funcionou, **conta não salvou** (`save result=-1`) |
+| `154f18cc` | schema do registro corrigido (atual) | conta e inventário salvos (`result=0`), persistiu após reiniciar |
+
+Falhas encontradas e causas:
+
+- **Panic de pilha (LVGL):** a refresh da tela nova guardava 350+ B de lista e texto na pilha. A folga
+  mínima, medida pelo novo campo `lvgl_stack_min` do log de recursos, era 8.748 B em repouso e caiu para
+  4.032 B depois de usar a tela; com 16 KiB isso estouraria. Causa provável, o estouro caiu em
+  `get_prop_core` do LVGL.
+- **Conta não salva (`ESP_FAIL`):** o cofre gravava o registro com `schema_version=2` e o cabeçalho
+  compartilhado só aceita 1; a leitura de verificação falhava. Corrigido para o valor compartilhado; a
+  troca de uma conta por uma tabela de até 4 é detectada pelo tamanho do payload.
+- **Varredura v1:** 254 endereços, `rtsp_open=0`, sem achar a C200 (alcançável). Hipótese não confirmada:
+  espera de 250 ms curta demais para uma câmera Wi-Fi que precisa de nova tentativa de ARP.
+  A v2 espera 1,3 s por lote de 6, varre do endereço do painel para fora e mostra resultados ao vivo.
+  O filtro da captura estava no formato antigo da linha e **o resultado da v2 não foi registrado**.
+
+Teste que funcionou (imagem `154f18cc`): probe sem conta, `OPTIONS 200` e `DESCRIBE 401` duas vezes, a tela
+pediu usuário e senha; com a conta, `DESCRIBE 200`, `SETUP 200`, `PLAY 200`, `account save result=0`,
+registro `result=2` (ok), vídeo abriu sozinho, `inventory save result=0` cerca de 27 s depois e a câmera
+persistiu após reiniciar (relato do responsável; o boot desse reinício não foi capturado).
+
+Vídeo ao vivo na mesma sessão, 30 janelas de 10 s: decodificado 11,5–14,7 fps, publicado 3,5–4,0 fps,
+`errors=0`, atraso típico de 50–450 ms com pico de 807 ms e até 29 quadros pulados por janela, decode médio
+42–65 ms, conversão média ~38 ms, pilha da tarefa de vídeo com 4.608 B livres, CPU de 79% e menor folga da
+pilha LVGL de 4.000 B. A publicação de 5 fps configurada rende cerca de 3,8 fps medidos, e a causa da
+diferença não foi investigada.
+
+Limitações abertas: o inventário só foi gravado depois do fim da varredura, porque o mesmo trabalhador
+executa as duas coisas, e um reinício durante os ~55 s dela perde a câmera nova; a varredura cobre só o
+/24 do painel e mostra até 4 câmeras; só uma marca de câmera foi testada; G2, soak, stream corrompido e QP
+baixo seguem sem validação.
+
+### 2026-11-04 — layout do cartão de vídeo da câmera (ADR-121)
+
+Mesma placa e base da seção anterior; C6 não regravado, sem Kconfig de produto, partição ou eFuse
+alterados. Só interface; conferido pelo responsável com a C200 real. Imagens, todas com
+`NP2_H264_DECODE_BENCH=OFF`:
+
+| SHA-256 (prefixo) | Layout | Resultado |
+|---|---|---|
+| `7886d848` | vídeo em tela cheia com o cabeçalho do painel por cima e barra da câmera abaixo | **reprovado** pelo responsável (visual) |
+| `41e16795` | cartão original (18, 84, 988×494) com a imagem redimensionada para caber, ícones no cabeçalho | pedido de ajuste: pouco espaço de vídeo |
+| `15a76076` | cartão sem cabeçalho, vídeo de 976×482 e três ícones translúcidos sobre a imagem (atual) | **aprovado** pelo responsável (visual) |
+
+A imagem é escalada em software por `LV_IMAGE_ALIGN_CONTAIN`, com amostragem sem suavização, mantendo 16:9
+(cerca de 857 px de largura em 482 de altura, com faixas pretas laterais). A medição de fluidez e do custo
+dessa escala sobre a pilha LVGL e sobre os quadros publicados não foi refeita com o layout final: a captura
+dessa sessão tem uma única janela de 10 s (39 quadros publicados, sem erro, atraso máximo de 306 ms). A
+aprovação é visual e não substitui os gates de render (G2).
