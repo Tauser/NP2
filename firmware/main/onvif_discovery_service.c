@@ -5,9 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "camera_inventory.h"
 #include "connectivity_diagnostic.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_random.h"
+#include "flash_coordinator.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
@@ -38,6 +41,17 @@ static bool s_scan_requested;
 static bool s_periodic_refresh_enabled;
 static uint64_t s_last_scan_us;
 static char s_manual_addresses[ONVIF_DISCOVERY_MAX_CAMERAS][16];
+static bool s_inventory_restored;
+static bool s_sweep_requested;
+static onvif_sweep_status_t s_sweep;
+
+/* lwIP is built with 10 sockets and the panel needs the rest, so probe a few at a time. */
+#define SWEEP_BATCH 6U
+/* A Wi-Fi camera that sleeps between beacons can need one ARP retry (about a second) before the
+ * first connect completes, so a short wait finds nothing. */
+#define SWEEP_CONNECT_TIMEOUT_US 1300000
+#define SWEEP_RTSP_PORT 554U
+#define SWEEP_ONVIF_PORT 2020U
 
 static bool xml_name_break(char character)
 {
@@ -382,10 +396,279 @@ static void scan_cameras(void)
     memset(found, 0, sizeof(found));
 }
 
+static bool private_address(uint32_t host_order)
+{
+    return (host_order & UINT32_C(0xff000000)) == UINT32_C(0x0a000000) ||
+           (host_order & UINT32_C(0xfff00000)) == UINT32_C(0xac100000) ||
+           (host_order & UINT32_C(0xffff0000)) == UINT32_C(0xc0a80000);
+}
+
+typedef enum {
+    PROBE_SILENT = 0, /* No answer in time: absent, asleep or filtering. */
+    PROBE_OPEN,
+    PROBE_REFUSED,    /* Alive, but the port is closed. */
+} probe_outcome_t;
+
+/* Non-blocking connects to one port on a few hosts, waiting up to the timeout for all of them. */
+static void probe_port_batch(const uint32_t *hosts_host_order, uint8_t count, uint16_t port,
+                             probe_outcome_t *outcome)
+{
+    int fds[SWEEP_BATCH];
+    uint8_t pending = 0U;
+    for (uint8_t i = 0U; i < count; ++i) {
+        outcome[i] = PROBE_SILENT;
+        fds[i] = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (fds[i] < 0) continue;
+        const int flags = fcntl(fds[i], F_GETFL, 0);
+        if (flags < 0 || fcntl(fds[i], F_SETFL, flags | O_NONBLOCK) < 0) {
+            (void)close(fds[i]);
+            fds[i] = -1;
+            continue;
+        }
+        const struct sockaddr_in endpoint = {
+            .sin_family = AF_INET,
+            .sin_port = htons(port),
+            .sin_addr.s_addr = htonl(hosts_host_order[i]),
+        };
+        if (connect(fds[i], (const struct sockaddr *)&endpoint, sizeof(endpoint)) == 0) {
+            outcome[i] = PROBE_OPEN;
+            (void)close(fds[i]);
+            fds[i] = -1;
+        } else if (errno == EINPROGRESS || errno == EWOULDBLOCK) {
+            ++pending;
+        } else {
+            if (errno == ECONNREFUSED) outcome[i] = PROBE_REFUSED;
+            (void)close(fds[i]);
+            fds[i] = -1;
+        }
+    }
+    const int64_t deadline = esp_timer_get_time() + SWEEP_CONNECT_TIMEOUT_US;
+    while (pending > 0U) {
+        const int64_t left = deadline - esp_timer_get_time();
+        if (left <= 0) break;
+        fd_set writable, failed;
+        FD_ZERO(&writable);
+        FD_ZERO(&failed);
+        int max_fd = -1;
+        for (uint8_t i = 0U; i < count; ++i) {
+            if (fds[i] < 0) continue;
+            FD_SET(fds[i], &writable);
+            FD_SET(fds[i], &failed);
+            if (fds[i] > max_fd) max_fd = fds[i];
+        }
+        struct timeval timeout = {.tv_sec = (time_t)(left / 1000000), .tv_usec = (suseconds_t)(left % 1000000)};
+        if (select(max_fd + 1, NULL, &writable, &failed, &timeout) <= 0) break;
+        for (uint8_t i = 0U; i < count; ++i) {
+            if (fds[i] < 0 || (!FD_ISSET(fds[i], &writable) && !FD_ISSET(fds[i], &failed))) continue;
+            int socket_error = 0;
+            socklen_t error_size = sizeof(socket_error);
+            if (getsockopt(fds[i], SOL_SOCKET, SO_ERROR, &socket_error, &error_size) == 0) {
+                if (socket_error == 0) outcome[i] = PROBE_OPEN;
+                else if (socket_error == ECONNREFUSED) outcome[i] = PROBE_REFUSED;
+            }
+            (void)close(fds[i]);
+            fds[i] = -1;
+            --pending;
+        }
+    }
+    for (uint8_t i = 0U; i < count; ++i) {
+        if (fds[i] >= 0) (void)close(fds[i]);
+    }
+}
+
+/* Port 554 alone also matches NAS boxes and routers, so ask for an RTSP answer. */
+static bool rtsp_server_answers(uint32_t host_order)
+{
+    const int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd < 0) return false;
+    const struct timeval timeout = {.tv_sec = 2, .tv_usec = 0};
+    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    const struct sockaddr_in endpoint = {
+        .sin_family = AF_INET,
+        .sin_port = htons(SWEEP_RTSP_PORT),
+        .sin_addr.s_addr = htonl(host_order),
+    };
+    bool answers = false;
+    if (connect(fd, (const struct sockaddr *)&endpoint, sizeof(endpoint)) == 0) {
+        static const char request[] = "OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: NovaPanel/1.0\r\n\r\n";
+        char reply[16] = {0};
+        answers = send(fd, request, sizeof(request) - 1U, 0) > 0 &&
+                  recv(fd, reply, sizeof(reply) - 1U, 0) >= 8 && strncmp(reply, "RTSP/1.", 7) == 0;
+    }
+    (void)close(fd);
+    return answers;
+}
+
+static void finish_sweep(esp_err_t result)
+{
+    taskENTER_CRITICAL(&s_lock);
+    s_sweep.busy = false;
+    s_sweep.progress_percent = 100U;
+    s_sweep.last_result = result;
+    ++s_sweep.generation;
+    taskEXIT_CRITICAL(&s_lock);
+}
+
+static void publish_candidate(uint32_t host_order)
+{
+    probe_outcome_t onvif = PROBE_SILENT;
+    const uint32_t host[1] = {host_order};
+    probe_port_batch(host, 1U, SWEEP_ONVIF_PORT, &onvif);
+    onvif_candidate_t candidate = {0};
+    struct in_addr address = {.s_addr = htonl(host_order)};
+    (void)inet_ntop(AF_INET, &address, candidate.address, sizeof(candidate.address));
+    (void)snprintf(candidate.label, sizeof(candidate.label), "%s",
+                   onvif == PROBE_OPEN ? "Câmera ONVIF" : "Câmera RTSP");
+    taskENTER_CRITICAL(&s_lock);
+    if (s_sweep.count < ONVIF_DISCOVERY_MAX_CANDIDATES) s_sweep.candidates[s_sweep.count++] = candidate;
+    taskEXIT_CRITICAL(&s_lock);
+}
+
+static void run_sweep(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    s_sweep.count = 0U;
+    s_sweep.progress_percent = 0U;
+    taskEXIT_CRITICAL(&s_lock);
+
+    connectivity_diagnostic_status_t network = {0};
+    connectivity_diagnostic_get_status(&network);
+    esp_netif_t *const station = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info = {0};
+    if (!network.online || station == NULL || esp_netif_get_ip_info(station, &ip_info) != ESP_OK ||
+        ip_info.ip.addr == 0U) {
+        finish_sweep(ESP_ERR_INVALID_STATE);
+        return;
+    }
+    const uint32_t own = ntohl(ip_info.ip.addr);
+    if (!private_address(own)) {
+        finish_sweep(ESP_ERR_INVALID_STATE);
+        return;
+    }
+    /* Only the panel's own /24: 254 hosts is already close to a minute on a quiet network. */
+    const uint32_t network_base = own & UINT32_C(0xffffff00);
+    const int own_offset = (int)(own - network_base);
+
+    /* Nearest addresses first: DHCP hands out neighbouring leases, so cameras tend to be found
+     * early and the list fills while the user is still typing. */
+    uint8_t order[254];
+    uint16_t total = 0U;
+    for (int distance = 1; distance <= 254; ++distance) {
+        const int up = own_offset + distance;
+        const int down = own_offset - distance;
+        if (up >= 1 && up <= 254) order[total++] = (uint8_t)up;
+        if (down >= 1 && down <= 254) order[total++] = (uint8_t)down;
+    }
+
+    const int64_t started_us = esp_timer_get_time();
+    uint16_t done = 0U;
+    uint16_t open = 0U, refused = 0U, silent = 0U;
+    while (done < total) {
+        uint32_t hosts[SWEEP_BATCH];
+        probe_outcome_t outcome[SWEEP_BATCH];
+        uint8_t batch = 0U;
+        while (batch < SWEEP_BATCH && done + batch < total) {
+            hosts[batch] = network_base + order[done + batch];
+            ++batch;
+        }
+        probe_port_batch(hosts, batch, SWEEP_RTSP_PORT, outcome);
+        for (uint8_t i = 0U; i < batch; ++i) {
+            if (outcome[i] == PROBE_OPEN) {
+                ++open;
+                if (rtsp_server_answers(hosts[i])) publish_candidate(hosts[i]);
+            } else if (outcome[i] == PROBE_REFUSED) {
+                ++refused;
+            } else {
+                ++silent;
+            }
+        }
+        done = (uint16_t)(done + batch);
+        taskENTER_CRITICAL(&s_lock);
+        s_sweep.progress_percent = (uint8_t)((uint32_t)done * 100U / total);
+        const bool full = s_sweep.count >= ONVIF_DISCOVERY_MAX_CANDIDATES;
+        taskEXIT_CRITICAL(&s_lock);
+        if (full) break;
+    }
+    onvif_sweep_status_t result = {0};
+    onvif_discovery_service_get_sweep(&result);
+    ESP_LOGI(TAG, "Subnet sweep complete hosts=%u open=%u refused=%u silent=%u cameras=%u ms=%lu",
+             (unsigned int)done, (unsigned int)open, (unsigned int)refused, (unsigned int)silent,
+             (unsigned int)result.count, (unsigned long)((esp_timer_get_time() - started_us) / 1000));
+    finish_sweep(ESP_OK);
+}
+
+_Static_assert(ONVIF_DISCOVERY_MAX_CAMERAS == CAMERA_INVENTORY_MAX,
+               "discovery and saved inventory must hold the same number of cameras");
+
+/* Brings back the cameras saved in flash. They start offline: only a scan marks one online.
+ * Saved addresses also join the direct-probe list, so a camera that does not answer
+ * WS-Discovery after a restart is still found. */
+static void restore_inventory(void)
+{
+    if (s_inventory_restored || !camera_inventory_load_attempted()) return;
+    camera_inventory_t saved = {0};
+    camera_inventory_get(&saved);
+    taskENTER_CRITICAL(&s_lock);
+    for (uint8_t i = 0U; i < saved.count; ++i) {
+        bool known = false;
+        for (uint8_t old = 0U; old < s_status.camera_count; ++old) {
+            known |= strcmp(s_status.cameras[old].address, saved.cameras[i].address) == 0;
+        }
+        if (!known && s_status.camera_count < ONVIF_DISCOVERY_MAX_CAMERAS) {
+            onvif_camera_t *const camera = &s_status.cameras[s_status.camera_count++];
+            memcpy(camera->address, saved.cameras[i].address, sizeof(camera->address));
+            memcpy(camera->model, saved.cameras[i].model, sizeof(camera->model));
+            camera->online = false;
+        }
+        for (uint8_t slot = 0U; slot < ONVIF_DISCOVERY_MAX_CAMERAS; ++slot) {
+            if (strcmp(s_manual_addresses[slot], saved.cameras[i].address) == 0) break;
+            if (s_manual_addresses[slot][0] == '\0') {
+                memcpy(s_manual_addresses[slot], saved.cameras[i].address,
+                       sizeof(s_manual_addresses[slot]));
+                break;
+            }
+        }
+    }
+    s_inventory_restored = true;
+    if (saved.count > 0U) s_scan_requested = true; /* Quiet: no spinner for a background refresh. */
+    taskEXIT_CRITICAL(&s_lock);
+    ESP_LOGI(TAG, "Saved cameras restored count=%u", (unsigned int)saved.count);
+}
+
+/* Saves only when the list differs from flash. Runs here, never from a touch callback. */
+static void persist_inventory_if_changed(void)
+{
+    if (!s_inventory_restored) return;
+    camera_inventory_t current = {0};
+    taskENTER_CRITICAL(&s_lock);
+    current.count = s_status.camera_count;
+    for (uint8_t i = 0U; i < s_status.camera_count; ++i) {
+        memcpy(current.cameras[i].address, s_status.cameras[i].address,
+               sizeof(current.cameras[i].address));
+        memcpy(current.cameras[i].model, s_status.cameras[i].model,
+               sizeof(current.cameras[i].model));
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    camera_inventory_t saved = {0};
+    camera_inventory_get(&saved);
+    if (memcmp(&current, &saved, sizeof(current)) == 0) return;
+    /* A busy coordinator is normal; the next poll tries again. */
+    (void)flash_coordinator_request_camera_inventory_write(&current);
+}
+
 static void onvif_worker(void *arg)
 {
     (void)arg;
     for (;;) {
+        restore_inventory();
+        persist_inventory_if_changed();
+        bool sweep = false;
+        taskENTER_CRITICAL(&s_lock);
+        sweep = s_sweep_requested;
+        s_sweep_requested = false;
+        taskEXIT_CRITICAL(&s_lock);
+        if (sweep) run_sweep();
         bool requested = false;
         bool periodic_refresh = false;
         taskENTER_CRITICAL(&s_lock);
@@ -478,6 +761,71 @@ esp_err_t onvif_discovery_service_request_address(const char *address)
     s_scan_requested = true;
     taskEXIT_CRITICAL(&s_lock);
     return ESP_OK;
+}
+
+esp_err_t onvif_discovery_service_request_sweep(void)
+{
+    if (!s_started) return ESP_ERR_INVALID_STATE;
+    taskENTER_CRITICAL(&s_lock);
+    if (s_sweep.busy) {
+        taskEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+    s_sweep.busy = true;
+    s_sweep.progress_percent = 0U;
+    s_sweep.count = 0U;
+    s_sweep_requested = true;
+    taskEXIT_CRITICAL(&s_lock);
+    return ESP_OK;
+}
+
+void onvif_discovery_service_get_sweep(onvif_sweep_status_t *out_status)
+{
+    if (out_status == NULL) return;
+    taskENTER_CRITICAL(&s_lock);
+    *out_status = s_sweep;
+    taskEXIT_CRITICAL(&s_lock);
+}
+
+esp_err_t onvif_discovery_service_add_camera(const char *address, const char *model)
+{
+    if (!s_started || address == NULL) return ESP_ERR_INVALID_ARG;
+    struct in_addr ipv4 = {0};
+    if (strnlen(address, 16U) >= 16U || inet_pton(AF_INET, address, &ipv4) != 1 ||
+        !private_address(ntohl(ipv4.s_addr))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t result = ESP_OK;
+    taskENTER_CRITICAL(&s_lock);
+    uint8_t slot = s_status.camera_count;
+    for (uint8_t i = 0U; i < s_status.camera_count; ++i) {
+        if (strcmp(s_status.cameras[i].address, address) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot >= ONVIF_DISCOVERY_MAX_CAMERAS) {
+        result = ESP_ERR_NO_MEM;
+    } else {
+        onvif_camera_t *const camera = &s_status.cameras[slot];
+        if (slot == s_status.camera_count) ++s_status.camera_count;
+        (void)snprintf(camera->address, sizeof(camera->address), "%s", address);
+        if (camera->model[0] == '\0' || model != NULL) {
+            (void)snprintf(camera->model, sizeof(camera->model), "%s",
+                           model != NULL && model[0] != '\0' ? model : "Câmera");
+        }
+        camera->online = true;
+        /* Direct probing keeps its online dot honest even where multicast is ignored. */
+        for (uint8_t i = 0U; i < ONVIF_DISCOVERY_MAX_CAMERAS; ++i) {
+            if (strcmp(s_manual_addresses[i], address) == 0) break;
+            if (s_manual_addresses[i][0] == '\0') {
+                (void)snprintf(s_manual_addresses[i], sizeof(s_manual_addresses[i]), "%s", address);
+                break;
+            }
+        }
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    return result;
 }
 
 void onvif_discovery_service_get_status(onvif_discovery_status_t *out_status)

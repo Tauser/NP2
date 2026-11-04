@@ -1,15 +1,17 @@
 #include "camera_stream_service.h"
 
+#include "camera_credentials.h"
+#include "flash_coordinator.h"
+#include "onvif_discovery_service.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
 
-#include "esp_h264_dec.h"
-#include "esp_h264_dec_sw.h"
-#include "esp_h264_dec_param.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_random.h"
 #include "esp_rom_md5.h"
 #include "esp_heap_caps.h"
@@ -17,13 +19,15 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "i420_rgb565.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha1.h"
+#include "np2_sub0h264.h"
 
 #define STREAM_TASK_STACK_BYTES 12288U
-#define STREAM_TASK_PRIORITY 5U
+#define STREAM_TASK_PRIORITY 3U /* Decode is CPU-bound and must stay below LVGL and network. */
 #define RTSP_RESPONSE_CAPACITY 8192U
 #define RTP_PACKET_CAPACITY 2048U
 #define ACCESS_UNIT_CAPACITY (512U * 1024U)
@@ -31,13 +35,31 @@
 #define CREDENTIAL_PASSWORD_CAPACITY 64U
 #define RTSP_PORT 554U
 #define ONVIF_PORT 2020U
+/* Session admission. Decoder vectors abort on allocation failure inside noexcept
+ * code, so the bounded worst case (ADR-121) must be available before starting. */
+#define DECODER_MIN_FREE_INTERNAL_BYTES (96U * 1024U)
+#define DECODER_MIN_PSRAM_BLOCK_BYTES (3U * 1024U * 1024U)
+/* A corrupt picture waits for the next IDR; this many in a row ends the session. */
+#define DECODER_MAX_CONSECUTIVE_ERRORS 3U
+/* Live decode measured 57-85 ms per picture with the video on screen, so conversion
+ * and the UI copy that follows it are limited to about 5 fps (ADR-121). */
+#define PUBLISH_MIN_INTERVAL_US (200 * 1000)
+/* Pictures behind real time, by RTP clock, before skipping to the next IDR. */
+#define VIDEO_MAX_LAG_MS 1000
+#define RTP_CLOCK_KHZ 90U
+#define VIDEO_STATS_INTERVAL_US (10 * 1000 * 1000)
+#define ACCOUNT_SAVE_RETRY_US (1000 * 1000)
 
 static const char *const TAG = "camera_stream";
-static const char *const STREAM_PATHS[] = {"/stream8", "/stream2"};
+/* /stream2 is the 640x360 stream measured in ADR-121; /stream8 never reached SETUP. */
+static const char *const STREAM_PATHS[] = {"/stream2", "/stream8"};
 static const uint8_t START_CODE[] = {0U, 0U, 0U, 1U};
 
 typedef enum {
-    COMMAND_PLAY = 1,
+    COMMAND_PLAY = 1, /* Typed account; saved once the camera accepts it. */
+    COMMAND_PLAY_SAVED, /* Carries no secret: the worker reads the vault. */
+    COMMAND_REGISTER,
+    COMMAND_PROBE,
     COMMAND_STOP,
 } command_kind_t;
 
@@ -58,6 +80,19 @@ typedef struct {
 } digest_challenge_t;
 
 typedef struct {
+    uint32_t decoded;
+    uint32_t published;
+    uint32_t dropped;
+    uint32_t decode_errors;
+    uint32_t skipped;
+    int64_t decode_us;
+    int64_t convert_us;
+    int64_t decode_max_us;
+    int64_t convert_max_us;
+    int64_t window_start_us;
+} video_stats_t;
+
+typedef struct {
     int socket_fd;
     char base_url[96];
     char track_url[256];
@@ -76,8 +111,17 @@ typedef struct {
     bool decoder_error;
     bool sps_logged;
     uint8_t fu_header;
-    esp_h264_dec_handle_t decoder;
-    esp_h264_dec_param_handle_t decoder_params;
+    np2_sub0h264_t *decoder;
+    bool awaiting_idr;
+    uint8_t consecutive_errors;
+    int64_t last_publish_us;
+    video_stats_t stats;
+    bool rtp_clock_started;
+    uint32_t rtp_clock_base;
+    int64_t rtp_wall_base_us;
+    int32_t lag_ms;
+    const char *end_reason;
+    int end_detail;
 } stream_session_t;
 
 static QueueHandle_t s_command_queue;
@@ -180,12 +224,81 @@ esp_err_t camera_stream_service_play(const char *ipv4, const char *username,
     (void)snprintf(command.ipv4, sizeof(command.ipv4), "%s", ipv4);
     (void)snprintf(command.username, sizeof(command.username), "%s", username);
     (void)snprintf(command.password, sizeof(command.password), "%s", password);
+    set_status(CAMERA_STREAM_CONNECTING, ESP_OK);
     if (xQueueOverwrite(s_command_queue, &command) != pdPASS) {
         memset(&command, 0, sizeof(command));
         return ESP_ERR_TIMEOUT;
     }
     memset(&command, 0, sizeof(command));
     return ESP_OK;
+}
+
+static void set_register(camera_register_state_t state, const char *ipv4)
+{
+    if (s_frame_mutex == NULL) return;
+    xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
+    s_status.register_state = state;
+    if (ipv4 != NULL) (void)snprintf(s_status.register_ipv4, sizeof(s_status.register_ipv4), "%s", ipv4);
+    xSemaphoreGive(s_frame_mutex);
+}
+
+esp_err_t camera_stream_service_register(const char *ipv4, const char *username,
+                                         const char *password)
+{
+    const bool no_account = username != NULL && password != NULL &&
+                            username[0] == '\0' && password[0] == '\0';
+    if (s_command_queue == NULL || !private_ipv4(ipv4) ||
+        (!no_account && (!safe_credential(username, CREDENTIAL_USER_CAPACITY, false) ||
+                         !safe_credential(password, CREDENTIAL_PASSWORD_CAPACITY, false)))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (const char *p = username; *p != '\0'; ++p) {
+        if (*p == '"' || *p == '\\' || *p == ',') return ESP_ERR_INVALID_ARG;
+    }
+    camera_command_t command = {.kind = COMMAND_REGISTER};
+    (void)snprintf(command.ipv4, sizeof(command.ipv4), "%s", ipv4);
+    (void)snprintf(command.username, sizeof(command.username), "%s", username);
+    (void)snprintf(command.password, sizeof(command.password), "%s", password);
+    /* Set here, not in the worker, so a result left by an earlier attempt is never read. */
+    set_register(CAMERA_REGISTER_CHECKING, ipv4);
+    const esp_err_t result = xQueueOverwrite(s_command_queue, &command) == pdPASS
+        ? ESP_OK : ESP_ERR_TIMEOUT;
+    memset(&command, 0, sizeof(command));
+    if (result != ESP_OK) set_register(CAMERA_REGISTER_UNREACHABLE, NULL);
+    return result;
+}
+
+static void set_probe(camera_probe_state_t state, const char *ipv4)
+{
+    if (s_frame_mutex == NULL) return;
+    xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
+    s_status.probe_state = state;
+    if (ipv4 != NULL) (void)snprintf(s_status.probe_ipv4, sizeof(s_status.probe_ipv4), "%s", ipv4);
+    xSemaphoreGive(s_frame_mutex);
+}
+
+esp_err_t camera_stream_service_probe(const char *ipv4)
+{
+    if (s_command_queue == NULL || !private_ipv4(ipv4)) return ESP_ERR_INVALID_ARG;
+    camera_command_t command = {.kind = COMMAND_PROBE};
+    (void)snprintf(command.ipv4, sizeof(command.ipv4), "%s", ipv4);
+    /* Set here, not in the worker, so an earlier answer is never read for this address. */
+    set_probe(CAMERA_PROBE_CHECKING, ipv4);
+    if (xQueueOverwrite(s_command_queue, &command) != pdPASS) {
+        set_probe(CAMERA_PROBE_UNREACHABLE, NULL);
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_OK;
+}
+
+esp_err_t camera_stream_service_play_saved(const char *ipv4)
+{
+    if (s_command_queue == NULL || !private_ipv4(ipv4)) return ESP_ERR_INVALID_ARG;
+    if (!camera_credentials_saved_for(ipv4)) return ESP_ERR_NOT_FOUND;
+    camera_command_t command = {.kind = COMMAND_PLAY_SAVED};
+    (void)snprintf(command.ipv4, sizeof(command.ipv4), "%s", ipv4);
+    set_status(CAMERA_STREAM_CONNECTING, ESP_OK);
+    return xQueueOverwrite(s_command_queue, &command) == pdPASS ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 esp_err_t camera_stream_service_stop(void)
@@ -341,9 +454,17 @@ static bool recv_exact(stream_session_t *session, void *buffer, size_t size,
         };
         const int ready = select(session->socket_fd + 1, &read_set, NULL, NULL,
                                  &timeout);
-        if (ready <= 0) return false;
+        if (ready <= 0) {
+            session->end_reason = ready == 0 ? "recv-timeout" : "select-error";
+            session->end_detail = ready == 0 ? 0 : errno;
+            return false;
+        }
         const int n = recv(session->socket_fd, out + received, size - received, 0);
-        if (n <= 0) return false;
+        if (n <= 0) {
+            session->end_reason = n == 0 ? "peer-closed" : "recv-error";
+            session->end_detail = n == 0 ? 0 : errno;
+            return false;
+        }
         received += (size_t)n;
     }
     return true;
@@ -896,13 +1017,12 @@ static bool response_session(stream_session_t *session)
 static bool parse_sdp_track(stream_session_t *session, const char *body,
                             size_t body_length)
 {
+    /* read_response() NUL-terminates the body inside session->response. */
     if (body_length == 0U || body_length >= RTSP_RESPONSE_CAPACITY) return false;
-    char sdp[RTSP_RESPONSE_CAPACITY] = {0};
-    memcpy(sdp, body, body_length);
-    if (strstr(sdp, "H264") == NULL && strstr(sdp, "h264") == NULL) return false;
-    char *control = sdp;
+    if (strstr(body, "H264") == NULL && strstr(body, "h264") == NULL) return false;
+    const char *control = body;
     size_t length = 0U;
-    char *selected = NULL;
+    const char *selected = NULL;
     while ((control = strstr(control, "a=control:")) != NULL) {
         control += strlen("a=control:");
         length = strcspn(control, "\r\n");
@@ -933,7 +1053,6 @@ static bool parse_sdp_track(stream_session_t *session, const char *body,
                            session->base_url, track);
         }
     }
-    memset(sdp, 0, sizeof(sdp));
     return session->track_url[0] != '\0';
 }
 
@@ -941,7 +1060,7 @@ static void session_cleanup(stream_session_t *session)
 {
     if (session == NULL) return;
     if (session->socket_fd >= 0) closesocket(session->socket_fd);
-    if (session->decoder != NULL) (void)esp_h264_dec_del(session->decoder);
+    np2_sub0h264_destroy(session->decoder);
     if (session->response != NULL) heap_caps_free(session->response);
     if (session->access_unit != NULL) heap_caps_free(session->access_unit);
     if (session->packet != NULL) heap_caps_free(session->packet);
@@ -959,14 +1078,19 @@ static bool session_allocate(stream_session_t *session)
                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (session->response == NULL || session->access_unit == NULL ||
         session->packet == NULL) return false;
-    const esp_h264_dec_cfg_sw_t config = {.pic_type = ESP_H264_RAW_FMT_I420};
-    if (esp_h264_dec_sw_new(&config, &session->decoder) != ESP_H264_ERR_OK ||
-        session->decoder == NULL || esp_h264_dec_open(session->decoder) !=
-            ESP_H264_ERR_OK ||
-        esp_h264_dec_sw_get_param_hd(session->decoder,
-                                     &session->decoder_params) != ESP_H264_ERR_OK)
+    const size_t free_internal =
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const size_t psram_block =
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (free_internal < DECODER_MIN_FREE_INTERNAL_BYTES ||
+        psram_block < DECODER_MIN_PSRAM_BLOCK_BYTES) {
+        ESP_LOGW(TAG, "Video not admitted: internal=%u psram_block=%u",
+                 (unsigned int)free_internal, (unsigned int)psram_block);
         return false;
-    return true;
+    }
+    session->decoder = np2_sub0h264_create();
+    session->awaiting_idr = true;
+    return session->decoder != NULL;
 }
 
 static bool rtsp_exchange(stream_session_t *session, const char *method,
@@ -1045,6 +1169,116 @@ static void session_teardown(stream_session_t *session)
                        &body, &body_length, &status);
 }
 
+static bool load_saved_account(camera_command_t *command)
+{
+    camera_credentials_t saved = {0};
+    const bool found = camera_credentials_copy_private(command->ipv4, &saved) == ESP_OK;
+    if (found) {
+        memcpy(command->username, saved.username, sizeof(command->username));
+        memcpy(command->password, saved.password, sizeof(command->password));
+    }
+    memset(&saved, 0, sizeof(saved));
+    return found;
+}
+
+/* True once there is nothing left to retry: only a busy coordinator is worth another try. */
+static bool request_account_save(const camera_command_t *command)
+{
+    camera_credentials_t account = {0};
+    memcpy(account.ipv4, command->ipv4, sizeof(account.ipv4));
+    memcpy(account.username, command->username, sizeof(account.username));
+    memcpy(account.password, command->password, sizeof(account.password));
+    const esp_err_t result = flash_coordinator_request_camera_credentials_write(&account);
+    memset(&account, 0, sizeof(account));
+    return result != ESP_ERR_INVALID_STATE;
+}
+
+/* Waits briefly for a busy coordinator rather than dropping the account. */
+static bool save_account_blocking(const camera_command_t *command)
+{
+    for (unsigned attempt = 0U; attempt < 30U; ++attempt) {
+        camera_credentials_t account = {0};
+        memcpy(account.ipv4, command->ipv4, sizeof(account.ipv4));
+        memcpy(account.username, command->username, sizeof(account.username));
+        memcpy(account.password, command->password, sizeof(account.password));
+        const esp_err_t result = flash_coordinator_request_camera_credentials_write(&account);
+        memset(&account, 0, sizeof(account));
+        if (result == ESP_OK) return true;
+        if (result != ESP_ERR_INVALID_STATE) return false;
+        vTaskDelay(pdMS_TO_TICKS(100U));
+    }
+    return false;
+}
+
+/* The write is queued to the flash owner; viewing needs it committed. */
+static bool wait_until_account_saved(const char *ipv4)
+{
+    for (unsigned attempt = 0U; attempt < 60U; ++attempt) {
+        if (camera_credentials_saved_for(ipv4)) return true;
+        vTaskDelay(pdMS_TO_TICKS(50U));
+    }
+    return false;
+}
+
+/* Opens, and closes, a real RTSP session with whatever account the command carries. */
+static camera_register_state_t rtsp_check(const camera_command_t *command)
+{
+    stream_session_t session = {.socket_fd = -1};
+    session.response = heap_caps_malloc(RTSP_RESPONSE_CAPACITY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    camera_register_state_t outcome = CAMERA_REGISTER_UNREACHABLE;
+    if (session.response != NULL) {
+        xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
+        s_status.last_rtsp_status = 0U;
+        xSemaphoreGive(s_frame_mutex);
+        /* PLAY 200 proves the address, the stream path and the account at once. */
+        if (session_open(&session, command, STREAM_PATHS[0])) {
+            session_teardown(&session);
+            outcome = CAMERA_REGISTER_OK;
+        } else {
+            xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
+            const uint16_t status = s_status.last_rtsp_status;
+            xSemaphoreGive(s_frame_mutex);
+            outcome = (status == 401U || status == 403U) ? CAMERA_REGISTER_AUTH_REJECTED
+                    : status >= 400U ? CAMERA_REGISTER_STREAM_REFUSED
+                    : CAMERA_REGISTER_UNREACHABLE;
+        }
+    }
+    session_cleanup(&session);
+    return outcome;
+}
+
+static void run_probe(const camera_command_t *command)
+{
+    /* No username and no password: a camera that needs an account answers 401 to both attempts. */
+    camera_command_t anonymous = {.kind = COMMAND_PROBE};
+    memcpy(anonymous.ipv4, command->ipv4, sizeof(anonymous.ipv4));
+    const camera_register_state_t result = rtsp_check(&anonymous);
+    const camera_probe_state_t outcome =
+        result == CAMERA_REGISTER_OK ? CAMERA_PROBE_OPEN
+        : result == CAMERA_REGISTER_AUTH_REJECTED ? CAMERA_PROBE_AUTH_REQUIRED
+        : result == CAMERA_REGISTER_STREAM_REFUSED ? CAMERA_PROBE_NOT_A_CAMERA
+        : CAMERA_PROBE_UNREACHABLE;
+    ESP_LOGI(TAG, "Camera probe result=%d", (int)outcome);
+    set_status(CAMERA_STREAM_STOPPED, ESP_OK);
+    set_probe(outcome, command->ipv4);
+}
+
+static void run_registration(const camera_command_t *command)
+{
+    camera_register_state_t outcome = rtsp_check(command);
+    if (outcome == CAMERA_REGISTER_OK) {
+        /* The account first: a camera without a usable account would only fail later. */
+        if (!save_account_blocking(command) || !wait_until_account_saved(command->ipv4)) {
+            outcome = CAMERA_REGISTER_SAVE_FAILED;
+        } else if (onvif_discovery_service_add_camera(command->ipv4, NULL) == ESP_ERR_NO_MEM) {
+            outcome = CAMERA_REGISTER_LIST_FULL;
+        }
+    }
+    ESP_LOGI(TAG, "Camera registration result=%d", (int)outcome);
+    set_status(CAMERA_STREAM_STOPPED, ESP_OK);
+    set_register(outcome, command->ipv4);
+}
+
 static void stream_worker(void *argument)
 {
     (void)argument;
@@ -1055,6 +1289,20 @@ static void stream_worker(void *argument)
         if (command.kind == COMMAND_STOP) {
             clear_published_frame();
             set_status(CAMERA_STREAM_STOPPED, ESP_OK);
+            memset(&command, 0, sizeof(command));
+            continue;
+        }
+        if (command.kind == COMMAND_REGISTER || command.kind == COMMAND_PROBE) {
+            clear_published_frame();
+            if (command.kind == COMMAND_PROBE) run_probe(&command);
+            else run_registration(&command);
+            memset(&command, 0, sizeof(command));
+            continue;
+        }
+        const bool save_after_play = command.kind == COMMAND_PLAY;
+        if (command.kind == COMMAND_PLAY_SAVED && !load_saved_account(&command)) {
+            clear_published_frame();
+            set_status(CAMERA_STREAM_ERROR, ESP_ERR_NOT_FOUND);
             memset(&command, 0, sizeof(command));
             continue;
         }
@@ -1096,10 +1344,25 @@ static void stream_worker(void *argument)
             opened_any = true;
             set_status(CAMERA_STREAM_PLAYING, ESP_OK);
             bool stream_ok = true;
+            const int64_t playing_since_us = esp_timer_get_time();
+            /* PLAY 200 proves the camera accepted this account. */
+            bool save_pending = save_after_play;
+            int64_t next_save_us = 0;
             while (!command_pending() && stream_ok) {
+                if (save_pending && esp_timer_get_time() >= next_save_us) {
+                    save_pending = !request_account_save(&command);
+                    next_save_us = esp_timer_get_time() + ACCOUNT_SAVE_RETRY_US;
+                }
                 stream_ok = consume_interleaved_packet(&session);
             }
             decoder_error = session.decoder_error;
+            if (!command_pending()) {
+                ESP_LOGW(TAG, "video session ended reason=%s detail=%d after_ms=%lu lag_ms=%ld",
+                         session.end_reason != NULL ? session.end_reason : "unknown",
+                         session.end_detail,
+                         (unsigned long)((esp_timer_get_time() - playing_since_us) / 1000),
+                         (long)session.lag_ms);
+            }
             if (!decoder_error) session_teardown(&session);
             session_cleanup(&session);
             if (command_pending() || !decoder_error) break;
@@ -1179,51 +1442,129 @@ static bool append_nal(stream_session_t *session, const uint8_t *nal, size_t siz
            append_bytes(session, nal, size);
 }
 
-static uint16_t yuv_to_rgb565(int y, int u, int v)
+/* Returns false only when the picture can never be shown. A busy UI just drops it. */
+static bool publish_frame(stream_session_t *session, const np2_sub0h264_frame_t *frame)
 {
-    const int c = y - 16;
-    const int d = u - 128;
-    const int e = v - 128;
-    const int r = (298 * c + 409 * e + 128) >> 8;
-    const int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-    const int b = (298 * c + 516 * d + 128) >> 8;
-    const uint16_t rr = (uint16_t)((r < 0 ? 0 : r > 255 ? 255 : r) >> 3);
-    const uint16_t gg = (uint16_t)((g < 0 ? 0 : g > 255 ? 255 : g) >> 2);
-    const uint16_t bb = (uint16_t)((b < 0 ? 0 : b > 255 ? 255 : b) >> 3);
-    return (uint16_t)((rr << 11U) | (gg << 5U) | bb);
-}
-
-static bool publish_i420(const uint8_t *i420, size_t size,
-                         uint16_t width, uint16_t height)
-{
-    if (i420 == NULL || width == 0U || height == 0U ||
-        width > CAMERA_STREAM_MAX_WIDTH || height > CAMERA_STREAM_MAX_HEIGHT ||
-        (width & 1U) != 0U || (height & 1U) != 0U) return false;
-    const size_t pixels = (size_t)width * height;
-    if (size < pixels + pixels / 2U) return false;
-    const uint8_t *const y_plane = i420;
-    const uint8_t *const u_plane = i420 + pixels;
-    const uint8_t *const v_plane = u_plane + pixels / 4U;
-    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) return false;
+    const uint16_t width = frame->visible_width;
+    const uint16_t height = frame->visible_height;
+    if (width == 0U || height == 0U || width > CAMERA_STREAM_MAX_WIDTH ||
+        height > CAMERA_STREAM_MAX_HEIGHT || (width & 1U) != 0U || (height & 1U) != 0U ||
+        frame->crop_x + width > frame->width || frame->crop_y + height > frame->height)
+        return false;
+    const int64_t start_us = esp_timer_get_time();
+    if (session->last_publish_us != 0 &&
+        start_us - session->last_publish_us < PUBLISH_MIN_INTERVAL_US) {
+        ++session->stats.dropped;
+        return true;
+    }
+    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) {
+        ++session->stats.dropped;
+        return true;
+    }
     const uint8_t target = (uint8_t)(s_published_frame ^ 1U);
     xSemaphoreGive(s_frame_mutex);
-    uint16_t *const rgb = (uint16_t *)s_frames[target];
-    for (uint16_t row = 0U; row < height; ++row) {
-        const size_t y_row = (size_t)row * width;
-        const size_t uv_row = (size_t)(row / 2U) * (width / 2U);
-        for (uint16_t col = 0U; col < width; ++col) {
-            const size_t p = y_row + col;
-            const size_t uv = uv_row + col / 2U;
-            rgb[p] = yuv_to_rgb565(y_plane[p], u_plane[uv], v_plane[uv]);
-        }
+    const i420_rgb565_source_t source = {
+        .y = frame->y + (size_t)frame->crop_y * frame->y_stride + frame->crop_x,
+        .u = frame->u + (size_t)(frame->crop_y / 2U) * frame->uv_stride + frame->crop_x / 2U,
+        .v = frame->v + (size_t)(frame->crop_y / 2U) * frame->uv_stride + frame->crop_x / 2U,
+        .y_stride = frame->y_stride,
+        .uv_stride = frame->uv_stride,
+        .width = width,
+        .height = height,
+    };
+    if (!i420_rgb565_convert(&source, (uint16_t *)s_frames[target])) return false;
+    const int64_t convert_us = esp_timer_get_time() - start_us;
+    session->last_publish_us = start_us;
+    session->stats.convert_us += convert_us;
+    if (convert_us > session->stats.convert_max_us) session->stats.convert_max_us = convert_us;
+    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) {
+        ++session->stats.dropped;
+        return true;
     }
-    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) return false;
+    ++session->stats.published;
     s_published_frame = target;
     s_frame_ready = true;
     s_status.width = width;
     s_status.height = height;
     ++s_status.frame_sequence;
     xSemaphoreGive(s_frame_mutex);
+    return true;
+}
+
+static void log_video_stats(stream_session_t *session, int64_t now_us)
+{
+    video_stats_t *const stats = &session->stats;
+    if (stats->window_start_us == 0) stats->window_start_us = now_us;
+    if (now_us - stats->window_start_us < VIDEO_STATS_INTERVAL_US) return;
+    const uint32_t elapsed_ms = (uint32_t)((now_us - stats->window_start_us) / 1000);
+    ESP_LOGI(TAG,
+             "video ms=%lu decoded=%lu published=%lu dropped=%lu skipped=%lu lag_ms=%ld errors=%lu "
+             "decode_us_avg=%lu max=%lu convert_us_avg=%lu max=%lu "
+             "stack_free=%u internal_free=%u internal_min=%u",
+             (unsigned long)elapsed_ms, (unsigned long)stats->decoded,
+             (unsigned long)stats->published, (unsigned long)stats->dropped,
+             (unsigned long)stats->skipped, (long)session->lag_ms,
+             (unsigned long)stats->decode_errors,
+             (unsigned long)(stats->decode_us / (stats->decoded != 0U ? stats->decoded : 1U)),
+             (unsigned long)stats->decode_max_us,
+             (unsigned long)(stats->convert_us / (stats->published != 0U ? stats->published : 1U)),
+             (unsigned long)stats->convert_max_us,
+             (unsigned int)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned int)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    *stats = (video_stats_t){.window_start_us = now_us};
+}
+
+/* The buffer only holds NALs appended here, each after a 4-byte start code. */
+static const uint8_t *find_next_nal(const uint8_t *cursor, const uint8_t *end)
+{
+    for (; cursor + sizeof(START_CODE) < end; ++cursor) {
+        if (memcmp(cursor, START_CODE, sizeof(START_CODE)) == 0)
+            return cursor + sizeof(START_CODE);
+    }
+    return NULL;
+}
+
+/* Returns false when the session must end. */
+static bool decode_nal(stream_session_t *session, const uint8_t *nal, size_t size)
+{
+    const uint8_t type = nal[0] & 0x1FU;
+    if (session->awaiting_idr && type == 1U) {
+        ++session->stats.skipped;
+        log_video_stats(session, esp_timer_get_time());
+        return true;
+    }
+    const int64_t start_us = esp_timer_get_time();
+    const int result = np2_sub0h264_decode_nal(session->decoder, nal, size);
+    const int64_t now_us = esp_timer_get_time();
+    if (result == NP2_SUB0H264_UNSUPPORTED) {
+        ESP_LOGW(TAG, "H264 stream uses an unsupported feature (nal_type=%u)", (unsigned int)type);
+        session->decoder_error = true;
+        return false;
+    }
+    if (result == NP2_SUB0H264_ERROR) {
+        ++session->stats.decode_errors;
+        session->awaiting_idr = true;
+        ESP_LOGW(TAG, "H264 decode error (nal_type=%u); waiting for next IDR", (unsigned int)type);
+        if (++session->consecutive_errors >= DECODER_MAX_CONSECUTIVE_ERRORS) {
+            session->decoder_error = true;
+            return false;
+        }
+        return true;
+    }
+    if (result != NP2_SUB0H264_FRAME) return true;
+    session->consecutive_errors = 0U;
+    session->awaiting_idr = false;
+    const int64_t decode_us = now_us - start_us;
+    ++session->stats.decoded;
+    session->stats.decode_us += decode_us;
+    if (decode_us > session->stats.decode_max_us) session->stats.decode_max_us = decode_us;
+    np2_sub0h264_frame_t frame = {0};
+    if (np2_sub0h264_get_frame(session->decoder, &frame) == 0 || !publish_frame(session, &frame)) {
+        session->decoder_error = true;
+        return false;
+    }
+    log_video_stats(session, now_us);
     return true;
 }
 
@@ -1247,33 +1588,15 @@ static bool decode_access_unit(stream_session_t *session)
             }
         }
     }
-    esp_h264_dec_in_frame_t in = {
-        .raw_data = {.buffer = session->access_unit,
-                     .len = (uint32_t)session->access_unit_size},
-    };
+    const uint8_t *const end = session->access_unit + session->access_unit_size;
+    const uint8_t *nal = find_next_nal(session->access_unit, end);
     bool valid = true;
-    while (in.raw_data.len > 0U) {
-        esp_h264_dec_out_frame_t out = {0};
-        if (esp_h264_dec_process(session->decoder, &in, &out) != ESP_H264_ERR_OK ||
-            in.consume == 0U || in.consume > in.raw_data.len) {
-            valid = false;
-            session->decoder_error = true;
-            break;
-        }
-        if (out.out_size > 0U) {
-            esp_h264_resolution_t resolution = {0};
-            if (esp_h264_dec_get_resolution(session->decoder_params, &resolution) !=
-                    ESP_H264_ERR_OK ||
-                !publish_i420(out.outbuf, out.out_size,
-                              (uint16_t)resolution.width,
-                              (uint16_t)resolution.height)) {
-                valid = false;
-                session->decoder_error = true;
-                break;
-            }
-        }
-        in.raw_data.buffer += in.consume;
-        in.raw_data.len -= in.consume;
+    while (nal != NULL && valid) {
+        const uint8_t *const next = find_next_nal(nal, end);
+        const size_t size = (next != NULL ? (size_t)(next - sizeof(START_CODE) - nal)
+                                          : (size_t)(end - nal));
+        valid = decode_nal(session, nal, size);
+        nal = next;
     }
     session->access_unit_size = 0U;
     return valid;
@@ -1341,17 +1664,49 @@ static bool handle_h264_payload(stream_session_t *session,
     return true;
 }
 
+/* The decoder cannot catch up by itself: past the limit it skips to the next IDR,
+ * trading a short freeze for bounded latency and a connection the camera keeps open. */
+static void update_video_lag(stream_session_t *session, const uint8_t *packet)
+{
+    const uint32_t timestamp = ((uint32_t)packet[4] << 24U) | ((uint32_t)packet[5] << 16U) |
+                               ((uint32_t)packet[6] << 8U) | packet[7];
+    const int64_t now_us = esp_timer_get_time();
+    if (!session->rtp_clock_started) {
+        session->rtp_clock_started = true;
+        session->rtp_clock_base = timestamp;
+        session->rtp_wall_base_us = now_us;
+        return;
+    }
+    const int64_t media_ms = (uint32_t)(timestamp - session->rtp_clock_base) / RTP_CLOCK_KHZ;
+    const int64_t lag_ms = (now_us - session->rtp_wall_base_us) / 1000 - media_ms;
+    session->lag_ms = (int32_t)lag_ms;
+    if (lag_ms > VIDEO_MAX_LAG_MS) session->awaiting_idr = true;
+}
+
 static bool consume_interleaved_packet(stream_session_t *session)
 {
     uint8_t header[4] = {0};
-    if (!recv_exact(session, header, sizeof(header), 5000U) || header[0] != '$')
+    if (!recv_exact(session, header, sizeof(header), 5000U)) return false;
+    if (header[0] != '$') {
+        session->end_reason = "not-interleaved";
+        session->end_detail = header[0];
         return false;
+    }
     const size_t length = ((size_t)header[2] << 8U) | header[3];
-    if (length < 12U || length > RTP_PACKET_CAPACITY ||
-        !recv_exact(session, session->packet, length, 5000U)) return false;
+    if (length < 12U || length > RTP_PACKET_CAPACITY) {
+        session->end_reason = "packet-length";
+        session->end_detail = (int)length;
+        return false;
+    }
+    if (!recv_exact(session, session->packet, length, 5000U)) return false;
     if (header[1] != 0U) return true; /* RTCP channel */
     const uint8_t *const packet = session->packet;
-    if ((packet[0] >> 6U) != 2U) return false;
+    if ((packet[0] >> 6U) != 2U) {
+        session->end_reason = "rtp-version";
+        session->end_detail = packet[0];
+        return false;
+    }
+    update_video_lag(session, packet);
     const size_t csrc_count = packet[0] & 0x0FU;
     size_t offset = 12U + csrc_count * 4U;
     if (offset > length) return false;
@@ -1369,6 +1724,11 @@ static bool consume_interleaved_packet(stream_session_t *session)
         payload_end -= padding;
     }
     if (payload_end <= offset) return false;
-    return handle_h264_payload(session, packet + offset, payload_end - offset,
-                               (packet[1] & 0x80U) != 0U);
+    const bool handled = handle_h264_payload(session, packet + offset, payload_end - offset,
+                                             (packet[1] & 0x80U) != 0U);
+    if (!handled && session->end_reason == NULL) {
+        session->end_reason = session->decoder_error ? "decoder" : "rtp-payload";
+        session->end_detail = packet[offset] & 0x1FU;
+    }
+    return handled;
 }

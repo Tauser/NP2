@@ -7,6 +7,7 @@
 #include "app_event_bus.h"
 #include "app_state.h"
 #include "camera_stream_service.h"
+#include "onvif_discovery_service.h"
 #include "esp_heap_caps.h"
 #include "np_ewelink.h"
 #include "np_form.h"
@@ -30,6 +31,26 @@
 #define IOT_CAMERA_ROW_PITCH 80
 
 static lv_image_dsc_t s_camera_stream_image = {0};
+#define CAMERA_HEADER_ACTION_STEP 52
+#define CAMERA_STATUS_WIDTH 640
+#define CAMERA_CARD_W 988
+#define CAMERA_CARD_H 494
+/* The picture takes the whole card, leaving a thin rim so the card border stays visible. */
+#define CAMERA_VIDEO_MARGIN 6
+#define CAMERA_VIDEO_W (CAMERA_CARD_W - 2 * CAMERA_VIDEO_MARGIN)
+#define CAMERA_VIDEO_H (CAMERA_CARD_H - 2 * CAMERA_VIDEO_MARGIN)
+#define CAMERA_ACTION_Y 14
+static void camera_add_before_hide(void *user_data);
+static void camera_add_set_phase(np_devices_view_t *view, uint8_t phase);
+static void camera_address_changed_cb(lv_event_t *event);
+
+enum {
+    ADD_PHASE_ADDRESS = 0,
+    ADD_PHASE_VERIFYING,
+    ADD_PHASE_NEED_ACCOUNT,
+    ADD_PHASE_OPEN_READY,
+    ADD_PHASE_REGISTERING,
+};
 
 static void set_pos_if_changed(lv_obj_t *obj, int32_t x, int32_t y)
 {
@@ -77,10 +98,26 @@ static void camera_viewer_before_hide(void *user_data)
     np_devices_view_t *const view = user_data;
     if (view == NULL) return;
     (void)camera_stream_service_stop();
-    if (view->camera_username_input != NULL)
-        lv_textarea_set_text(view->camera_username_input, "");
-    if (view->camera_password_input != NULL)
-        lv_textarea_set_text(view->camera_password_input, "");
+    view->camera_viewer_closing = true;
+    np_modal_hide(&view->camera_auth_modal);
+    view->camera_viewer_closing = false;
+}
+
+/* Cancelling the first login leaves nothing to watch, so the viewer closes too. */
+static void camera_auth_before_hide(void *user_data)
+{
+    np_devices_view_t *const view = user_data;
+    if (view == NULL) return;
+    lv_textarea_set_text(view->camera_username_input, "");
+    lv_textarea_set_text(view->camera_password_input, "");
+    view->camera_auth_submitted = false;
+    if (view->camera_viewer_closing) return;
+    camera_stream_status_t status = {0};
+    camera_stream_service_get_status(&status);
+    if (status.state != CAMERA_STREAM_PLAYING && status.state != CAMERA_STREAM_CONNECTING &&
+        status.state != CAMERA_STREAM_AUTHENTICATING) {
+        np_modal_hide(&view->camera_viewer_modal);
+    }
 }
 
 static lv_obj_t *camera_card_create(lv_obj_t *parent, uint8_t index,
@@ -371,40 +408,114 @@ np_devices_view_t np_devices_build_with_header(lv_obj_t *parent,
 
     set_page(&view, NP_DEVICES_PAGE_OVERVIEW);
 
-    np_modal_create(&view.camera_viewer_modal, view.root, 18, 84, 988, 494,
-                    NP_ICON_CAMERA, np_c_accent(), "Tapo C200", "RTSP local • vídeo 640×360");
+    /* No header: the card is the picture, with the three actions floating over its top-right
+     * corner. The modal's title, subtitle and divider are built and then hidden, so close
+     * keeps the shared modal behaviour. */
+    np_modal_create(&view.camera_viewer_modal, view.root, 18, 84, CAMERA_CARD_W, CAMERA_CARD_H,
+                    NULL, np_c_accent(), "", "");
+    lv_obj_t *const viewer_panel = view.camera_viewer_modal.panel;
+    for (uint32_t i = 0U; i < lv_obj_get_child_count(viewer_panel); ++i) {
+        lv_obj_t *const child = lv_obj_get_child(viewer_panel, (int32_t)i);
+        if (child != view.camera_viewer_modal.content && child != view.camera_viewer_modal.close_button)
+            lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_pos(view.camera_viewer_modal.content, 0, 0);
+    lv_obj_set_size(view.camera_viewer_modal.content, CAMERA_CARD_W, CAMERA_CARD_H);
+    lv_obj_move_to_index(view.camera_viewer_modal.content, 0);
+    lv_obj_remove_flag(view.camera_viewer_modal.content, LV_OBJ_FLAG_SCROLLABLE);
+    view.camera_reconnect_button = np_icon_button(viewer_panel,
+        CAMERA_CARD_W - 64 - 2 * CAMERA_HEADER_ACTION_STEP, CAMERA_ACTION_Y, 44, NP_ICON_REFRESH);
+    view.camera_change_account_button = np_icon_button(viewer_panel,
+        CAMERA_CARD_W - 64 - CAMERA_HEADER_ACTION_STEP, CAMERA_ACTION_Y, 44, NP_ICON_ACCOUNT);
+    lv_obj_set_pos(view.camera_viewer_modal.close_button, CAMERA_CARD_W - 64, CAMERA_ACTION_Y);
+    lv_obj_t *const actions[] = {view.camera_reconnect_button, view.camera_change_account_button,
+                                 view.camera_viewer_modal.close_button};
+    for (size_t i = 0U; i < sizeof(actions) / sizeof(actions[0]); ++i) {
+        /* Translucent so the buttons read on any picture without hiding it. */
+        lv_obj_set_style_bg_color(actions[i], lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(actions[i], LV_OPA_60, 0);
+    }
+    /* The picture is scaled to fit the card, keeping its 16:9 shape. Nearest sampling: this runs in
+     * software on the LVGL task at video rate. */
     lv_obj_t *const video_surface = np_fill(view.camera_viewer_modal.content,
-        22, 20, 640, 360, lv_color_black(), LV_OPA_COVER, NP_RADIUS_SURFACE);
+        CAMERA_VIDEO_MARGIN, CAMERA_VIDEO_MARGIN, CAMERA_VIDEO_W, CAMERA_VIDEO_H,
+        lv_color_black(), LV_OPA_COVER, NP_RADIUS_SURFACE);
+    lv_obj_remove_flag(video_surface, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_clip_corner(video_surface, true, 0);
     view.camera_stream_image = lv_image_create(video_surface);
+    lv_obj_set_size(view.camera_stream_image, CAMERA_VIDEO_W, CAMERA_VIDEO_H);
     lv_obj_center(view.camera_stream_image);
-    lv_obj_set_size(view.camera_stream_image, 640, 360);
+    lv_image_set_inner_align(view.camera_stream_image, LV_IMAGE_ALIGN_CONTAIN);
+    lv_image_set_antialias(view.camera_stream_image, false);
     view.camera_frame_buffer = heap_caps_malloc(CAMERA_STREAM_RGB565_BYTES,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
-    np_label(view.camera_viewer_modal.content, "Conta da Câmera", NP_FONT_MD,
-             np_c_text(), 690, 18, 264, LV_TEXT_ALIGN_LEFT);
+    /* Only over the empty surface while there is no picture. */
+    view.camera_stream_status = np_label(video_surface, "", NP_FONT_MD, lv_color_white(),
+        (CAMERA_VIDEO_W - CAMERA_STATUS_WIDTH) / 2, CAMERA_VIDEO_H / 2 - 24,
+        CAMERA_STATUS_WIDTH, LV_TEXT_ALIGN_CENTER);
+    lv_label_set_long_mode(view.camera_stream_status, LV_LABEL_LONG_WRAP);
+    np_set_visible(view.camera_viewer_modal.scrim, false);
+
+    /* Kept in the upper half so the on-screen keyboard never covers the fields. */
+    np_modal_create(&view.camera_auth_modal, view.root, 272, 12, 480, 330,
+                    NP_ICON_CAMERA, np_c_accent(), "Conta da Câmera",
+                    "Fica salva neste painel para esta câmera");
     view.camera_username_input = np_form_text_input(
-        view.camera_viewer_modal.content, 690, 52, 264, 44,
+        view.camera_auth_modal.content, 24, 8, 432, 44,
         "Usuário local do Tapo", NULL);
     lv_textarea_set_max_length(view.camera_username_input, 47U);
     view.camera_password_input = np_form_text_input(
-        view.camera_viewer_modal.content, 690, 108, 264, 44,
+        view.camera_auth_modal.content, 24, 60, 432, 44,
         "Senha da câmera", NULL);
     lv_textarea_set_password_mode(view.camera_password_input, true);
     lv_textarea_set_max_length(view.camera_password_input, 63U);
-    view.camera_stream_start_button = np_button(
-        view.camera_viewer_modal.content, 690, 166, 264, 48, "Iniciar vídeo", true);
-    view.camera_stream_status = np_label(
-        view.camera_viewer_modal.content, "Informe a conta local da câmera.",
-        NP_FONT_SM, np_c_text_2(), 690, 226, 264, LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(view.camera_stream_status, LV_LABEL_LONG_WRAP);
-    lv_obj_set_height(view.camera_stream_status, 48);
-    view.camera_stream_stop_button = np_button(
-        view.camera_viewer_modal.content, 690, 286, 264, 48, "Parar vídeo", false);
-    np_label(view.camera_viewer_modal.content,
-        "O usuário e a senha não são salvos. Digite-os novamente após reiniciar o painel.",
-        NP_FONT_SM, np_c_text_3(), 690, 344, 264, LV_TEXT_ALIGN_LEFT);
-    np_set_visible(view.camera_viewer_modal.scrim, false);
+    view.camera_auth_submit_button = np_button(
+        view.camera_auth_modal.content, 24, 114, 432, 48, "Entrar", true);
+    view.camera_auth_status = np_label(
+        view.camera_auth_modal.content, "", NP_FONT_SM, np_c_text_2(), 24, 170, 432,
+        LV_TEXT_ALIGN_LEFT);
+    lv_label_set_long_mode(view.camera_auth_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(view.camera_auth_status, 44);
+    np_set_visible(view.camera_auth_modal.scrim, false);
+
+    /* Registering a camera: one screen, kept in the upper area so the keyboard never covers it. */
+    np_modal_create(&view.camera_add_modal, view.root, 192, 4, 640, 372,
+                    NP_ICON_CAMERA, np_c_accent(), "Adicionar câmera",
+                    "Use a conta local criada no app Tapo");
+    lv_obj_remove_flag(view.camera_add_modal.content, LV_OBJ_FLAG_SCROLLABLE);
+    view.camera_add_discovery_status = np_label(view.camera_add_modal.content, "",
+        NP_FONT_SM, np_c_text_2(), 24, 4, 592, LV_TEXT_ALIGN_LEFT);
+    lv_obj_set_height(view.camera_add_discovery_status, 22);
+    for (uint8_t i = 0U; i < NP_CAMERA_ADD_CHIPS; ++i) {
+        view.camera_add_chips[i] = np_button(view.camera_add_modal.content,
+            24 + (int32_t)i * 152, 28, 144, 40, "", false);
+        np_set_visible(view.camera_add_chips[i], false);
+    }
+    view.camera_address_input = np_form_text_input(view.camera_add_modal.content,
+        24, 78, 420, 44, "IP da câmera, ex.: 192.168.1.8", NULL);
+    lv_textarea_set_max_length(view.camera_address_input, 15U);
+    lv_textarea_set_accepted_chars(view.camera_address_input, "0123456789.");
+    view.camera_add_verify_button = np_button(view.camera_add_modal.content,
+        452, 78, 164, 44, "Verificar", true);
+    /* Account fields and the add button appear only once the camera has answered. */
+    view.camera_add_user_input = np_form_text_input(view.camera_add_modal.content,
+        24, 130, 292, 44, "Usuário da câmera", NULL);
+    lv_textarea_set_max_length(view.camera_add_user_input, 47U);
+    view.camera_add_password_input = np_form_text_input(view.camera_add_modal.content,
+        324, 130, 292, 44, "Senha da câmera", NULL);
+    lv_textarea_set_password_mode(view.camera_add_password_input, true);
+    lv_textarea_set_max_length(view.camera_add_password_input, 63U);
+    view.camera_add_submit_button = np_button(view.camera_add_modal.content,
+        24, 184, 592, 48, "Adicionar câmera", true);
+    view.camera_add_status = np_label(view.camera_add_modal.content, "", NP_FONT_SM,
+        np_c_text_2(), 24, 130, 592, LV_TEXT_ALIGN_LEFT);
+    lv_label_set_long_mode(view.camera_add_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(view.camera_add_status, 56);
+    np_set_visible(view.camera_add_user_input, false);
+    np_set_visible(view.camera_add_password_input, false);
+    np_set_visible(view.camera_add_submit_button, false);
+    np_set_visible(view.camera_add_modal.scrim, false);
 
     np_modal_create(&view.add_modal, view.root, 192, 68, 640, 464,
                     NP_ICON_ROUTER, np_c_accent(), "Adicionar", "Integração local");
@@ -415,18 +526,6 @@ np_devices_view_t np_devices_build_with_header(lv_obj_t *parent,
     lv_obj_set_height(view.modal_description, 72);
     view.scan_button = np_button(view.add_modal.content, 32, 88, 576, 46,
                                  "Buscar SONOFF eWeLink", true);
-    view.camera_scan_button = np_button(view.add_modal.content, 330, 88, 278, 46,
-                                        "Buscar câmera ONVIF", true);
-    lv_obj_set_width(view.scan_button, 278);
-    view.camera_address_label = np_label(view.add_modal.content,
-        "Ou informe o IP da câmera (serviço ONVIF 2020)", NP_FONT_SM,
-        np_c_text_2(), 32, 141, 576, LV_TEXT_ALIGN_LEFT);
-    view.camera_address_input = np_form_text_input(view.add_modal.content,
-        32, 163, 420, 44, "Ex.: 192.168.1.8", NULL);
-    lv_textarea_set_max_length(view.camera_address_input, 15U);
-    lv_textarea_set_accepted_chars(view.camera_address_input, "0123456789.");
-    view.camera_address_check_button = np_button(view.add_modal.content,
-        464, 163, 144, 44, "Verificar IP", true);
     view.scan_status = np_label(view.add_modal.content, "", NP_FONT_SM,
                                  np_c_text_2(), 32, 216, 576,
                                  LV_TEXT_ALIGN_LEFT);
@@ -439,10 +538,6 @@ np_devices_view_t np_devices_build_with_header(lv_obj_t *parent,
     view.modal_close_button = np_button(view.add_modal.content, 208, 366,
                                          224, 46, "Fechar", true);
     np_set_visible(view.scan_button, false);
-    np_set_visible(view.camera_scan_button, false);
-    np_set_visible(view.camera_address_label, false);
-    np_set_visible(view.camera_address_input, false);
-    np_set_visible(view.camera_address_check_button, false);
     np_set_visible(view.scan_status, false);
     np_set_visible(view.scan_results, false);
 
@@ -455,6 +550,14 @@ void np_devices_rebind(np_devices_view_t *view)
     np_modal_rebind(&view->camera_viewer_modal);
     np_modal_set_close_callback(&view->camera_viewer_modal,
                                 camera_viewer_before_hide, view);
+    np_modal_rebind(&view->camera_auth_modal);
+    np_modal_set_close_callback(&view->camera_auth_modal,
+                                camera_auth_before_hide, view);
+    np_modal_rebind(&view->camera_add_modal);
+    np_modal_set_close_callback(&view->camera_add_modal,
+                                camera_add_before_hide, view);
+    lv_obj_add_event_cb(view->camera_address_input, camera_address_changed_cb,
+                        LV_EVENT_VALUE_CHANGED, view);
 }
 
 void np_devices_set_channel_event_cb(np_devices_view_t *view,
@@ -471,18 +574,244 @@ void np_devices_open_camera(np_devices_view_t *view, uint8_t index)
     if (view == NULL || index >= APP_IOT_MAX_CAMERAS ||
         view->camera_ipv4[index][0] == '\0') return;
     view->selected_camera = index;
-    lv_textarea_set_text(view->camera_username_input, "");
-    lv_textarea_set_text(view->camera_password_input, "");
-    char status[48] = {0};
-    (void)snprintf(status, sizeof(status), "Câmera %s • stream2", view->camera_ipv4[index]);
-    np_set_text(view->camera_stream_status, status);
+    view->camera_auth_rejection_shown = false;
     np_modal_show(&view->camera_viewer_modal);
+    np_devices_connect_camera(view);
+}
+
+void np_devices_connect_camera(np_devices_view_t *view)
+{
+    if (view == NULL) return;
+    view->camera_auth_rejection_shown = false;
+    const esp_err_t result =
+        camera_stream_service_play_saved(view->camera_ipv4[view->selected_camera]);
+    if (result == ESP_ERR_NOT_FOUND) {
+        np_devices_show_camera_auth(view);
+    } else if (result == ESP_OK) {
+        np_set_text(view->camera_stream_status, "Conectando à câmera…");
+    } else {
+        np_set_text(view->camera_stream_status, "Não foi possível iniciar o vídeo.");
+    }
+}
+
+void np_devices_show_camera_auth(np_devices_view_t *view)
+{
+    if (view == NULL) return;
+    view->camera_auth_submitted = false;
+    np_set_text(view->camera_auth_status, "Informe a conta local criada no app Tapo.");
+    np_modal_show(&view->camera_auth_modal);
 }
 
 void np_devices_close_camera(np_devices_view_t *view)
 {
     if (view == NULL) return;
+    np_modal_hide(&view->camera_add_modal);
     np_modal_hide(&view->camera_viewer_modal);
+}
+
+static void camera_add_before_hide(void *user_data)
+{
+    np_devices_view_t *const view = user_data;
+    if (view == NULL) return;
+    lv_textarea_set_text(view->camera_add_user_input, "");
+    lv_textarea_set_text(view->camera_add_password_input, "");
+    view->camera_add_phase = ADD_PHASE_ADDRESS;
+}
+
+/* Which controls are shown follows what the camera has said so far. */
+static void camera_add_set_phase(np_devices_view_t *view, uint8_t phase)
+{
+    view->camera_add_phase = phase;
+    const bool busy = phase == ADD_PHASE_VERIFYING || phase == ADD_PHASE_REGISTERING;
+    const bool ready = phase == ADD_PHASE_NEED_ACCOUNT || phase == ADD_PHASE_OPEN_READY ||
+                       phase == ADD_PHASE_REGISTERING;
+    const bool account = ready && view->camera_add_needs_account;
+    np_set_visible(view->camera_add_user_input, account);
+    np_set_visible(view->camera_add_password_input, account);
+    np_set_visible(view->camera_add_submit_button, ready);
+    const int32_t button_y = account ? 184 : 130;
+    lv_obj_set_y(view->camera_add_submit_button, button_y);
+    lv_obj_set_y(view->camera_add_status, ready ? button_y + 56 : 130);
+    if (busy) lv_obj_add_state(view->camera_add_verify_button, LV_STATE_DISABLED);
+    else lv_obj_remove_state(view->camera_add_verify_button, LV_STATE_DISABLED);
+    if (phase == ADD_PHASE_REGISTERING) lv_obj_add_state(view->camera_add_submit_button, LV_STATE_DISABLED);
+    else lv_obj_remove_state(view->camera_add_submit_button, LV_STATE_DISABLED);
+}
+
+/* A different address invalidates what was learned about the previous one. */
+static void camera_address_changed_cb(lv_event_t *event)
+{
+    np_devices_view_t *const view = lv_event_get_user_data(event);
+    if (view == NULL || view->camera_add_phase == ADD_PHASE_ADDRESS ||
+        view->camera_add_phase == ADD_PHASE_VERIFYING ||
+        view->camera_add_phase == ADD_PHASE_REGISTERING) return;
+    if (strcmp(lv_textarea_get_text(view->camera_address_input), view->camera_add_verified_ip) == 0) return;
+    view->camera_add_needs_account = false;
+    camera_add_set_phase(view, ADD_PHASE_ADDRESS);
+    np_set_text(view->camera_add_status, "Endereço alterado. Toque em Verificar de novo.");
+}
+
+static bool camera_already_registered(const np_devices_view_t *view, const char *ipv4)
+{
+    for (uint8_t i = 0U; i < APP_IOT_MAX_CAMERAS; ++i) {
+        if (view->camera_ipv4[i][0] != '\0' && strcmp(view->camera_ipv4[i], ipv4) == 0) return true;
+    }
+    return false;
+}
+
+static const char *camera_probe_message(camera_probe_state_t state)
+{
+    switch (state) {
+    case CAMERA_PROBE_UNREACHABLE:
+        return "Não encontrei a câmera nesse IP. Confira o endereço e se o painel e a câmera estão na mesma rede.";
+    case CAMERA_PROBE_NOT_A_CAMERA:
+        return "Esse endereço respondeu, mas não oferece vídeo RTSP no caminho esperado.";
+    default:
+        return "";
+    }
+}
+
+static const char *camera_register_message(camera_register_state_t state)
+{
+    switch (state) {
+    case CAMERA_REGISTER_AUTH_REJECTED:
+        return "Usuário ou senha recusados pela câmera. Confira a Conta da Câmera no app Tapo.";
+    case CAMERA_REGISTER_UNREACHABLE:
+        return "A câmera parou de responder. Confira a rede e tente de novo.";
+    case CAMERA_REGISTER_STREAM_REFUSED:
+        return "A câmera respondeu, mas recusou o vídeo. Confira se o RTSP está habilitado.";
+    case CAMERA_REGISTER_LIST_FULL:
+        return "O painel já tem 4 câmeras cadastradas.";
+    case CAMERA_REGISTER_SAVE_FAILED:
+        return "A câmera funcionou, mas não foi possível salvar a conta neste painel.";
+    default:
+        return "";
+    }
+}
+
+/* Found-on-network shortcuts and the answers to the probe and the registration in progress. */
+static void refresh_camera_add(np_devices_view_t *view)
+{
+    if (!np_modal_is_visible(&view->camera_add_modal)) return;
+    /* Static on purpose: this runs on the LVGL task, whose stack is the scarce resource. Only
+     * that task touches these, and it never runs two refreshes at once. */
+    static onvif_sweep_status_t sweep;
+    static char line[96];
+    onvif_discovery_service_get_sweep(&sweep);
+    line[0] = '\0';
+
+    uint8_t shown = 0U;
+    for (uint8_t i = 0U; i < sweep.count && shown < NP_CAMERA_ADD_CHIPS; ++i) {
+        if (camera_already_registered(view, sweep.candidates[i].address)) continue;
+        (void)snprintf(view->camera_add_chip_ipv4[shown], sizeof(view->camera_add_chip_ipv4[shown]),
+                       "%s", sweep.candidates[i].address);
+        lv_obj_t *const label = lv_obj_get_child(view->camera_add_chips[shown], 0);
+        if (label != NULL) np_set_text(label, sweep.candidates[i].address);
+        np_set_visible(view->camera_add_chips[shown], true);
+        ++shown;
+    }
+    for (uint8_t i = shown; i < NP_CAMERA_ADD_CHIPS; ++i) {
+        view->camera_add_chip_ipv4[i][0] = '\0';
+        np_set_visible(view->camera_add_chips[i], false);
+    }
+    if (sweep.busy) {
+        (void)snprintf(line, sizeof(line), shown > 0U
+                           ? "Procurando câmeras na rede… %u%%  Toque em uma para usar:"
+                           : "Procurando câmeras na rede… %u%%",
+                       (unsigned int)sweep.progress_percent);
+    } else if (sweep.last_result == ESP_ERR_INVALID_STATE) {
+        (void)snprintf(line, sizeof(line), "Conecte o painel ao Wi-Fi para procurar câmeras.");
+    } else if (shown > 0U) {
+        (void)snprintf(line, sizeof(line), "Câmeras na rede. Toque em uma para usar o IP:");
+    } else if (sweep.generation > 0U) {
+        (void)snprintf(line, sizeof(line), "Nenhuma câmera nova encontrada. Digite o IP abaixo.");
+    }
+    np_set_text(view->camera_add_discovery_status, line);
+
+    if (view->camera_add_phase != ADD_PHASE_VERIFYING && view->camera_add_phase != ADD_PHASE_REGISTERING)
+        return;
+    camera_stream_status_t status = {0};
+    camera_stream_service_get_status(&status);
+    if (view->camera_add_phase == ADD_PHASE_VERIFYING) {
+        switch (status.probe_state) {
+        case CAMERA_PROBE_OPEN:
+            view->camera_add_needs_account = false;
+            camera_add_set_phase(view, ADD_PHASE_OPEN_READY);
+            np_set_text(view->camera_add_status, "Esta câmera não pede senha. Toque em Adicionar câmera.");
+            break;
+        case CAMERA_PROBE_AUTH_REQUIRED:
+            view->camera_add_needs_account = true;
+            camera_add_set_phase(view, ADD_PHASE_NEED_ACCOUNT);
+            np_set_text(view->camera_add_status,
+                        "A câmera pede a Conta da Câmera, criada no app Tapo. Informe usuário e senha.");
+            break;
+        case CAMERA_PROBE_UNREACHABLE:
+        case CAMERA_PROBE_NOT_A_CAMERA:
+            camera_add_set_phase(view, ADD_PHASE_ADDRESS);
+            np_set_text(view->camera_add_status, camera_probe_message(status.probe_state));
+            break;
+        default:
+            break;
+        }
+        return;
+    }
+    if (status.register_state == CAMERA_REGISTER_OK) {
+        (void)snprintf(view->camera_open_after_add, sizeof(view->camera_open_after_add), "%s",
+                       status.register_ipv4);
+        np_modal_hide(&view->camera_add_modal);
+    } else if (status.register_state != CAMERA_REGISTER_CHECKING &&
+               status.register_state != CAMERA_REGISTER_IDLE) {
+        camera_add_set_phase(view, view->camera_add_needs_account ? ADD_PHASE_NEED_ACCOUNT
+                                                                  : ADD_PHASE_OPEN_READY);
+        np_set_text(view->camera_add_status, camera_register_message(status.register_state));
+    }
+}
+
+/* Asks the camera for its stream with no account, to learn whether one is needed. */
+esp_err_t np_devices_verify_camera_add(np_devices_view_t *view)
+{
+    if (view == NULL) return ESP_ERR_INVALID_ARG;
+    if (view->camera_add_phase == ADD_PHASE_VERIFYING || view->camera_add_phase == ADD_PHASE_REGISTERING)
+        return ESP_ERR_INVALID_STATE;
+    const char *const address = lv_textarea_get_text(view->camera_address_input);
+    const esp_err_t result = camera_stream_service_probe(address);
+    if (result != ESP_OK) {
+        np_set_text(view->camera_add_status, result == ESP_ERR_INVALID_ARG
+            ? "IP inválido. Use um endereço da sua rede, como 192.168.1.8."
+            : "Não foi possível verificar agora. Tente de novo.");
+        return result;
+    }
+    (void)snprintf(view->camera_add_verified_ip, sizeof(view->camera_add_verified_ip), "%s", address);
+    view->camera_add_needs_account = false;
+    camera_add_set_phase(view, ADD_PHASE_VERIFYING);
+    np_set_text(view->camera_add_status, "Verificando a câmera…");
+    return ESP_OK;
+}
+
+esp_err_t np_devices_submit_camera_add(np_devices_view_t *view)
+{
+    if (view == NULL || (view->camera_add_phase != ADD_PHASE_NEED_ACCOUNT &&
+                         view->camera_add_phase != ADD_PHASE_OPEN_READY))
+        return ESP_ERR_INVALID_STATE;
+    const bool account = view->camera_add_needs_account;
+    const esp_err_t result = camera_stream_service_register(
+        view->camera_add_verified_ip,
+        account ? lv_textarea_get_text(view->camera_add_user_input) : "",
+        account ? lv_textarea_get_text(view->camera_add_password_input) : "");
+    if (result != ESP_OK) return result;
+    camera_add_set_phase(view, ADD_PHASE_REGISTERING);
+    np_set_text(view->camera_add_status, "Adicionando a câmera…");
+    return ESP_OK;
+}
+
+void np_devices_use_camera_chip(np_devices_view_t *view, uint8_t index)
+{
+    if (view == NULL || index >= NP_CAMERA_ADD_CHIPS ||
+        view->camera_add_chip_ipv4[index][0] == '\0' ||
+        view->camera_add_phase == ADD_PHASE_VERIFYING ||
+        view->camera_add_phase == ADD_PHASE_REGISTERING) return;
+    lv_textarea_set_text(view->camera_address_input, view->camera_add_chip_ipv4[index]);
+    (void)np_devices_verify_camera_add(view); /* Picking a found camera goes straight to the check. */
 }
 
 static const char *camera_stream_state_text(const camera_stream_status_t *status)
@@ -513,6 +842,22 @@ void np_devices_refresh_camera(np_devices_view_t *view)
     camera_stream_status_t status = {0};
     camera_stream_service_get_status(&status);
     np_set_text(view->camera_stream_status, camera_stream_state_text(&status));
+    const bool rejected = status.state == CAMERA_STREAM_ERROR &&
+                          (status.last_rtsp_status == 401U || status.last_rtsp_status == 403U);
+    if (np_modal_is_visible(&view->camera_auth_modal)) {
+        if (status.state == CAMERA_STREAM_PLAYING && view->camera_auth_submitted) {
+            np_modal_hide(&view->camera_auth_modal);
+        } else if (view->camera_auth_submitted) {
+            np_set_text(view->camera_auth_status, camera_stream_state_text(&status));
+        }
+    } else if (rejected && !view->camera_auth_rejection_shown) {
+        /* A saved password that stopped working asks again; this does not repeat every tick. */
+        view->camera_auth_rejection_shown = true;
+        np_devices_show_camera_auth(view);
+        np_set_text(view->camera_auth_status, camera_stream_state_text(&status));
+    }
+    np_set_visible(view->camera_stream_status,
+                   status.state != CAMERA_STREAM_PLAYING || status.frame_sequence == 0U);
     if (status.state != CAMERA_STREAM_PLAYING) {
         if (view->camera_frame_sequence != 0U) {
             lv_image_set_src(view->camera_stream_image, NULL);
@@ -541,7 +886,6 @@ void np_devices_refresh_camera(np_devices_view_t *view)
         .data = view->camera_frame_buffer,
     };
     lv_image_set_src(view->camera_stream_image, &s_camera_stream_image);
-    lv_obj_center(view->camera_stream_image);
     view->camera_frame_sequence = sequence;
 }
 
@@ -560,22 +904,23 @@ void np_devices_open_add(np_devices_view_t *view, bool sensor)
 void np_devices_open_camera_add(np_devices_view_t *view)
 {
     if (view == NULL || view->root == NULL) return;
-    np_set_text(view->add_modal.title, "Adicionar câmera Tapo");
-    np_set_text(view->add_modal.subtitle, "Descoberta local ONVIF");
-    np_set_text(view->modal_description,
-        "No app Tapo, habilite ONVIF e crie uma conta local da câmera.");
-    np_set_text(view->scan_status, "Pronto para buscar câmeras na rede local.");
-    np_set_text(view->scan_results, "Use a busca ONVIF ou informe o IP da câmera.");
-    np_set_visible(view->scan_button, false);
-    np_set_visible(view->camera_scan_button, true);
-    np_set_visible(view->camera_address_label, true);
-    np_set_visible(view->camera_address_input, true);
-    np_set_visible(view->camera_address_check_button, true);
-    np_set_visible(view->scan_status, true);
-    np_set_visible(view->scan_results, true);
-    view->onvif_scan_selected = false;
-    set_page(view, NP_DEVICES_PAGE_OVERVIEW);
-    np_modal_show(&view->add_modal);
+    lv_textarea_set_text(view->camera_address_input, "");
+    lv_textarea_set_text(view->camera_add_user_input, "");
+    lv_textarea_set_text(view->camera_add_password_input, "");
+    view->camera_open_after_add[0] = '\0';
+    view->camera_add_verified_ip[0] = '\0';
+    view->camera_add_needs_account = false;
+    for (uint8_t i = 0U; i < NP_CAMERA_ADD_CHIPS; ++i) {
+        view->camera_add_chip_ipv4[i][0] = '\0';
+        np_set_visible(view->camera_add_chips[i], false);
+    }
+    camera_add_set_phase(view, ADD_PHASE_ADDRESS);
+    np_set_text(view->camera_add_status,
+        "Toque em uma câmera encontrada ou digite o IP, e toque em Verificar. "
+        "O painel só pede usuário e senha se a câmera exigir.");
+    /* A sweep already running is fine: its results are shown as they arrive. */
+    (void)onvif_discovery_service_request_sweep();
+    np_modal_show(&view->camera_add_modal);
 }
 
 void np_devices_open_ewelink(np_devices_view_t *view)
@@ -688,7 +1033,7 @@ static void sync_progress_update(np_devices_view_t *view)
 
 void np_devices_refresh_discovery(np_devices_view_t *view)
 {
-    if (view == NULL || view->onvif_scan_selected || view->scan_status == NULL ||
+    if (view == NULL || view->scan_status == NULL ||
         !np_modal_is_visible(&view->add_modal) ||
         !lv_obj_is_visible(view->scan_button)) return;
 
@@ -941,43 +1286,18 @@ void np_devices_sync(np_devices_view_t *view,
             ? np_c_positive() : np_c_text_3());
     }
 
+    if (view->camera_open_after_add[0] != '\0' && !np_modal_is_visible(&view->camera_viewer_modal)) {
+        for (uint8_t i = 0U; i < camera_count; ++i) {
+            if (strcmp(view->camera_ipv4[i], view->camera_open_after_add) != 0) continue;
+            view->camera_open_after_add[0] = '\0';
+            np_devices_open_camera(view, i);
+            break;
+        }
+    }
+    refresh_camera_add(view);
     np_devices_refresh_camera(view);
     sync_progress_update(view);
 
-    if (!view->onvif_scan_selected ||
-        !np_modal_is_visible(&view->add_modal)) return;
-    if (projection->scan_busy) {
-        np_set_text(view->scan_status, "Buscando câmeras ONVIF na rede...");
-        return;
-    }
-    if (projection->scan_generation == 0U ||
-        projection->scan_generation == view->onvif_seen_generation) return;
-    view->onvif_seen_generation = projection->scan_generation;
-    if (projection->last_result == ESP_ERR_INVALID_STATE) {
-        np_set_text(view->scan_status, "Conecte o painel ao Wi-Fi e tente novamente.");
-        np_set_text(view->scan_results, "");
-    } else if (projection->last_result != ESP_OK) {
-        np_set_text(view->scan_status, "Falha na busca ONVIF. Tente novamente.");
-        np_set_text(view->scan_results, "");
-    } else if (projection->camera_count == 0U) {
-        np_set_text(view->scan_status, "Nenhuma câmera ONVIF encontrada.");
-        np_set_text(view->scan_results,
-            "Sem resposta multicast. Informe o IP acima ou confira se a porta "
-            "ONVIF 2020 está acessível.");
-    } else {
-        np_set_text(view->scan_status, "Câmeras encontradas na rede:");
-        char results[APP_IOT_MAX_CAMERAS * 72U + 1U] = {0};
-        size_t used = 0U;
-        for (uint8_t i = 0U; i < camera_count; ++i) {
-            const int written = snprintf(results + used, sizeof(results) - used,
-                "%s%s  •  %s", i == 0U ? "" : "\n",
-                projection->cameras[i].model,
-                projection->cameras[i].address);
-            if (written < 0 || (size_t)written >= sizeof(results) - used) break;
-            used += (size_t)written;
-        }
-        np_set_text(view->scan_results, results);
-    }
 }
 
 lv_obj_t *np_devices_create(lv_obj_t *parent)

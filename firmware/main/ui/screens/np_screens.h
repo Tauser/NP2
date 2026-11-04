@@ -11,6 +11,8 @@
 #include "np_modal.h"
 #include "app_state.h"
 
+#define NP_CAMERA_ADD_CHIPS 4U
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -122,26 +124,41 @@ typedef struct {
     char camera_ipv4[APP_IOT_MAX_CAMERAS][16];
     np_modal_t camera_viewer_modal;
     lv_obj_t *camera_stream_image;
+    np_modal_t camera_auth_modal;
     lv_obj_t *camera_username_input;
     lv_obj_t *camera_password_input;
-    lv_obj_t *camera_stream_start_button;
-    lv_obj_t *camera_stream_stop_button;
+    lv_obj_t *camera_auth_submit_button;
+    lv_obj_t *camera_auth_status;
+    lv_obj_t *camera_reconnect_button;
+    lv_obj_t *camera_change_account_button;
     lv_obj_t *camera_stream_status;
+    bool camera_auth_submitted;
+    bool camera_auth_rejection_shown;
+    bool camera_viewer_closing;
     uint8_t *camera_frame_buffer;
     uint32_t camera_frame_sequence;
     uint8_t selected_camera;
     np_modal_t add_modal;
     lv_obj_t *modal_description;
     lv_obj_t *scan_button;
-    lv_obj_t *camera_scan_button;
-    lv_obj_t *camera_address_label;
-    lv_obj_t *camera_address_input;
-    lv_obj_t *camera_address_check_button;
     lv_obj_t *scan_status;
     lv_obj_t *scan_results;
     lv_obj_t *modal_close_button;
-    bool onvif_scan_selected;
-    uint32_t onvif_seen_generation;
+    /* One screen registers a camera: found-on-network shortcuts, address and account. */
+    np_modal_t camera_add_modal;
+    lv_obj_t *camera_add_discovery_status;
+    lv_obj_t *camera_add_chips[NP_CAMERA_ADD_CHIPS];
+    char camera_add_chip_ipv4[NP_CAMERA_ADD_CHIPS][16];
+    lv_obj_t *camera_address_input;
+    lv_obj_t *camera_add_user_input;
+    lv_obj_t *camera_add_password_input;
+    lv_obj_t *camera_add_submit_button;
+    lv_obj_t *camera_add_status;
+    lv_obj_t *camera_add_verify_button;
+    uint8_t camera_add_phase;
+    bool camera_add_needs_account;
+    char camera_add_verified_ip[16];
+    char camera_open_after_add[16];
     lv_obj_t *ewelink_username_input;
     lv_obj_t *ewelink_password_input;
 } np_devices_view_t;
@@ -182,6 +199,11 @@ void np_devices_set_channel_event_cb(np_devices_view_t *view,
                                      lv_event_cb_t callback);
 void np_devices_rebind(np_devices_view_t *view);
 void np_devices_open_camera(np_devices_view_t *view, uint8_t index);
+void np_devices_connect_camera(np_devices_view_t *view);
+esp_err_t np_devices_verify_camera_add(np_devices_view_t *view);
+esp_err_t np_devices_submit_camera_add(np_devices_view_t *view);
+void np_devices_use_camera_chip(np_devices_view_t *view, uint8_t index);
+void np_devices_show_camera_auth(np_devices_view_t *view);
 void np_devices_close_camera(np_devices_view_t *view);
 void np_devices_refresh_camera(np_devices_view_t *view);
 lv_obj_t *np_sheets_create(lv_obj_t *parent);

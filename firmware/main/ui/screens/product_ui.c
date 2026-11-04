@@ -2728,9 +2728,11 @@ static bool navigation_build(void *context, uintptr_t page)
                                     iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             }
             np_devices_set_channel_event_cb(&s_ui.devices, iot_action_event_cb);
-            lv_obj_add_event_cb(s_ui.devices.camera_stream_start_button,
+            lv_obj_add_event_cb(s_ui.devices.camera_auth_submit_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
-            lv_obj_add_event_cb(s_ui.devices.camera_stream_stop_button,
+            lv_obj_add_event_cb(s_ui.devices.camera_reconnect_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_change_account_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.camera_viewer_modal.close_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
@@ -2756,9 +2758,15 @@ static bool navigation_build(void *context, uintptr_t page)
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.scan_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
-            lv_obj_add_event_cb(s_ui.devices.camera_scan_button, iot_action_event_cb,
-                                LV_EVENT_CLICKED, NULL);
-            lv_obj_add_event_cb(s_ui.devices.camera_address_check_button,
+            for (uint8_t chip = 0U; chip < NP_CAMERA_ADD_CHIPS; ++chip) {
+                lv_obj_add_event_cb(s_ui.devices.camera_add_chips[chip],
+                                    iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            }
+            lv_obj_add_event_cb(s_ui.devices.camera_add_verify_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_add_submit_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_add_modal.close_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             np_keyboard_bind(&s_ui.keyboard,
                 s_ui.devices.camera_address_input, NP_KEYBOARD_MODE_NUMERIC);
@@ -2819,6 +2827,8 @@ static bool navigation_build(void *context, uintptr_t page)
                        page == PRODUCT_SCREEN_MARKET ? s_ui.market.root :
                        page == PRODUCT_SCREEN_IOT ? s_ui.devices.root :
                        page == PRODUCT_SCREEN_AGENDA ? s_ui.agenda.root :
+            lv_obj_add_event_cb(s_ui.devices.camera_auth_modal.close_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
                        page == PRODUCT_SCREEN_POMODORO ? s_ui.pomodoro.root : s_ui.preferences.root, true);
         return true;
     }
@@ -2847,6 +2857,10 @@ static bool navigation_build(void *context, uintptr_t page)
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
                                 LV_EVENT_CLICKED, NULL);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_add_user_input, NP_KEYBOARD_MODE_TEXT);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_add_password_input, NP_KEYBOARD_MODE_PASSWORD);
         }
         root = s_ui.profile.root;
         header = &s_ui.profile.header;
@@ -3487,7 +3501,6 @@ static void iot_action_event_cb(lv_event_t *event)
         np_keyboard_hide(&s_ui.keyboard);
         np_devices_return_to_overview(&s_ui.devices);
     } else if (target == s_ui.devices.scan_button) {
-        s_ui.devices.onvif_scan_selected = false;
         np_set_text(s_ui.devices.modal_description,
                     "Escolha a integração para buscar dispositivos disponíveis "
                     "na rede local.");
@@ -3500,46 +3513,19 @@ static void iot_action_event_cb(lv_event_t *event)
                                        : "Servico local ainda nao iniciou",
                                    2400U);
         }
-    } else if (target == s_ui.devices.camera_scan_button) {
-        app_ui_projection_t projection = {0};
-        app_state_get_ui_projection(&projection);
-        s_ui.devices.onvif_seen_generation = projection.iot.scan_generation;
-        s_ui.devices.onvif_scan_selected = true;
-        np_set_text(s_ui.devices.modal_description,
-                    "No app Tapo, habilite ONVIF e crie uma conta local da "
-                    "câmera, separada da conta Tapo. Use a mesma rede Wi-Fi.");
-        np_set_text(s_ui.devices.scan_status, "Buscando câmeras ONVIF na rede...");
-        np_set_text(s_ui.devices.scan_results, "");
-        np_set_visible(s_ui.devices.camera_address_label, true);
-        np_set_visible(s_ui.devices.camera_address_input, true);
-        np_set_visible(s_ui.devices.camera_address_check_button, true);
-        const esp_err_t result = app_event_bus_post_onvif_scan_request();
-        if (result != ESP_OK) {
-            np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
-                                   "Busca indisponivel",
-                                   "Nao foi possivel iniciar a busca ONVIF",
-                                   2400U);
-        }
-    } else if (target == s_ui.devices.camera_address_check_button) {
-        const char *const address = lv_textarea_get_text(
-            s_ui.devices.camera_address_input);
-        app_ui_projection_t projection = {0};
-        app_state_get_ui_projection(&projection);
-        s_ui.devices.onvif_seen_generation = projection.iot.scan_generation;
-        s_ui.devices.onvif_scan_selected = true;
-        const esp_err_t result = app_event_bus_post_onvif_address_request(address);
+    } else if (target == s_ui.devices.camera_add_verify_button) {
+        if (np_devices_verify_camera_add(&s_ui.devices) == ESP_OK) np_keyboard_hide(&s_ui.keyboard);
+    } else if (target == s_ui.devices.camera_add_submit_button) {
+        const esp_err_t result = np_devices_submit_camera_add(&s_ui.devices);
         if (result == ESP_OK) {
-            np_set_text(s_ui.devices.scan_status,
-                        "Verificando serviço ONVIF na porta 2020...");
-            np_set_text(s_ui.devices.scan_results, "");
             np_keyboard_hide(&s_ui.keyboard);
         } else {
             np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
-                                   "Endereço inválido",
-                                   "Informe um IPv4 privado, como 192.168.1.8",
-                                   2400U);
+                                   "Dados incompletos",
+                                   "Informe um IP privado, como 192.168.1.8, usuário e senha.",
+                                   2800U);
         }
-    } else if (target == s_ui.devices.camera_stream_start_button) {
+    } else if (target == s_ui.devices.camera_auth_submit_button) {
         const char *const username = lv_textarea_get_text(
             s_ui.devices.camera_username_input);
         const char *const password = lv_textarea_get_text(
@@ -3550,21 +3536,32 @@ static void iot_action_event_cb(lv_event_t *event)
                                                             password);
         if (result == ESP_OK) {
             np_keyboard_hide(&s_ui.keyboard);
-            np_set_text(s_ui.devices.camera_stream_status,
-                        "Conectando à câmera…");
+            s_ui.devices.camera_auth_submitted = true;
+            np_set_text(s_ui.devices.camera_auth_status, "Conectando à câmera…");
         } else {
             np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
                                    "Não foi possível iniciar",
                                    "Informe usuário e senha da Conta da Câmera.",
                                    2600U);
         }
-    } else if (target == s_ui.devices.camera_stream_stop_button) {
-        (void)camera_stream_service_stop();
-        np_set_text(s_ui.devices.camera_stream_status, "Vídeo parado.");
-    } else if (target == s_ui.devices.camera_viewer_modal.close_button) {
+    } else if (target == s_ui.devices.camera_reconnect_button) {
+        np_devices_connect_camera(&s_ui.devices);
+    } else if (target == s_ui.devices.camera_change_account_button) {
+        np_devices_show_camera_auth(&s_ui.devices);
+    } else if (target == s_ui.devices.camera_viewer_modal.close_button ||
+               target == s_ui.devices.camera_auth_modal.close_button ||
+               target == s_ui.devices.camera_add_modal.close_button) {
         np_keyboard_hide(&s_ui.keyboard);
-    } else if (target == s_ui.devices.modal_close_button) {
-        np_modal_hide(&s_ui.devices.add_modal);
+    } else {
+        for (uint8_t chip = 0U; chip < NP_CAMERA_ADD_CHIPS; ++chip) {
+            if (target == s_ui.devices.camera_add_chips[chip]) {
+                np_devices_use_camera_chip(&s_ui.devices, chip);
+                return;
+            }
+        }
+        if (target == s_ui.devices.modal_close_button) {
+            np_modal_hide(&s_ui.devices.add_modal);
+        }
     }
 }
 

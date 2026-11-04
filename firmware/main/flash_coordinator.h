@@ -16,6 +16,8 @@
 #include "agenda_service.h"
 #include "google_agenda_sync.h"
 #include "spotify_remote.h"
+#include "camera_credentials.h"
+#include "camera_inventory.h"
 
 #define FLASH_COORDINATOR_COINGECKO_API_KEY_BYTES 64U
 #define FLASH_COORDINATOR_BRAPI_API_KEY_BYTES 128U
@@ -261,5 +263,7 @@ esp_err_t flash_coordinator_request_p4_ota_rollback(void);
 void flash_coordinator_get_status(flash_coordinator_status_t *out_status);
 
 esp_err_t flash_coordinator_request_spotify_credentials_write(const spotify_remote_credentials_t *credentials);
+esp_err_t flash_coordinator_request_camera_credentials_write(const camera_credentials_t *credentials);
+esp_err_t flash_coordinator_request_camera_inventory_write(const camera_inventory_t *inventory);
 
 esp_err_t flash_coordinator_request_home_widget_write(uint8_t widget);

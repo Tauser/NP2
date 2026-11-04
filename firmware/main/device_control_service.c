@@ -498,11 +498,15 @@ static void device_control_task(void *arg)
             portEXIT_CRITICAL(&s_lock);
             if (xTaskGetTickCount() - last_resources_log >= pdMS_TO_TICKS(30000U)) {
                 last_resources_log = xTaskGetTickCount();
-                ESP_LOGI(TAG, "resources cpu=%u%% cores=%u/%u internal_free=%lu largest=%lu psram_free=%lu uptime=%lus",
+                /* The LVGL task holds every screen refresh, so its stack is the margin that matters. */
+                const TaskHandle_t lvgl_task = xTaskGetHandle("lvgl");
+                const unsigned lvgl_stack_min = lvgl_task != NULL
+                    ? (unsigned)uxTaskGetStackHighWaterMark(lvgl_task) : 0U;
+                ESP_LOGI(TAG, "resources cpu=%u%% cores=%u/%u internal_free=%lu largest=%lu psram_free=%lu uptime=%lus lvgl_stack_min=%u",
                     (unsigned)metrics.cpu_percent, (unsigned)metrics.cpu_core_percent[0],
                     (unsigned)metrics.cpu_core_percent[1], (unsigned long)metrics.internal_free_bytes,
                     (unsigned long)metrics.internal_largest_bytes, (unsigned long)metrics.psram_free_bytes,
-                    (unsigned long)metrics.uptime_s);
+                    (unsigned long)metrics.uptime_s, lvgl_stack_min);
             }
         }
         (void)ulTaskNotifyTake(pdTRUE, s_active_sound>=0 || audio_active ? 0U : pdMS_TO_TICKS(DEVICE_CONTROL_POLL_MS));

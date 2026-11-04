@@ -212,6 +212,8 @@ typedef enum {
     FLASH_REQUEST_AGENDA_WRITE,
     FLASH_REQUEST_GOOGLE_CREDENTIALS_WRITE,
     FLASH_REQUEST_SPOTIFY_CREDENTIALS_WRITE,
+    FLASH_REQUEST_CAMERA_CREDENTIALS_WRITE,
+    FLASH_REQUEST_CAMERA_INVENTORY_WRITE,
     FLASH_REQUEST_HOME_WIDGET_WRITE,
 } flash_request_kind_t;
 
@@ -2377,6 +2379,8 @@ static void flash_worker_task(void *arg)
     refresh_update_journal_status();
     (void)google_agenda_credentials_owner_load();
     (void)spotify_remote_credentials_owner_load();
+    (void)camera_credentials_owner_load();
+    (void)camera_inventory_owner_load();
     uint8_t home_widget = 0;
     esp_err_t home_widget_result = home_widget_owner_load(&home_widget);
     portENTER_CRITICAL(&s_status_lock);
@@ -2451,6 +2455,16 @@ static void flash_worker_task(void *arg)
             ++s_status.spotify_auth_completion;
             portEXIT_CRITICAL(&s_status_lock);
             ESP_LOGI("np2_spotify_remote", "credentials completion result=%ld", (long)result);
+            secure_zero(request.ota_chunk, sizeof(request.ota_chunk));
+            break;
+        case FLASH_REQUEST_CAMERA_CREDENTIALS_WRITE:
+            result = camera_credentials_owner_write((const camera_credentials_t *)request.ota_chunk);
+            ESP_LOGI("camera_stream", "account save result=%ld", (long)result);
+            secure_zero(request.ota_chunk, sizeof(request.ota_chunk));
+            break;
+        case FLASH_REQUEST_CAMERA_INVENTORY_WRITE:
+            result = camera_inventory_owner_write((const camera_inventory_t *)request.ota_chunk);
+            ESP_LOGI("camera_stream", "inventory save result=%ld", (long)result);
             secure_zero(request.ota_chunk, sizeof(request.ota_chunk));
             break;
         case FLASH_REQUEST_AGENDA_WRITE:
@@ -3483,6 +3497,52 @@ esp_err_t flash_coordinator_request_spotify_credentials_write(const spotify_remo
     return queued ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
+
+esp_err_t flash_coordinator_request_camera_credentials_write(const camera_credentials_t *credentials)
+{
+    _Static_assert(sizeof(*credentials) <= FLASH_COORDINATOR_OTA_CHUNK_BYTES,
+                   "camera account must fit the bounded request");
+    if (credentials == NULL || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending || status.p4_ota_active || status.p4_ota_finished) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_CAMERA_CREDENTIALS_WRITE,
+        .sequence = status.last_sequence + 1U};
+    memcpy(s_p4_ota_request.ota_chunk, credentials, sizeof(*credentials));
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    secure_zero(s_p4_ota_request.ota_chunk, sizeof(s_p4_ota_request.ota_chunk));
+    if (queued) set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t flash_coordinator_request_camera_inventory_write(const camera_inventory_t *inventory)
+{
+    _Static_assert(sizeof(*inventory) <= FLASH_COORDINATOR_OTA_CHUNK_BYTES,
+                   "camera inventory must fit the bounded request");
+    if (inventory == NULL || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    flash_coordinator_status_t status = {0};
+    flash_coordinator_get_status(&status);
+    if (!status.ready || status.busy || status.pending || status.p4_ota_active || status.p4_ota_finished) {
+        xSemaphoreGive(s_p4_ota_submission_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_p4_ota_request = (flash_request_t){.kind = FLASH_REQUEST_CAMERA_INVENTORY_WRITE,
+        .sequence = status.last_sequence + 1U};
+    memcpy(s_p4_ota_request.ota_chunk, inventory, sizeof(*inventory));
+    const bool queued = xQueueSend(s_request_queue, &s_p4_ota_request, 0) == pdPASS;
+    secure_zero(s_p4_ota_request.ota_chunk, sizeof(s_p4_ota_request.ota_chunk));
+    if (queued) set_busy(false, true);
+    xSemaphoreGive(s_p4_ota_submission_lock);
+    return queued ? ESP_OK : ESP_ERR_TIMEOUT;
+}
 
 esp_err_t flash_coordinator_request_home_widget_write(uint8_t widget)
 {
