@@ -1,0 +1,265 @@
+diff --git a/src/annexb.hpp b/src/annexb.hpp
+index c505930..a7c0d1a 100644
+--- a/src/annexb.hpp
++++ b/src/annexb.hpp
+@@ -12,7 +12,7 @@
+ #include "nal.hpp"
+ 
+ #include <cstdint>
+-#include <vector>
++#include "panel_allocator.hpp"
+ 
+ namespace sub0h264 {
+ 
+@@ -47,7 +47,7 @@ struct NalBounds
+  *  @param[out] nals Vector of NAL boundaries found
+  */
+ inline void findNalUnits(const uint8_t* data, uint32_t size,
+-                         std::vector<NalBounds>& nals) noexcept
++                         sub0h264::Vector<NalBounds>& nals) noexcept
+ {
+     nals.clear();
+     if (size < 4U)
+@@ -112,7 +112,7 @@ inline void findNalUnits(const uint8_t* data, uint32_t size,
+  *  @param[out] rbsp  Output RBSP data (emulation bytes removed)
+  */
+ inline void removeEmulationPrevention(const uint8_t* ebsp, uint32_t size,
+-                                       std::vector<uint8_t>& rbsp) noexcept
++                                       sub0h264::Vector<uint8_t>& rbsp) noexcept
+ {
+     rbsp.clear();
+     rbsp.reserve(size);
+diff --git a/src/cabac_neighbor.hpp b/src/cabac_neighbor.hpp
+index 758944f..4e9872e 100644
+--- a/src/cabac_neighbor.hpp
++++ b/src/cabac_neighbor.hpp
+@@ -20,7 +20,7 @@
+ 
+ #include <cstdint>
+ #include <cstring>
+-#include <vector>
++#include "panel_allocator.hpp"
+ 
+ namespace sub0h264 {
+ 
+@@ -260,7 +260,7 @@ public:
+ 
+ private:
+     uint32_t widthMbs_ = 0U;
+-    std::vector<MbCabacInfo> mbs_;
++    sub0h264::Vector<MbCabacInfo> mbs_;
+ };
+ 
+ } // namespace sub0h264
+diff --git a/src/decoder.hpp b/src/decoder.hpp
+index 8ea7582..8c42f24 100644
+--- a/src/decoder.hpp
++++ b/src/decoder.hpp
+@@ -88,7 +88,7 @@ public:
+      */
+     int32_t decodeStream(const uint8_t* data, uint32_t size) noexcept
+     {
+-        std::vector<NalBounds> bounds;
++        sub0h264::Vector<NalBounds> bounds;
+         findNalUnits(data, size, bounds);
+ 
+         int32_t framesDecoded = 0;
+@@ -190,21 +190,21 @@ private:
+     bool dpbInitialized_ = false;
+ 
+     // Per-frame MB context: non-zero coefficient counts for CAVLC context
+-    std::vector<uint8_t> nnzLuma_;    // [mbIdx * 16 + blkIdx]
+-    std::vector<uint8_t> nnzCb_;      // [mbIdx * 4 + blkIdx]
+-    std::vector<uint8_t> nnzCr_;      // [mbIdx * 4 + blkIdx]
++    sub0h264::Vector<uint8_t> nnzLuma_;    // [mbIdx * 16 + blkIdx]
++    sub0h264::Vector<uint8_t> nnzCb_;      // [mbIdx * 4 + blkIdx]
++    sub0h264::Vector<uint8_t> nnzCr_;      // [mbIdx * 4 + blkIdx]
+ 
+     // Per-MB luma QP after mb_qp_delta accumulation — ITU-T H.264 §7.4.5.
+     // Used by deblocking filter: boundary edges require QP averaging (§8.7.2.2).
+-    std::vector<int32_t> mbQps_;      // [mbIdx]
++    sub0h264::Vector<int32_t> mbQps_;      // [mbIdx]
+ 
+     // Per-MB transform_size_8x8_flag — ITU-T H.264 §7.3.5.
+     // Used by deblocking (§8.7.2): MBs using 8x8 transform skip filtering of
+     // internal 4x4 edges (vertical edges 1,3 and horizontal edges 1,3).
+-    std::vector<uint8_t> mbTransform8x8_; // [mbIdx], 0 or 1
++    sub0h264::Vector<uint8_t> mbTransform8x8_; // [mbIdx], 0 or 1
+ 
+     // Per-frame MV context for inter prediction
+-    std::vector<MbMotionInfo> mbMotion_;  // [mbIdx]
++    sub0h264::Vector<MbMotionInfo> mbMotion_;  // [mbIdx]
+ 
+     /// Per-slice resolved scaling lists in raster order (§7.4.2.1.1).
+     /// Refreshed each slice; lists default to flat-16 when no SPS/PPS matrix.
+@@ -213,7 +213,7 @@ private:
+     // Per-MB intra 4x4 prediction modes for MPM derivation across MBs.
+     // [mbIdx * 16 + blkIdx] — only valid for I_4x4 MBs.
+     // For I_16x16 MBs, all entries set to DC(2) per spec §8.3.1.1.
+-    std::vector<uint8_t> mbIntra4x4Modes_;  // [mbIdx * 16 + blkIdx]
++    sub0h264::Vector<uint8_t> mbIntra4x4Modes_;  // [mbIdx * 16 + blkIdx]
+ 
+     // CABAC state
+     uint32_t cabacSliceCount_ = 0U; ///< Counts CABAC slice inits for SliceStart event indexing
+diff --git a/src/dpb.hpp b/src/dpb.hpp
+index 0010ef8..d02c86f 100644
+--- a/src/dpb.hpp
++++ b/src/dpb.hpp
+@@ -26,7 +26,7 @@
+ #include <algorithm>
+ 
+ #include <cstdint>
+-#include <vector>
++#include "panel_allocator.hpp"
+ #include <algorithm>
+ 
+ namespace sub0h264 {
+@@ -396,8 +396,8 @@ public:
+             return frameNum > static_cast<int32_t>(currFrameNum) ?
+                    frameNum - static_cast<int32_t>(maxFrameNum) : frameNum;
+         };
+-        std::vector<const DpbEntry*> shortTerm;
+-        std::vector<const DpbEntry*> longTerm;
++        sub0h264::Vector<const DpbEntry*> shortTerm;
++        sub0h264::Vector<const DpbEntry*> longTerm;
+         for (const auto& e : entries_)
+         {
+             if (!e.occupied || !e.isReference)
+@@ -533,7 +533,7 @@ public:
+             return &refListL0_[refIdx]->frame;
+ 
+         // Fallback: build on the fly (legacy behavior)
+-        std::vector<const DpbEntry*> refList;
++        sub0h264::Vector<const DpbEntry*> refList;
+         for (const auto& e : entries_)
+         {
+             if (e.occupied && e.isReference)
+@@ -568,7 +568,7 @@ public:
+     }
+ 
+ private:
+-    std::vector<DpbEntry> entries_;
++    sub0h264::Vector<DpbEntry> entries_;
+     uint32_t nextDecodeSeq_ = 0U;
+     DpbEntry* currentEntry_ = nullptr;
+     uint16_t width_ = 0U;
+@@ -576,7 +576,7 @@ private:
+     uint8_t maxRefFrames_ = 0U;
+ 
+     /// Cached L0 reference list — built by buildRefListL0(), used by getReference().
+-    mutable std::vector<const DpbEntry*> refListL0_;
++    mutable sub0h264::Vector<const DpbEntry*> refListL0_;
+     bool refListL0Built_ = false;
+ };
+ 
+diff --git a/src/frame.hpp b/src/frame.hpp
+index fe92fb7..976cbd9 100644
+--- a/src/frame.hpp
++++ b/src/frame.hpp
+@@ -12,7 +12,7 @@
+ 
+ #include <cstdint>
+ #include <cstring>
+-#include <vector>
++#include "panel_allocator.hpp"
+ #include <algorithm>
+ 
+ namespace sub0h264 {
+@@ -123,9 +123,9 @@ private:
+     uint16_t yStride_ = 0U;
+     uint16_t uvStride_ = 0U;
+ 
+-    std::vector<uint8_t> yPlane_;
+-    std::vector<uint8_t> uPlane_;
+-    std::vector<uint8_t> vPlane_;
++    sub0h264::Vector<uint8_t> yPlane_;
++    sub0h264::Vector<uint8_t> uPlane_;
++    sub0h264::Vector<uint8_t> vPlane_;
+ };
+ 
+ } // namespace sub0h264
+diff --git a/src/nal.hpp b/src/nal.hpp
+index c06e539..6f7c68a 100644
+--- a/src/nal.hpp
++++ b/src/nal.hpp
+@@ -8,7 +8,7 @@
+ #define CROG_SUB0H264_NAL_HPP
+ 
+ #include <cstdint>
+-#include <vector>
++#include "panel_allocator.hpp"
+ 
+ namespace sub0h264 {
+ 
+@@ -38,7 +38,7 @@ struct NalUnit
+ {
+     NalType  type    = NalType::Unspecified;
+     uint8_t  refIdc  = 0U;   ///< nal_ref_idc (2 bits): reference priority
+-    std::vector<uint8_t> rbspData;  ///< RBSP bytes (emulation prevention removed)
++    sub0h264::Vector<uint8_t> rbspData;  ///< RBSP bytes (emulation prevention removed)
+ };
+ 
+ /** Check if a NAL type is a slice (contains macroblock data). */
+diff --git a/src/panel_allocator.hpp b/src/panel_allocator.hpp
+new file mode 100644
+index 0000000..57088f9
+--- /dev/null
++++ b/src/panel_allocator.hpp
+@@ -0,0 +1,57 @@
++/** NP2 local addition: keeps decoder working memory out of internal SRAM.
++ *
++ *  The panel reserves SRAM for TLS, JSON and HTTP. Small transient vectors stay
++ *  in the default heap; anything larger goes to PSRAM, which is the placement
++ *  measured in ADR-121. Allocation failure still terminates, because the decoder
++ *  vectors live inside noexcept functions: callers must admit the session first.
++ */
++#pragma once
++
++#include <cstddef>
++#include <cstdlib>
++#include <new>
++#include <vector>
++
++#ifdef ESP_PLATFORM
++#include "esp_heap_caps.h"
++#endif
++
++namespace sub0h264
++{
++
++inline constexpr std::size_t cPanelSmallAllocBytes = 1024U;
++
++template <typename T>
++struct PanelAllocator
++{
++    using value_type = T;
++
++    PanelAllocator() noexcept = default;
++    template <typename U>
++    PanelAllocator(const PanelAllocator<U>&) noexcept {}
++
++    T* allocate(std::size_t count)
++    {
++        const std::size_t bytes = count * sizeof(T);
++#ifdef ESP_PLATFORM
++        void* const memory = bytes > cPanelSmallAllocBytes
++            ? heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
++            : std::malloc(bytes);
++#else
++        void* const memory = std::malloc(bytes);
++#endif
++        if (memory == nullptr)
++            std::abort();
++        return static_cast<T*>(memory);
++    }
++
++    void deallocate(T* memory, std::size_t) noexcept { std::free(memory); }
++
++    template <typename U>
++    bool operator==(const PanelAllocator<U>&) const noexcept { return true; }
++};
++
++template <typename T>
++using Vector = std::vector<T, PanelAllocator<T>>;
++
++} // namespace sub0h264

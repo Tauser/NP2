@@ -1,0 +1,107 @@
+diff --git a/src/dpb.hpp b/src/dpb.hpp
+index 52acb95..0010ef8 100644
+--- a/src/dpb.hpp
++++ b/src/dpb.hpp
+@@ -13,7 +13,7 @@
+  *    §A.3.1 DPB size: max(numRefFrames+1, 2) [CHECKED §A.3.1]
+  *    IDR flush: all refs unmarked [CHECKED]
+  *    [PARTIAL] MMCO Op 6 uses value2 — verify matches slice header MmcoCmd layout
+- *    [PARTIAL] frameNum wrap-around in eviction not handled (benign for short sequences)
++ *    frame_num wrap: eviction follows decode order; L0 sorts by FrameNumWrap §8.2.4.1 (NP2 patch)
+  *
+  *  SPDX-License-Identifier: MIT
+  */
+@@ -39,6 +39,7 @@ struct DpbEntry
+ {
+     Frame frame;
+     uint16_t frameNum = 0U;       ///< H.264 frame_num
++    uint32_t decodeSeq = 0U;      ///< Monotonic marking order; unaffected by frame_num wrap
+     int32_t picOrderCnt = 0;      ///< Picture order count
+     bool isReference = false;     ///< True if used as reference
+     bool isLongTerm = false;      ///< True if long-term reference
+@@ -102,7 +103,7 @@ public:
+         {
+             if (e.occupied && e.isReference && !e.isLongTerm)
+             {
+-                if (!oldest || e.frameNum < oldest->frameNum)
++                if (!oldest || e.decodeSeq < oldest->decodeSeq)
+                     oldest = &e;
+             }
+         }
+@@ -126,6 +127,7 @@ public:
+         if (currentEntry_)
+         {
+             currentEntry_->frameNum = frameNum;
++            currentEntry_->decodeSeq = ++nextDecodeSeq_;
+             currentEntry_->isReference = true;
+             currentEntry_->isLongTerm = false;
+             currentEntry_->isOutput = true;
+@@ -297,7 +299,7 @@ public:
+             {
+                 if (e.occupied && e.isReference && !e.isLongTerm)
+                 {
+-                    if (!oldest || e.frameNum < oldest->frameNum)
++                    if (!oldest || e.decodeSeq < oldest->decodeSeq)
+                         oldest = &e;
+                 }
+             }
+@@ -347,7 +349,7 @@ public:
+                 {
+                     if (e.occupied && e.isReference && !e.isLongTerm)
+                     {
+-                        if (!slot || e.frameNum < slot->frameNum)
++                        if (!slot || e.decodeSeq < slot->decodeSeq)
+                             slot = &e;
+                     }
+                 }
+@@ -358,6 +360,7 @@ public:
+             // Mark as non-existing short-term reference
+             slot->occupied = true;
+             slot->frameNum = static_cast<uint16_t>(fn);
++            slot->decodeSeq = ++nextDecodeSeq_;
+             slot->isReference = true;
+             slot->isLongTerm = false;
+             slot->isOutput = false;
+@@ -386,7 +389,13 @@ public:
+ 
+         // §8.2.4.2.1: Initial reference picture list for P/SP slices.
+         // Short-term refs sorted by PicNum descending.
+-        // PicNum = FrameNumWrap = frameNum (for frame-only, no field pics)
++        // PicNum = FrameNumWrap for frame-only pictures; §8.2.4.1 subtracts
++        // MaxFrameNum from a frame_num above the current one.
++        const auto frameNumWrap = [currFrameNum, maxFrameNum](const DpbEntry* e) {
++            const int32_t frameNum = static_cast<int32_t>(e->frameNum);
++            return frameNum > static_cast<int32_t>(currFrameNum) ?
++                   frameNum - static_cast<int32_t>(maxFrameNum) : frameNum;
++        };
+         std::vector<const DpbEntry*> shortTerm;
+         std::vector<const DpbEntry*> longTerm;
+         for (const auto& e : entries_)
+@@ -401,8 +410,8 @@ public:
+ 
+         // Short-term: descending PicNum (=FrameNumWrap for frames)
+         std::sort(shortTerm.begin(), shortTerm.end(),
+-                  [](const DpbEntry* a, const DpbEntry* b) {
+-                      return a->frameNum > b->frameNum;
++                  [&frameNumWrap](const DpbEntry* a, const DpbEntry* b) {
++                      return frameNumWrap(a) > frameNumWrap(b);
+                   });
+         // Long-term: ascending LongTermPicNum
+         std::sort(longTerm.begin(), longTerm.end(),
+@@ -533,7 +542,7 @@ public:
+ 
+         std::sort(refList.begin(), refList.end(),
+                   [](const DpbEntry* a, const DpbEntry* b) {
+-                      return a->frameNum > b->frameNum;
++                      return a->decodeSeq > b->decodeSeq;
+                   });
+ 
+         if (refIdx < refList.size())
+@@ -560,6 +569,7 @@ public:
+ 
+ private:
+     std::vector<DpbEntry> entries_;
++    uint32_t nextDecodeSeq_ = 0U;
+     DpbEntry* currentEntry_ = nullptr;
+     uint16_t width_ = 0U;
+     uint16_t height_ = 0U;

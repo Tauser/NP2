@@ -6,6 +6,9 @@
 #include "app_state.h"
 #include "board_bringup.h"
 #include "camera_stream_service.h"
+#ifdef NP2_H264_DECODE_BENCH
+#include "h264_decode_bench.h"
+#endif
 #include "connectivity_diagnostic.h"
 #include "device_control_service.h"
 #include "flash_coordinator.h"
@@ -134,4 +137,7 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "P4 local bring-up ready; Phase 4 state projection runs asynchronously");
+#ifdef NP2_H264_DECODE_BENCH
+    h264_decode_bench_start();
+#endif
 }

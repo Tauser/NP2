@@ -7,6 +7,8 @@ file(GLOB NP2_FONT_SRCS
 option(NP2_DEVELOPMENT_WIFI_CREDENTIAL_RETENTION
        "Retain Wi-Fi credentials in development NVS" ON)
 option(NP2_MUSIC_AUDIO_BENCH "Run one bounded PCM probe after boot; laboratory only" OFF)
+option(NP2_H264_DECODE_BENCH "Compare H.264 decoders once after boot; laboratory only (ADR-121)" OFF)
+set(NP2_H264_BENCH_SAMPLE "" CACHE FILEPATH "Annex B sample embedded by the decode bench; never versioned")
 option(NP2_SPOTIFY_PAIRING_BENCH "Private bounded Connect pairing experiment; no playback" OFF)
 option(NP2_SPOTIFY_PLAYBACK_BENCH "Enable experimental native Spotify playback after decoder gate" OFF)
 if(NP2_SPOTIFY_PLAYBACK_BENCH AND NOT NP2_SPOTIFY_PAIRING_BENCH)
@@ -31,7 +33,7 @@ idf_component_register(
          "ui/screens/np_boot.c" "ui/screens/np_home.c" "ui/screens/np_weather.c" "ui/screens/np_market.c" "ui/screens/np_devices.c"
          "ui/screens/np_profile.c" "ui/screens/np_preferences.c"
          "ui/screens/settings/np_settings_display_sound.c" "ui/screens/settings/np_settings_photo_frame.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
-         "ui/screens/np_navigation_manager.c" "ui/screens/np_pomodoro.c" "ui/screens/np_notification_center.c" "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "agenda_service.c" "agenda_storage.c" "google_agenda_codec.c" "google_agenda_credentials.c" "google_agenda_sync.c" "ui/screens/np_agenda.c" "pomodoro_service.c" "camera_stream_service.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "sonoff_lan_service.c" "np_ewelink.c" "np_ewelink_auth.c" "np_ewelink_cloud.c" "np_ewelink_storage.c" "onvif_discovery_service.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
+         "ui/screens/np_navigation_manager.c" "ui/screens/np_pomodoro.c" "ui/screens/np_notification_center.c" "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "agenda_service.c" "agenda_storage.c" "google_agenda_codec.c" "google_agenda_credentials.c" "google_agenda_sync.c" "ui/screens/np_agenda.c" "pomodoro_service.c" "camera_stream_service.c" "i420_rgb565.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "sonoff_lan_service.c" "np_ewelink.c" "np_ewelink_auth.c" "np_ewelink_cloud.c" "np_ewelink_storage.c" "onvif_discovery_service.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          "sound_melody.c" "photo_frame_model.c" "photo_frame_service.c" "photo_thumbnail_service.c" "spotify_http_bridge.c" "music_pcm.c" "music_audio_service.c"
          "ui/screens/np_photo_frame.c" ${NP2_FONT_SRCS}
     INCLUDE_DIRS "." "ui/core" "ui/screens"
@@ -40,9 +42,12 @@ idf_component_register(
     REQUIRES esp_app_format esp_event esp_netif esp_psram esp_wifi espressif__esp_hosted
              espressif__esp_wifi_remote joltwallet__littlefs nvs_flash esp_driver_usb_serial_jtag
              espressif__mdns esp_http_client mbedtls json app_update bootloader_support esp_driver_tsens
-             esp_driver_sdmmc fatfs sdmmc lwip esp_rom espressif__esp_h264 edge264
+             esp_driver_sdmmc fatfs sdmmc lwip esp_rom espressif__esp_h264 edge264 sub0h264
              ${NP2_SPOTIFY_REQUIRES}
 )
+
+# Per-pixel path at video rate; the application default is -Og.
+set_source_files_properties("i420_rgb565.c" PROPERTIES COMPILE_OPTIONS "-O2")
 
 # sdkconfig.defaults does not override a generated sdkconfig from an older build.
 # ADR-076 keeps the P4 AES-DMA path disabled until its memory gate is qualified.
@@ -63,6 +68,27 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_PRODUCT_FONTS=1)
 if(NP2_MUSIC_AUDIO_BENCH)
     target_sources(${COMPONENT_LIB} PRIVATE "music_audio_probe.c")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_MUSIC_AUDIO_BENCH=1)
+endif()
+
+if(NP2_H264_DECODE_BENCH)
+    if(NOT EXISTS "${NP2_H264_BENCH_SAMPLE}")
+        message(FATAL_ERROR "Decode bench requires NP2_H264_BENCH_SAMPLE")
+    endif()
+    file(SIZE "${NP2_H264_BENCH_SAMPLE}" NP2_H264_BENCH_SAMPLE_BYTES)
+    if(NP2_H264_BENCH_SAMPLE_BYTES GREATER 4194304)
+        message(FATAL_ERROR "Decode bench sample exceeds 4 MiB; capture a shorter one")
+    endif()
+    file(SHA256 "${NP2_H264_BENCH_SAMPLE}" NP2_H264_BENCH_SAMPLE_SHA256)
+    # A fixed name gives the bench fixed symbols for any sample.
+    configure_file("${NP2_H264_BENCH_SAMPLE}" "${CMAKE_CURRENT_BINARY_DIR}/h264_bench_sample.h264" COPYONLY)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/h264_bench_sample.h264" BINARY)
+    target_sources(${COMPONENT_LIB} PRIVATE "h264_decode_bench.c")
+    # The edge264 component is INTERFACE, so its external object never reaches the
+    # linker by itself. Only this build links it; the product image is unchanged.
+    add_dependencies(${COMPONENT_LIB} edge264_build)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE "${CMAKE_BINARY_DIR}/esp-idf/edge264/edge264.o")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_H264_DECODE_BENCH=1
+        NP2_H264_BENCH_SAMPLE_SHA256="${NP2_H264_BENCH_SAMPLE_SHA256}")
 endif()
 
 if(NP2_SPOTIFY_PAIRING_BENCH)
