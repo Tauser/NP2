@@ -6694,3 +6694,35 @@ A imagem é escalada em software por `LV_IMAGE_ALIGN_CONTAIN`, com amostragem se
 dessa escala sobre a pilha LVGL e sobre os quadros publicados não foi refeita com o layout final: a captura
 dessa sessão tem uma única janela de 10 s (39 quadros publicados, sem erro, atraso máximo de 306 ms). A
 aprovação é visual e não substitui os gates de render (G2).
+
+### 2026-11-04 — tentativa de fluidez: PPA e fila de apresentação, revertida (ADR-121)
+
+Mesma placa e base; C6 não regravado, sem Kconfig de produto, partição ou eFuse alterados. Testes feitos
+pelo responsável com a C200 real; captura com `tools/capture_camera_stream.py`. A versão commitada
+(`b92a049`, publicação limitada a 5 fps, tela atualizada a cada 250 ms) foi **restaurada** na placa (imagem
+`6dbfbbfe…`) a pedido do responsável. O experimento ficou só fora do repositório, em arquivos locais.
+
+Pontos medidos, todos com `NP2_H264_DECODE_BENCH=OFF`:
+
+| Imagem | Mudança | Resultado |
+|---|---|---|
+| ensaio no banco | autoteste do PPA contra o conversor por software | layout `O_UYY_E_VYY` correto: erro médio de 0,3 a 0,5 em 255, 0% de pixels com diferença grande; com U e V trocados, 5 a 6 e 2,7% |
+| `10b06594` | conversão e escala 640×360 para 840×472 pelo PPA, 3 buffers sem cópia, tela a cada 40 ms | **sem imagem** |
+| `72983138` | passo de linha de 864 pixels (1728 bytes) | imagem apareceu, ~11 quadros por segundo publicados, ~30 pulados por janela, atraso de 376 a 824 ms; o responsável viu "quadro a quadro" |
+| `204656bb` | fila de 7 quadros com apresentação pelo relógio RTP e atraso de 280 ms | **panic** ao abrir a câmera, duas vezes: `remove_free_block`/`block_locate_free` (alocador do LVGL) e `lv_draw_dispatch`; `MCAUSE 0xdeadc0de`; causa não determinada |
+| `64fe31db` | folga de 32 KiB após cada buffer e verificação | imagem apareceu e a placa não reiniciou; nenhuma ultrapassagem do PPA detectada; maior intervalo sem imagem de 5,3 s (atraso de 1,9 s passou do limite de 2 s e a sessão pulou para o próximo IDR) |
+| `33bb5267` | PPA assíncrono e um descritor de imagem por buffer | decode saudável (43 a 48 ms, 140 a 148 quadros por 10 s, atraso de 1 a 359 ms, 0 pulados), mas o responsável relatou que **ainda travava** |
+
+Achado importante sobre o PPA com o LVGL: `LV_DRAW_BUF_STRIDE_ALIGN=64`. Quando o passo da linha da imagem
+não é múltiplo de 64 bytes (840 pixels dão 1680, o esperado é 1728), o decodificador de imagens do LVGL tenta
+copiar o quadro inteiro para um buffer alinhado; o pool do LVGL é de 64 KiB e a cópia falha, sem erro visível,
+e nada é desenhado. A saída do PPA precisa de passo de 864 pixels.
+
+Ressalva sobre a última imagem: nas janelas do teste em que a tela deveria mostrar o vídeo, a fila entregou
+poucos quadros (0 a 44 mostrados por 10 s, contra ~144 decodificados) e descartou quase todos os demais (`qdrop`
+de 93 a 145), com intervalos máximos de 2 a 39 s. Ou seja, o travamento relatado coincide com a **apresentação**
+(fila e consulta da tela), e não com falta de CPU no decode, que estava saudável. A causa dessa entrega baixa não
+foi investigada. A fila de apresentação portanto não está validada e não deve ser tomada como solução.
+
+Medições do pior caso: o empacotamento I420 para o formato do PPA custa 12,7 a 14,8 ms por quadro na CPU; a
+conversão pelo PPA leva 12,6 a 14,7 ms em hardware.

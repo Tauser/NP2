@@ -3054,3 +3054,11 @@ reconectar, trocar conta e fechar flutuam sobre a imagem, com fundo translúcido
 reutilizado (título, subtítulo e divisor são ocultados) para manter o comportamento de fechar e de parar o
 vídeo ao sair. A tela cheia por trás do cabeçalho do painel foi testada e reprovada. O nome da câmera deixou
 de aparecer; se houver várias câmeras, reavaliar.
+
+**Fluidez do vídeo (2026-11-04), tentativa revertida:** o caminho com PPA mostrou que a conversão e a escala
+cabem no hardware (layout `O_UYY_E_VYY` confirmado) e que a tela precisa receber quadros com passo de linha
+múltiplo de 64 bytes. A fila de apresentação com atraso fixo e o consumo pela tela não deram um resultado
+confiável: houve panic no alocador do LVGL com a fila ativa, sem causa conhecida, e depois entrega de poucos
+quadros. O firmware voltou à versão commitada (5 fps, conversão pela CPU). Se o tema for retomado, o menor
+passo plausível é PPA assíncrono com passo de linha de 864 pixels e exibição do quadro mais recente, sem fila,
+com a causa do panic investigada antes de reintroduzir qualquer fila de apresentação.

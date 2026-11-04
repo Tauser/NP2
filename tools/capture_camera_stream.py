@@ -23,6 +23,9 @@ RECORDS = [re.compile(pattern) for pattern in (
     r"onvif_discovery: Saved cameras restored count=\d+",
     r"onvif_discovery: Subnet sweep complete hosts=\d+ open=\d+ refused=\d+ silent=\d+ cameras=\d+ ms=\d+",
     r"camera_stream: Camera probe result=\d+",
+    r"camera_stream: Frame path: [A-Za-z ]+",
+    r"camera_stream: PPA conversion failed[^\r\n]*",
+    r"camera_stream: PPA wrote \d+ bytes past the end of frame buffer \d+",
     r"camera_stream: video session ended reason=[a-z-]+ detail=-?\d+ after_ms=\d+ lag_ms=-?\d+",
     r"camera_stream: H264 (?:stream uses an unsupported feature|decode error) \(nal_type=\d+\)[^\r\n]*",
     r"camera_stream: RTSP paths reached PLAY[^\r\n]*",
@@ -39,8 +42,12 @@ FAULT_DETAIL = [re.compile(pattern) for pattern in (
     r"RA\s*:\s*0x[0-9a-f]+",
     r"MCAUSE\s*:\s*0x[0-9a-f]+",
     r"SP\s*:\s*0x[0-9a-f]+",
+    r"Backtrace:(?: 0x[0-9a-f]+(?::0x[0-9a-f]+)?)+",
+    r"abort\(\) was called at PC 0x[0-9a-f]+ on core \d",
+    r"Core\s+\d register dump:",
+    r"Task name : [A-Za-z0-9_ ]+",
 )]
-FAULT_DETAIL_SECONDS = 4.0
+FAULT_DETAIL_SECONDS = 8.0
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
