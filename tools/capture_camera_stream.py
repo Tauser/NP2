@@ -24,6 +24,8 @@ RECORDS = [re.compile(pattern) for pattern in (
     r"onvif_discovery: Subnet sweep complete hosts=\d+ open=\d+ refused=\d+ silent=\d+ cameras=\d+ ms=\d+",
     r"camera_stream: Camera probe result=\d+",
     r"camera_stream: Frame path: [A-Za-z ]+",
+    r"task_wdt: Task watchdog got triggered[^\r\n]*",
+    r"task_wdt: CPU \d: [A-Za-z0-9_]+",
     r"camera_stream: PPA conversion failed[^\r\n]*",
     r"camera_stream: PPA wrote \d+ bytes past the end of frame buffer \d+",
     r"camera_stream: video session ended reason=[a-z-]+ detail=-?\d+ after_ms=\d+ lag_ms=-?\d+",
@@ -32,7 +34,7 @@ RECORDS = [re.compile(pattern) for pattern in (
     r"camera_stream: Could not establish[^\r\n]*",
     r"resources cpu=\d+% cores=\d+/\d+ internal_free=\d+ largest=\d+ psram_free=\d+ uptime=\d+s(?: lvgl_stack_min=\d+)?",
 )]
-FAULT = re.compile(r"Guru Meditation|Stack protection fault|Task watchdog|assert failed|abort\(\)|Rebooting")
+FAULT = re.compile(r"Asserted at expression|Guru Meditation|Stack protection fault|Task watchdog|assert failed|abort\(\)|Rebooting")
 FAULT_DETAIL = [re.compile(pattern) for pattern in (
     r"Guru Meditation Error: [A-Za-z0-9 ]+panic'ed \([A-Za-z ]+\)",
     r"Stack protection fault",
@@ -46,6 +48,9 @@ FAULT_DETAIL = [re.compile(pattern) for pattern in (
     r"abort\(\) was called at PC 0x[0-9a-f]+ on core \d",
     r"Core\s+\d register dump:",
     r"Task name : [A-Za-z0-9_ ]+",
+    r"Asserted at expression: [^\r\n]*",
+    r"assert failed: [^\r\n]*",
+    r"lv_[a-z0-9_]+\.c:\d+[^\r\n]*",
 )]
 FAULT_DETAIL_SECONDS = 8.0
 ANSI = re.compile(r"\x1b\[[0-9;]*m")

@@ -7493,3 +7493,34 @@ Wi-Fi, `errors=0`, `skipped=0`, ~4 quadros publicados por segundo (igual à tela
 Não verificado: o encerramento da sessão ao sair da página não foi capturado em log (a linha de fim de sessão
 não apareceu na janela); testes de host das preferências (`spotify_remote_credentials_host_test.c`) não rodados;
 soak, stream corrompido e demais gates do decoder continuam abertos.
+
+### 2026-11-05 — cadência do vídeo da câmera: 4 para ~6,5 quadros por segundo
+
+Placa ESP32-P4 v1.3 (serial terminado em 8F42), COM8. Imagem P4 `np2_p4.bin` sha256
+`09e387dd5e755e23eaf35449fd286104b58097968eefa348526759c2d213e1ae`, gravada com
+`tools/flash_p4_app_checked.py`; build limpo de `tools/run_spotify_remote.ps1`, sem avisos. C6 não envolvido.
+
+Mudança: publicação de um quadro a cada 125 ms (antes 200 ms); temporizador de vídeo próprio do LVGL (100 ms na
+Home; 200 ms no visualizador grande de Dispositivos, que amplia a imagem para ~976 px); `vTaskDelay(1)` na tarefa
+da câmera após cada quadro publicado, para a tarefa ociosa sempre rodar.
+
+Resultados (capturas de 120 a 150 s): Home e tela grande sem aviso de watchdog, `errors=0`; 64 a 69 quadros
+publicados por 10 s; `lag_ms` 154 a 518; CPU ~78 % na Home e 91 a 94 % na tela grande; `lvgl_stack_min` 8748 B
+na Home e 4016 B na tela grande (mesma folga de antes).
+
+**Correção de diagnóstico.** Com publicação a cada 100 ms e temporizador de 66 ms, a tela grande parecia travar e
+os logs mostravam `MCAUSE 0xdeadc0de` com `MEPC` em `lv_tlsf.c`. Isso foi lido como corrupção do heap do LVGL e
+um build com `LV_USE_ASSERT_MEM_INTEGRITY` foi gravado para confirmar. Estava errado: as linhas eram o dump do
+**Task Watchdog** (`IDLE1`/`IDLE0` sem rodar, `CPU 0: lvgl`, `CPU 1: camera_stream`), repetido a cada 5 s;
+`CONFIG_ESP_TASK_WDT_PANIC` está desligado, a placa não reiniciava (uptime crescente) e o `MEPC` era apenas onde
+a tarefa estava no instante da amostra. A causa era saturação de CPU: com o decode atrasado a recepção nunca
+bloqueia, e o desenho ampliado da tela grande excedia o período do temporizador. O build de diagnóstico não é
+mais usado. A hipótese de causa raiz é coerente com os dados, mas a corrupção do heap não foi descartada por teste
+direto; apenas deixou de ser necessária para explicar os sintomas.
+
+Limite de origem: o decoder recebe ~14,3 quadros por segundo (141 a 146 por 10 s), então 30 fps não é alcançável
+com este stream da C200. Teto prático ~15 fps. Decode custa ~45 ms e a conversão I420→RGB565 ~39 ms por quadro,
+na mesma tarefa.
+
+Não verificado: soak longo, stream corrompido e demais gates do decoder; fluidez avaliada só pelo relato do
+usuário e pelas métricas acima.

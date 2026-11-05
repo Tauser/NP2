@@ -43,7 +43,7 @@
 #define DECODER_MAX_CONSECUTIVE_ERRORS 3U
 /* Live decode measured 57-85 ms per picture with the video on screen, so conversion
  * and the UI copy that follows it are limited to about 5 fps (ADR-121). */
-#define PUBLISH_MIN_INTERVAL_US (200 * 1000)
+#define PUBLISH_MIN_INTERVAL_US (125 * 1000)
 /* Pictures behind real time, by RTP clock, before skipping to the next IDR. */
 #define VIDEO_MAX_LAG_MS 1000
 #define RTP_CLOCK_KHZ 90U
@@ -1488,6 +1488,9 @@ static bool publish_frame(stream_session_t *session, const np2_sub0h264_frame_t 
     s_status.height = height;
     ++s_status.frame_sequence;
     xSemaphoreGive(s_frame_mutex);
+    /* When decoding falls behind, receive never blocks. Give the idle task one tick so the task
+     * watchdog is always fed and the rest of the system keeps running. */
+    vTaskDelay(1);
     return true;
 }
 

@@ -49,6 +49,8 @@
 #include "src/misc/cache/instance/lv_image_cache.h"
 
 #define UI_REFRESH_PERIOD_MS 250U
+/* Live video is drawn on its own cadence: the slow refresh above would cap it near 4 frames per second. */
+#define VIDEO_PRESENT_PERIOD_MS 100U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define BOOT_SAVED_NETWORK_MAXIMUM_MS 15000U
@@ -2422,6 +2424,18 @@ static void photo_tick(const app_ui_projection_t *projection)
     photo_frame_service_set_visible(s_ui.photo_active || s_ui.photo_preview_pending);
 }
 
+static void video_present_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if (s_ui.active_screen == PRODUCT_SCREEN_HOME) np_home_camera_present(&s_ui.home_camera);
+    else if (s_ui.active_screen == PRODUCT_SCREEN_IOT) {
+        /* The large viewer scales the picture up; drawing it takes longer, so it is shown every other tick. */
+        static bool s_viewer_tick;
+        s_viewer_tick = !s_viewer_tick;
+        if (s_viewer_tick) np_devices_present_camera(&s_ui.devices);
+    }
+}
+
 static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -3723,6 +3737,10 @@ esp_err_t product_ui_create(lv_display_t *display, lv_indev_t *touch_indev)
                         ESP_ERR_NO_MEM,
                         "product_ui",
                         "UI refresh timer allocation failed");
+    ESP_RETURN_ON_FALSE(lv_timer_create(video_present_timer_cb, VIDEO_PRESENT_PERIOD_MS, NULL) != NULL,
+                        ESP_ERR_NO_MEM,
+                        "product_ui",
+                        "UI video timer allocation failed");
 
     refresh_timer_cb(s_ui.refresh_timer);
     return ESP_OK;

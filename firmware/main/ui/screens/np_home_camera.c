@@ -109,7 +109,16 @@ void np_home_camera_sync(np_home_camera_view_t *view, bool visible, const char *
         np_set_text(view->status, status_text(&status, camera_ipv4));
         return;
     }
-    if (status.frame_sequence == view->frame_sequence) return;
+    np_home_camera_present(view);
+}
+
+void np_home_camera_present(np_home_camera_view_t *view)
+{
+    if (view == NULL || view->root == NULL || !s_running) return;
+    camera_stream_status_t status = {0};
+    camera_stream_service_get_status(&status);
+    if (status.state != CAMERA_STREAM_PLAYING || status.frame_sequence == 0U ||
+        status.frame_sequence == view->frame_sequence) return;
     if (s_frame == NULL) {
         s_frame = heap_caps_malloc(CAMERA_STREAM_RGB565_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_frame == NULL) return;

@@ -865,7 +865,15 @@ void np_devices_refresh_camera(np_devices_view_t *view)
         }
         return;
     }
-    if (status.frame_sequence == 0U ||
+    np_devices_present_camera(view);
+}
+
+void np_devices_present_camera(np_devices_view_t *view)
+{
+    if (view == NULL || view->root == NULL || !np_modal_is_visible(&view->camera_viewer_modal)) return;
+    camera_stream_status_t status = {0};
+    camera_stream_service_get_status(&status);
+    if (status.state != CAMERA_STREAM_PLAYING || status.frame_sequence == 0U ||
         status.frame_sequence == view->camera_frame_sequence ||
         view->camera_frame_buffer == NULL) return;
     uint16_t width = 0U;

@@ -206,6 +206,8 @@ void np_devices_use_camera_chip(np_devices_view_t *view, uint8_t index);
 void np_devices_show_camera_auth(np_devices_view_t *view);
 void np_devices_close_camera(np_devices_view_t *view);
 void np_devices_refresh_camera(np_devices_view_t *view);
+/* Shows the newest camera frame in the open viewer; cheap when nothing new arrived. */
+void np_devices_present_camera(np_devices_view_t *view);
 lv_obj_t *np_sheets_create(lv_obj_t *parent);
 
 typedef struct {

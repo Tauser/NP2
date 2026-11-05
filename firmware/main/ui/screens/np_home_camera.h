@@ -20,3 +20,6 @@ void np_home_camera_sync(np_home_camera_view_t *view, bool visible, const char *
 
 /* Ends the session if this module started one. Safe on a view that was already destroyed. */
 void np_home_camera_stop(void);
+
+/* Shows the newest frame if there is one. Cheap when nothing new arrived or no session runs. */
+void np_home_camera_present(np_home_camera_view_t *view);
