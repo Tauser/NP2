@@ -19,7 +19,9 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "i420_ppa.h"
 #include "i420_rgb565.h"
+#include "i420_uyy.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "mbedtls/base64.h"
@@ -43,7 +45,7 @@
 #define DECODER_MAX_CONSECUTIVE_ERRORS 3U
 /* Live decode measured 57-85 ms per picture with the video on screen, so conversion
  * and the UI copy that follows it are limited to about 5 fps (ADR-121). */
-#define PUBLISH_MIN_INTERVAL_US (125 * 1000)
+#define PUBLISH_MIN_INTERVAL_US (66 * 1000)
 /* Pictures behind real time, by RTP clock, before skipping to the next IDR. */
 #define VIDEO_MAX_LAG_MS 1000
 #define RTP_CLOCK_KHZ 90U
@@ -85,6 +87,7 @@ typedef struct {
     uint32_t dropped;
     uint32_t decode_errors;
     uint32_t skipped;
+    uint32_t non_reference; /* Slices with nal_ref_idc 0: nothing predicts from them. */
     int64_t decode_us;
     int64_t convert_us;
     int64_t decode_max_us;
@@ -131,6 +134,23 @@ static camera_stream_status_t s_status;
 static uint8_t *s_frames[2];
 static uint8_t s_published_frame;
 static bool s_frame_ready;
+static uint16_t s_frame_stride_bytes;
+static uint8_t *s_pack;     /* Picture repacked into the layout the PPA reads. */
+static bool s_ppa_ready;
+static uint8_t s_scale16 = CAMERA_STREAM_SCALE_MAX;
+
+/* The PPA runs in hardware, so the picture it is working on is published when the next one arrives:
+ * the decoder task spends that time decoding. Only the decoder task touches this. */
+typedef struct {
+    bool active;
+    uint8_t target;
+    uint16_t width;
+    uint16_t height;
+    uint16_t stride_bytes;
+    int64_t pack_us;
+} pending_ppa_t;
+static pending_ppa_t s_pending;
+static void finish_pending_ppa(stream_session_t *session, bool publish);
 
 static bool consume_interleaved_packet(stream_session_t *session);
 
@@ -146,6 +166,7 @@ static void set_status(camera_stream_state_t state, esp_err_t error)
 
 static void clear_published_frame(void)
 {
+    finish_pending_ppa(NULL, false);
     if (s_frame_mutex == NULL) return;
     xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
     s_frame_ready = false;
@@ -167,14 +188,21 @@ void camera_stream_service_get_status(camera_stream_status_t *out_status)
     xSemaphoreGive(s_frame_mutex);
 }
 
+esp_err_t camera_stream_service_set_output_scale(uint8_t sixteenths)
+{
+    if (sixteenths < CAMERA_STREAM_SCALE_MIN || sixteenths > CAMERA_STREAM_SCALE_MAX) return ESP_ERR_INVALID_ARG;
+    __atomic_store_n(&s_scale16, sixteenths, __ATOMIC_RELAXED);
+    return ESP_OK;
+}
+
 esp_err_t camera_stream_service_copy_frame(uint8_t *dst, size_t capacity,
                                            uint16_t *width, uint16_t *height,
-                                           uint32_t *sequence)
+                                           uint16_t *stride_bytes, uint32_t *sequence)
 {
-    if (dst == NULL || width == NULL || height == NULL || sequence == NULL ||
+    if (dst == NULL || width == NULL || height == NULL || stride_bytes == NULL || sequence == NULL ||
         s_frame_mutex == NULL) return ESP_ERR_INVALID_ARG;
     xSemaphoreTake(s_frame_mutex, portMAX_DELAY);
-    const size_t bytes = (size_t)s_status.width * s_status.height * 2U;
+    const size_t bytes = (size_t)s_frame_stride_bytes * s_status.height;
     if (!s_frame_ready || bytes == 0U || capacity < bytes) {
         xSemaphoreGive(s_frame_mutex);
         return s_frame_ready ? ESP_ERR_INVALID_SIZE : ESP_ERR_NOT_FOUND;
@@ -182,6 +210,7 @@ esp_err_t camera_stream_service_copy_frame(uint8_t *dst, size_t capacity,
     memcpy(dst, s_frames[s_published_frame], bytes);
     *width = s_status.width;
     *height = s_status.height;
+    *stride_bytes = s_frame_stride_bytes;
     *sequence = s_status.frame_sequence;
     xSemaphoreGive(s_frame_mutex);
     return ESP_OK;
@@ -1395,10 +1424,15 @@ esp_err_t camera_stream_service_start(void)
     if (s_frame_mutex == NULL) return ESP_ERR_NO_MEM;
     s_command_queue = xQueueCreate(1U, sizeof(camera_command_t));
     if (s_command_queue == NULL) return ESP_ERR_NO_MEM;
-    s_frames[0] = heap_caps_calloc(1U, CAMERA_STREAM_RGB565_BYTES,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_frames[1] = heap_caps_calloc(1U, CAMERA_STREAM_RGB565_BYTES,
-                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_frames[0] = heap_caps_aligned_calloc(I420_PPA_ALIGN, 1U,
+        CAMERA_STREAM_FRAME_BYTES + CAMERA_STREAM_FRAME_GUARD_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_frames[1] = heap_caps_aligned_calloc(I420_PPA_ALIGN, 1U,
+        CAMERA_STREAM_FRAME_BYTES + CAMERA_STREAM_FRAME_GUARD_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_pack = heap_caps_aligned_calloc(I420_PPA_ALIGN, 1U,
+        i420_ppa_packed_bytes(CAMERA_STREAM_MAX_WIDTH, CAMERA_STREAM_MAX_HEIGHT),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_ppa_ready = s_pack != NULL && i420_ppa_init() == ESP_OK;
+    ESP_LOGI(TAG, "Frame path: %s", s_ppa_ready ? "PPA scale" : "CPU convert");
     if (s_frames[0] == NULL || s_frames[1] == NULL) {
         if (s_frames[0] != NULL) heap_caps_free(s_frames[0]);
         if (s_frames[1] != NULL) heap_caps_free(s_frames[1]);
@@ -1442,6 +1476,45 @@ static bool append_nal(stream_session_t *session, const uint8_t *nal, size_t siz
            append_bytes(session, nal, size);
 }
 
+/* Makes the buffer the newest picture. */
+static void commit_frame(stream_session_t *session, uint8_t target, uint16_t width, uint16_t height,
+                         uint16_t stride_bytes, int64_t convert_us)
+{
+    session->stats.convert_us += convert_us;
+    if (convert_us > session->stats.convert_max_us) session->stats.convert_max_us = convert_us;
+    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) {
+        ++session->stats.dropped;
+        return;
+    }
+    ++session->stats.published;
+    s_published_frame = target;
+    s_frame_ready = true;
+    s_frame_stride_bytes = stride_bytes;
+    s_status.width = width;
+    s_status.height = height;
+    ++s_status.frame_sequence;
+    xSemaphoreGive(s_frame_mutex);
+    /* When decoding falls behind, receive never blocks. Give the idle task one tick so the task
+     * watchdog is always fed and the rest of the system keeps running. */
+    vTaskDelay(1);
+}
+
+/* Waits for the picture the PPA was given and, when asked, publishes it. */
+static void finish_pending_ppa(stream_session_t *session, bool publish)
+{
+    if (!s_pending.active) return;
+    s_pending.active = false;
+    const int64_t wait_start_us = esp_timer_get_time();
+    if (i420_ppa_wait(200U) != ESP_OK) {
+        ESP_LOGW(TAG, "PPA did not finish; using the CPU path");
+        s_ppa_ready = false;
+        return;
+    }
+    if (!publish || session == NULL) return;
+    commit_frame(session, s_pending.target, s_pending.width, s_pending.height, s_pending.stride_bytes,
+                 s_pending.pack_us + (esp_timer_get_time() - wait_start_us));
+}
+
 /* Returns false only when the picture can never be shown. A busy UI just drops it. */
 static bool publish_frame(stream_session_t *session, const np2_sub0h264_frame_t *frame)
 {
@@ -1451,6 +1524,8 @@ static bool publish_frame(stream_session_t *session, const np2_sub0h264_frame_t 
         height > CAMERA_STREAM_MAX_HEIGHT || (width & 1U) != 0U || (height & 1U) != 0U ||
         frame->crop_x + width > frame->width || frame->crop_y + height > frame->height)
         return false;
+    /* The previous picture finished while this one was decoded. */
+    finish_pending_ppa(session, true);
     const int64_t start_us = esp_timer_get_time();
     if (session->last_publish_us != 0 &&
         start_us - session->last_publish_us < PUBLISH_MIN_INTERVAL_US) {
@@ -1472,25 +1547,34 @@ static bool publish_frame(stream_session_t *session, const np2_sub0h264_frame_t 
         .width = width,
         .height = height,
     };
-    if (!i420_rgb565_convert(&source, (uint16_t *)s_frames[target])) return false;
-    const int64_t convert_us = esp_timer_get_time() - start_us;
-    session->last_publish_us = start_us;
-    session->stats.convert_us += convert_us;
-    if (convert_us > session->stats.convert_max_us) session->stats.convert_max_us = convert_us;
-    if (xSemaphoreTake(s_frame_mutex, pdMS_TO_TICKS(40U)) != pdTRUE) {
-        ++session->stats.dropped;
-        return true;
+    if (s_ppa_ready) {
+        const uint8_t sixteenths = __atomic_load_n(&s_scale16, __ATOMIC_RELAXED);
+        const float scale = (float)sixteenths / 16.0f;
+        uint16_t out_w = 0U;
+        uint16_t out_h = 0U;
+        i420_ppa_output_size(width, height, scale, &out_w, &out_h);
+        const uint16_t pitch = i420_ppa_row_pitch(out_w);
+        const size_t out_bytes = i420_ppa_align((size_t)pitch * out_h * 2U);
+        if (out_w != 0U && out_h != 0U && out_bytes <= CAMERA_STREAM_FRAME_BYTES &&
+            i420_pack_uyy_vyy(&source, s_pack, false) &&
+            i420_ppa_start(s_pack, width, height, scale, (uint16_t *)s_frames[target], out_bytes, pitch) == ESP_OK) {
+            s_pending = (pending_ppa_t){
+                .active = true,
+                .target = target,
+                .width = out_w,
+                .height = out_h,
+                .stride_bytes = (uint16_t)(pitch * 2U),
+                .pack_us = esp_timer_get_time() - start_us,
+            };
+            session->last_publish_us = start_us;
+            return true;
+        }
+        ESP_LOGW(TAG, "PPA conversion failed; using the CPU path");
+        s_ppa_ready = false;
     }
-    ++session->stats.published;
-    s_published_frame = target;
-    s_frame_ready = true;
-    s_status.width = width;
-    s_status.height = height;
-    ++s_status.frame_sequence;
-    xSemaphoreGive(s_frame_mutex);
-    /* When decoding falls behind, receive never blocks. Give the idle task one tick so the task
-     * watchdog is always fed and the rest of the system keeps running. */
-    vTaskDelay(1);
+    if (!i420_rgb565_convert(&source, (uint16_t *)s_frames[target])) return false;
+    session->last_publish_us = start_us;
+    commit_frame(session, target, width, height, (uint16_t)(width * 2U), esp_timer_get_time() - start_us);
     return true;
 }
 
@@ -1501,12 +1585,12 @@ static void log_video_stats(stream_session_t *session, int64_t now_us)
     if (now_us - stats->window_start_us < VIDEO_STATS_INTERVAL_US) return;
     const uint32_t elapsed_ms = (uint32_t)((now_us - stats->window_start_us) / 1000);
     ESP_LOGI(TAG,
-             "video ms=%lu decoded=%lu published=%lu dropped=%lu skipped=%lu lag_ms=%ld errors=%lu "
+             "video ms=%lu decoded=%lu published=%lu dropped=%lu skipped=%lu nonref=%lu lag_ms=%ld errors=%lu "
              "decode_us_avg=%lu max=%lu convert_us_avg=%lu max=%lu "
              "stack_free=%u internal_free=%u internal_min=%u",
              (unsigned long)elapsed_ms, (unsigned long)stats->decoded,
              (unsigned long)stats->published, (unsigned long)stats->dropped,
-             (unsigned long)stats->skipped, (long)session->lag_ms,
+             (unsigned long)stats->skipped, (unsigned long)stats->non_reference, (long)session->lag_ms,
              (unsigned long)stats->decode_errors,
              (unsigned long)(stats->decode_us / (stats->decoded != 0U ? stats->decoded : 1U)),
              (unsigned long)stats->decode_max_us,
@@ -1537,6 +1621,7 @@ static bool decode_nal(stream_session_t *session, const uint8_t *nal, size_t siz
         log_video_stats(session, esp_timer_get_time());
         return true;
     }
+    if (type == 1U && ((nal[0] >> 5U) & 3U) == 0U) ++session->stats.non_reference;
     const int64_t start_us = esp_timer_get_time();
     const int result = np2_sub0h264_decode_nal(session->decoder, nal, size);
     const int64_t now_us = esp_timer_get_time();

@@ -447,7 +447,7 @@ np_devices_view_t np_devices_build_with_header(lv_obj_t *parent,
     lv_obj_center(view.camera_stream_image);
     lv_image_set_inner_align(view.camera_stream_image, LV_IMAGE_ALIGN_CONTAIN);
     lv_image_set_antialias(view.camera_stream_image, false);
-    view.camera_frame_buffer = heap_caps_malloc(CAMERA_STREAM_RGB565_BYTES,
+    view.camera_frame_buffer = heap_caps_malloc(CAMERA_STREAM_FRAME_BYTES,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     /* Only over the empty surface while there is no picture. */
@@ -583,6 +583,8 @@ void np_devices_connect_camera(np_devices_view_t *view)
 {
     if (view == NULL) return;
     view->camera_auth_rejection_shown = false;
+    /* 21/16 of 640x360 is 840x472: it fits the card whole, so LVGL draws it without scaling. */
+    (void)camera_stream_service_set_output_scale(21U);
     const esp_err_t result =
         camera_stream_service_play_saved(view->camera_ipv4[view->selected_camera]);
     if (result == ESP_ERR_NOT_FOUND) {
@@ -878,21 +880,27 @@ void np_devices_present_camera(np_devices_view_t *view)
         view->camera_frame_buffer == NULL) return;
     uint16_t width = 0U;
     uint16_t height = 0U;
+    uint16_t stride = 0U;
     uint32_t sequence = 0U;
     if (camera_stream_service_copy_frame(view->camera_frame_buffer,
-            CAMERA_STREAM_RGB565_BYTES, &width, &height, &sequence) != ESP_OK ||
-        width == 0U || height == 0U) return;
+            CAMERA_STREAM_FRAME_BYTES, &width, &height, &stride, &sequence) != ESP_OK ||
+        width == 0U || height == 0U || stride < width * 2U) return;
     s_camera_stream_image = (lv_image_dsc_t){
         .header = {
             .magic = LV_IMAGE_HEADER_MAGIC,
             .cf = LV_COLOR_FORMAT_RGB565,
             .w = width,
             .h = height,
-            .stride = (uint16_t)(width * 2U),
+            .stride = stride,
         },
-        .data_size = (uint32_t)width * height * 2U,
+        .data_size = (uint32_t)stride * height,
         .data = view->camera_frame_buffer,
     };
+    /* A picture that fits the card is drawn as it is; anything larger is scaled to fit. */
+    const lv_image_align_t align = width <= CAMERA_VIDEO_W && height <= CAMERA_VIDEO_H
+        ? LV_IMAGE_ALIGN_CENTER : LV_IMAGE_ALIGN_CONTAIN;
+    if (lv_image_get_inner_align(view->camera_stream_image) != align)
+        lv_image_set_inner_align(view->camera_stream_image, align);
     lv_image_set_src(view->camera_stream_image, &s_camera_stream_image);
     view->camera_frame_sequence = sequence;
 }

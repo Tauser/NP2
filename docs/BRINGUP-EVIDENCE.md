@@ -7524,3 +7524,31 @@ na mesma tarefa.
 
 Não verificado: soak longo, stream corrompido e demais gates do decoder; fluidez avaliada só pelo relato do
 usuário e pelas métricas acima.
+
+### 2026-11-05 — vídeo da câmera a 11 a 12 quadros por segundo: PPA, conversor e escala exata
+
+Placa ESP32-P4 v1.3 (serial terminado em 8F42), COM8. Imagem P4 `np2_p4.bin` sha256
+`205635a5c695022d3aa282051884c6ffbb78418dbee8ab9c2563aca798b94702`, gravada com `tools/flash_p4_app_checked.py`;
+build limpo de `tools/run_spotify_remote.ps1`, sem avisos. C6 não envolvido.
+
+Mudanças: (1) conversor I420→RGB565 em CPU com tabelas de limitação e escrita de 32 bits, igual bit a bit à fórmula
+anterior (`tools/i420_rgb565_host_test.c`, 16,7 milhões de combinações, passa); 39 → 29,6 ms por quadro. (2) Caminho
+principal pelo PPA do P4: reempacotamento planar→layout do PPA na CPU (`i420_uyy.c`, ~13 ms, teste de host
+`tools/i420_uyy_host_test.c`) e conversão com escala em hardware, assíncrona: o quadro é publicado quando o próximo
+chega, e o decoder trabalha no intervalo. (3) A imagem sai já no tamanho do consumidor: 13/16 (520×292) na Home e
+21/16 (840×472) no visualizador grande, com linha de 864 px quando preciso, para o LVGL desenhar sem escalar nem
+copiar. O conversor de CPU fica como reserva se o PPA falhar. (4) Publicação a cada 66 ms.
+
+Medido na Home (80 a 90 s, página da câmera): 110 a 124 quadros publicados por 10 s (~11 a 12 por segundo; antes ~4 a
+6,6); 129 a 139 decodificados por 10 s; conversão efetiva ~16 ms; `errors=0`; sem aviso de watchdog; `lvgl_stack_min`
+8748 B; CPU 71 a 93 %. `lag_ms` oscilou entre 77 e 789 e houve 0 a 17 quadros pulados por janela (pico de decode de
+150 a 170 ms nos quadros-chave); isso afeta a latência, não a taxa.
+
+Descartados com medida: conversão em outra tarefa no outro núcleo (9,4 fps, mas atraso de 650 ms, quadros pulados e
+watchdog; decode e conversão passaram a disputar a PSRAM); pular decode de quadros não referenciados (`nonref=0`:
+o stream da C200 não tem quadros com `nal_ref_idc` 0). A origem envia ~14,3 quadros por segundo, então 30 fps não é
+alcançável com este stream; o teto prático é ~12 a 14.
+
+Não verificado: o visualizador grande com esta imagem foi avaliado só pelo relato do usuário ("está tudo certo"), sem
+captura de watchdog/CPU; as cores do PPA foram avaliadas pelo usuário a olho; soak longo, stream corrompido e demais
+gates do decoder seguem abertos.

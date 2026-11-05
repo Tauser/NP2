@@ -50,7 +50,7 @@
 
 #define UI_REFRESH_PERIOD_MS 250U
 /* Live video is drawn on its own cadence: the slow refresh above would cap it near 4 frames per second. */
-#define VIDEO_PRESENT_PERIOD_MS 100U
+#define VIDEO_PRESENT_PERIOD_MS 66U
 #define BOOT_MINIMUM_MS 1200U
 #define BOOT_MAXIMUM_MS 6000U
 #define BOOT_SAVED_NETWORK_MAXIMUM_MS 15000U

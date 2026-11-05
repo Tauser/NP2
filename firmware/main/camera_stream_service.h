@@ -13,6 +13,16 @@ extern "C" {
 #define CAMERA_STREAM_MAX_HEIGHT 360U
 #define CAMERA_STREAM_RGB565_BYTES \
     (CAMERA_STREAM_MAX_WIDTH * CAMERA_STREAM_MAX_HEIGHT * 2U)
+/* The PPA scales 640x360 in steps of 1/16: at most 21/16, which is 840x472. A scaled row is padded to the
+ * 64 bytes LVGL requires (864 pixels), otherwise LVGL copies every picture into a pool too small for it. */
+#define CAMERA_STREAM_OUT_MAX_WIDTH 840U
+#define CAMERA_STREAM_OUT_MAX_HEIGHT 472U
+#define CAMERA_STREAM_OUT_MAX_PITCH 864U
+#define CAMERA_STREAM_FRAME_BYTES (CAMERA_STREAM_OUT_MAX_PITCH * CAMERA_STREAM_OUT_MAX_HEIGHT * 2U)
+/* Slack after each frame buffer: the PPA works in 32 x 32 tiles and 472 rows is not a whole number of them. */
+#define CAMERA_STREAM_FRAME_GUARD_BYTES 32768U
+#define CAMERA_STREAM_SCALE_MIN 8U   /* Sixteenths. */
+#define CAMERA_STREAM_SCALE_MAX 21U
 
 typedef enum {
     CAMERA_STREAM_STOPPED = 0,
@@ -76,9 +86,13 @@ esp_err_t camera_stream_service_register(const char *ipv4, const char *username,
                                          const char *password);
 esp_err_t camera_stream_service_stop(void);
 void camera_stream_service_get_status(camera_stream_status_t *out_status);
+/* The picture is published already scaled, at the size set here (sixteenths of the camera's 640x360). The
+ * viewer that is on screen asks for the size that fits it exactly so LVGL never has to scale. */
+esp_err_t camera_stream_service_set_output_scale(uint8_t sixteenths);
+/* Copies the newest picture. stride_bytes is the distance between rows, at least width * 2. */
 esp_err_t camera_stream_service_copy_frame(uint8_t *dst, size_t capacity,
                                            uint16_t *width, uint16_t *height,
-                                           uint32_t *sequence);
+                                           uint16_t *stride_bytes, uint32_t *sequence);
 
 #ifdef __cplusplus
 }

@@ -89,6 +89,8 @@ void np_home_camera_sync(np_home_camera_view_t *view, bool visible, const char *
         return;
     }
     if (!s_running) {
+        /* 13/16 of 640x360 is 520x292, which fits the card whole: LVGL draws it without scaling. */
+        (void)camera_stream_service_set_output_scale(13U);
         const esp_err_t result = camera_stream_service_play_saved(camera_ipv4);
         if (result == ESP_ERR_NOT_FOUND) {
             np_set_text(view->status, "Informe a conta da câmera em Dispositivos.");
@@ -120,25 +122,30 @@ void np_home_camera_present(np_home_camera_view_t *view)
     if (status.state != CAMERA_STREAM_PLAYING || status.frame_sequence == 0U ||
         status.frame_sequence == view->frame_sequence) return;
     if (s_frame == NULL) {
-        s_frame = heap_caps_malloc(CAMERA_STREAM_RGB565_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_frame = heap_caps_malloc(CAMERA_STREAM_FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_frame == NULL) return;
     }
     uint16_t width = 0U;
     uint16_t height = 0U;
+    uint16_t stride = 0U;
     uint32_t sequence = 0U;
-    if (camera_stream_service_copy_frame(s_frame, CAMERA_STREAM_RGB565_BYTES, &width, &height,
-                                         &sequence) != ESP_OK || width == 0U || height == 0U) return;
+    if (camera_stream_service_copy_frame(s_frame, CAMERA_STREAM_FRAME_BYTES, &width, &height, &stride,
+                                         &sequence) != ESP_OK || width == 0U || height == 0U ||
+        stride < width * 2U) return;
     s_image = (lv_image_dsc_t){
         .header = {
             .magic = LV_IMAGE_HEADER_MAGIC,
             .cf = LV_COLOR_FORMAT_RGB565,
             .w = width,
             .h = height,
-            .stride = (uint16_t)(width * 2U),
+            .stride = stride,
         },
-        .data_size = (uint32_t)width * height * 2U,
+        .data_size = (uint32_t)stride * height,
         .data = s_frame,
     };
+    const lv_image_align_t align = width <= HOME_CAMERA_VIDEO_W && height <= HOME_CAMERA_VIDEO_H
+        ? LV_IMAGE_ALIGN_CENTER : LV_IMAGE_ALIGN_CONTAIN;
+    if (lv_image_get_inner_align(view->image) != align) lv_image_set_inner_align(view->image, align);
     lv_image_set_src(view->image, &s_image);
     view->frame_sequence = sequence;
 }
