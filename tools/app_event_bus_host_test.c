@@ -157,7 +157,7 @@ static void test_lifecycle_and_commands(void)
         result.spotify_command.value==3 && result.spotify_command.revision==1234);
     assert(app_event_bus_post_home_widget(1)==ESP_OK);
     result=receive(); assert(result.type==APP_EVENT_HOME_WIDGET && result.home_widget==1);
-    assert(app_event_bus_post_home_widget(2)==ESP_ERR_INVALID_ARG);
+    assert(app_event_bus_post_home_widget(2)==ESP_OK); result=receive(); assert(result.home_widget==2); assert(app_event_bus_post_home_widget(3)==ESP_ERR_INVALID_ARG);
     expect_empty();
 }
 

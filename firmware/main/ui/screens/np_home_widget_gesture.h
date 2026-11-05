@@ -21,3 +21,14 @@ static inline int np_home_widget_destination(int32_t dx, int32_t dy)
     if (x < 72 || x < y * 2) return -1;
     return dx < 0 ? 1 : 0;
 }
+#define NP_HOME_WIDGET_COUNT 3
+/* The page a horizontal drag leads to from `current`, clamped to the first and last page: a drag
+ * at an end returns `current`, so the card still owns it and the main page does not change. */
+static inline int np_home_widget_step(int current, int32_t dx, int32_t dy)
+{
+    if (np_home_widget_destination(dx, dy) < 0) return -1;
+    int next = dx < 0 ? current + 1 : current - 1;
+    if (next < 0) next = 0;
+    if (next >= NP_HOME_WIDGET_COUNT) next = NP_HOME_WIDGET_COUNT - 1;
+    return next;
+}

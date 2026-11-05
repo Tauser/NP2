@@ -3546,7 +3546,7 @@ esp_err_t flash_coordinator_request_camera_inventory_write(const camera_inventor
 
 esp_err_t flash_coordinator_request_home_widget_write(uint8_t widget)
 {
-    if (widget > 1U || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
+    if (widget > 2U || s_request_queue == NULL || s_p4_ota_submission_lock == NULL)
         return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_p4_ota_submission_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
     flash_coordinator_status_t status = {0};

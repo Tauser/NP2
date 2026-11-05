@@ -31,6 +31,8 @@ int main(int argc,char **argv)
     assert(np_home_widget_destination(72,0)==0);
     assert(np_home_widget_destination(-100,-60)==-1);
     assert(np_home_widget_destination(-71,0)==-1);
+    assert(np_home_widget_step(0,-72,0)==1 && np_home_widget_step(1,-72,0)==2 && np_home_widget_step(2,-72,0)==2);
+    assert(np_home_widget_step(2,72,0)==1 && np_home_widget_step(0,72,0)==0 && np_home_widget_step(1,-71,0)==-1);
     assert(np_home_widget_destination(-100,60)==-1);
     lv_font_glyph_dsc_t glyph;
     const unsigned icons[] = {0xe034,0xe037};

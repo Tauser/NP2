@@ -23,6 +23,7 @@
 #include "np_pomodoro.h"
 #include "np_agenda.h"
 #include "np_spotify.h"
+#include "np_home_camera.h"
 #include "np_home_widget_gesture.h"
 #include "np_profile.h"
 #include "np_preferences.h"
@@ -90,7 +91,8 @@ typedef struct {
     np_pomodoro_view_t pomodoro;
     np_agenda_view_t agenda;
     np_spotify_view_t spotify;
-    lv_obj_t *home_widget_dots[2];
+    np_home_camera_view_t home_camera;
+    lv_obj_t *home_widget_dots[NP_HOME_WIDGET_COUNT];
     uint8_t home_widget_selected;
     bool spotify_visible;
     np_devices_view_t devices;
@@ -1490,7 +1492,7 @@ static void update_home(const app_ui_projection_t *projection)
         memcmp(&s_ui.rendered_home_data, &projection->offline_data,
                sizeof(projection->offline_data)) != 0 ||
         s_ui.rendered_weather_icon_source != projection->weather_assets.icon_source) {
-        if (s_ui.home_widget_selected != 1U) update_weather(projection);
+        if (s_ui.home_widget_selected == 0U) update_weather(projection);
         update_market(projection);
         update_exchange(projection);
         update_ibovespa(projection);
@@ -1520,25 +1522,27 @@ static void home_widget_build(void)
 {
     s_ui.spotify = np_spotify_build(s_ui.home.root);
     np_spotify_bind(&s_ui.spotify);
+    s_ui.home_camera = np_home_camera_build(s_ui.home.root);
     s_ui.home_widget_selected = UINT8_MAX;
-    for (unsigned i = 0; i < 2; ++i) {
-        s_ui.home_widget_dots[i] = np_dot(s_ui.home.root, 292 + (int)i * 16, 436, 8, np_c_text_3());
+    for (unsigned i = 0; i < NP_HOME_WIDGET_COUNT; ++i) {
+        s_ui.home_widget_dots[i] = np_dot(s_ui.home.root, 284 + (int)i * 16, 436, 8, np_c_text_3());
         lv_obj_remove_flag(s_ui.home_widget_dots[i], LV_OBJ_FLAG_CLICKABLE);
     }
 }
 static void home_widget_sync(const app_ui_projection_t *projection)
 {
     if (s_ui.home.root == NULL || s_ui.spotify.root == NULL) return;
-    const uint8_t selected = projection->device_controls.home_widget == 1U ? 1U : 0U;
+    const uint8_t selected = projection->device_controls.home_widget <= 2U ? projection->device_controls.home_widget : 0U;
     if (selected != s_ui.home_widget_selected) {
         s_ui.home_widget_selected = selected;
         np_set_visible(s_ui.home.weather_card, selected == 0U);
         np_set_visible(s_ui.spotify.root, selected == 1U);
-        if (selected == 1U) {
+        np_set_visible(s_ui.home_camera.root, selected == 2U);
+        if (selected != 0U) {
             (void)lv_animimg_delete(s_ui.home.weather_icon);
             np_set_visible(s_ui.home.weather_icon, false);
         } else update_weather(projection);
-        for (unsigned i=0;i<2;++i) {
+        for (unsigned i=0;i<NP_HOME_WIDGET_COUNT;++i) {
             np_set_bg_color(s_ui.home_widget_dots[i], i == selected ? np_c_accent() : np_c_text_3());
         }
     }
@@ -1548,6 +1552,13 @@ static void home_widget_sync(const app_ui_projection_t *projection)
         if (app_event_bus_post_spotify(&c)==ESP_OK) s_ui.spotify_visible=visible;
     }
     if (visible) np_spotify_sync(&s_ui.spotify, projection->network.online);
+    const bool camera_shown = s_ui.active_screen == PRODUCT_SCREEN_HOME && selected == 2U && !s_ui.photo_active &&
+                              projection->network.online;
+    const char *camera_address = "";
+    for (unsigned i = 0U; i < APP_IOT_MAX_CAMERAS; ++i) {
+        if (projection->iot.cameras[i].address[0] != '\0') { camera_address = projection->iot.cameras[i].address; break; }
+    }
+    np_home_camera_sync(&s_ui.home_camera, camera_shown, camera_address);
 }
 
 static void update_display_sound_controls(const app_ui_projection_t *projection)
@@ -1890,6 +1901,11 @@ static void main_page_swipe_event_cb(lv_event_t *event)
             s_ui.main_page_swipe_start_valid = s_ui.main_page_swipe_start.y >= NP_HEADER_H;
             lv_obj_t *const touched_object = lv_event_get_param(event);
             int owner = np_home_widget_owner(touched_object, s_ui.home.weather_card, &s_ui.spotify);
+            if (owner == 0) {
+                for (lv_obj_t *a = touched_object; a != NULL; a = lv_obj_get_parent(a)) {
+                    if (a == s_ui.home_camera.root) { owner = 1; break; }
+                }
+            }
             s_ui.home_widget_swipe_start = owner == 1 && s_ui.active_screen == PRODUCT_SCREEN_HOME;
             if (owner < 0) s_ui.main_page_swipe_start_valid = false;
             if (s_ui.shell_header.drawer_scrim == NULL ||
@@ -1919,7 +1935,7 @@ static void main_page_swipe_event_cb(lv_event_t *event)
     const int32_t distance_x = delta_x < 0 ? -delta_x : delta_x;
     const int32_t distance_y = delta_y < 0 ? -delta_y : delta_y;
     if (s_ui.home_widget_swipe_start) {
-        int destination = np_home_widget_destination(delta_x, delta_y);
+        int destination = np_home_widget_step((int)s_ui.home_widget_selected, delta_x, delta_y);
         if (destination >= 0) {
             s_ui.main_page_swipe_consumed = true;
             if ((uint8_t)destination != s_ui.home_widget_selected &&
@@ -2663,6 +2679,7 @@ static void navigation_clean(void *context, uintptr_t page)
     s_ui.pomodoro = (np_pomodoro_view_t){0};
     s_ui.agenda = (np_agenda_view_t){0};
     s_ui.spotify = (np_spotify_view_t){0};
+    s_ui.home_camera = (np_home_camera_view_t){0};
     memset(s_ui.home_widget_dots, 0, sizeof(s_ui.home_widget_dots));
     s_ui.home_widget_selected = UINT8_MAX;
     if (s_ui.navigation.destination != PRODUCT_SCREEN_HOME &&
@@ -3038,6 +3055,7 @@ static void navigation_enter(void *context, uintptr_t page)
         spotify_remote_command_t c = {.action=SPOTIFY_REMOTE_HIDDEN};
         if(app_event_bus_post_spotify(&c)==ESP_OK) s_ui.spotify_visible=false;
     }
+    if (page != PRODUCT_SCREEN_HOME) np_home_camera_stop();
     if (page == PRODUCT_SCREEN_WIFI) {
         s_ui.wifi_scan_pending = true;
         s_ui.wifi_scan_idle_since_tick = 0U;

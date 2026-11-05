@@ -107,7 +107,7 @@ esp_err_t app_event_bus_post(const app_event_t *event)
         queued.payload.notification_id = event->notification_id;
         break;
     case APP_EVENT_HOME_WIDGET:
-        if (event->home_widget > 1U) return ESP_ERR_INVALID_ARG;
+        if (event->home_widget > 2U) return ESP_ERR_INVALID_ARG;
         queued.payload.home_widget = event->home_widget; break;
     case APP_EVENT_SPOTIFY_REMOTE:
         queued.payload.spotify = event->spotify_command;
@@ -342,7 +342,7 @@ esp_err_t app_event_bus_post_spotify(const spotify_remote_command_t *command)
 
 esp_err_t app_event_bus_post_home_widget(uint8_t widget)
 {
-    if (widget > 1U || s_queue == NULL) return ESP_ERR_INVALID_ARG;
+    if (widget > 2U || s_queue == NULL) return ESP_ERR_INVALID_ARG;
     app_queued_event_t e = {.type=APP_EVENT_HOME_WIDGET}; e.payload.home_widget=widget;
     return enqueue_event(&e);
 }

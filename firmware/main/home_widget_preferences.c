@@ -7,7 +7,7 @@ typedef struct { cache_record_header_t header; uint8_t value[4]; } record_t;
 static bool valid(const record_t *r)
 {
     return cache_record_header_is_valid(&r->header,sizeof(r->value)) && r->header.payload_size==sizeof(r->value) &&
-        r->value[0]<=1 && !r->value[1] && !r->value[2] && !r->value[3] &&
+        r->value[0]<=2 && !r->value[1] && !r->value[2] && !r->value[3] &&
         r->header.payload_crc32==cache_record_crc32(r->value,sizeof(r->value));
 }
 static esp_err_t read(nvs_handle_t handle,record_t *selected)
@@ -33,7 +33,7 @@ esp_err_t home_widget_owner_load(uint8_t *widget)
 }
 esp_err_t home_widget_owner_write(uint8_t widget)
 {
-    if(widget>1)return ESP_ERR_INVALID_ARG;
+    if(widget>2)return ESP_ERR_INVALID_ARG;
     nvs_handle_t h;esp_err_t result=nvs_open("np2_home",NVS_READWRITE,&h);
     if(result!=ESP_OK)return result;
     record_t prior={0};result=read(h,&prior);

@@ -58,7 +58,7 @@ int main(void)
     assert(home_widget_owner_load(&widget)==ESP_OK && widget==0);
     home_slots[0][sizeof(record_t)-1]^=1;
     assert(home_widget_owner_load(&widget)==ESP_OK && widget==1);
-    assert(home_widget_owner_write(2)==ESP_ERR_INVALID_ARG);
+    assert(home_widget_owner_write(3)==ESP_ERR_INVALID_ARG);
     puts("Home widget: save/restore, commit failure and CRC fallback PASS");
     puts("Spotify vault: strict private provision, duplicate/unknown rejection, coordinated rotation retry, failed commit and CRC fallback PASS");
 }

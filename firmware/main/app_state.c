@@ -788,7 +788,7 @@ static void app_loop_task(void *arg)
                 s_profile_result = ESP_OK;
             }
         } else if (result == ESP_OK && event->type == APP_EVENT_HOME_WIDGET) {
-            if (event->home_widget <= 1U && event->home_widget != s_home_widget) {
+            if (event->home_widget <= 2U && event->home_widget != s_home_widget) {
                 s_home_widget = event->home_widget; s_home_dirty = true;
                 s_home_changed = (uint64_t)esp_timer_get_time()/1000U;
             }

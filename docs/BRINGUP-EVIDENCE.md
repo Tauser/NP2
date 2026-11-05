@@ -6726,3 +6726,27 @@ foi investigada. A fila de apresentação portanto não está validada e não de
 
 Medições do pior caso: o empacotamento I420 para o formato do PPA custa 12,7 a 14,8 ms por quadro na CPU; a
 conversão pelo PPA leva 12,6 a 14,7 ms em hardware.
+
+### 2026-11-04 — câmera como terceira página do widget da Home
+
+Placa ESP32-P4 v1.3 (serial terminado em 8F42), COM8. Imagem P4 `np2_p4.bin` com sha256
+`cb8328506e58372b92f9c4b476f8ecc59d803edf4aa4e269350f3705302ad74b` (3.874.512 B), gravada com
+`tools/flash_p4_app_checked.py` (somente o app; C6, NVS e tabela de partições preservados). Build limpo de
+`tools/run_spotify_remote.ps1`, sem avisos. Nenhuma imagem C6 envolvida.
+
+Mudança: o espaço do Clima passa a ter três páginas (Clima, Spotify, Câmera), selecionadas por arrasto e salvas
+em NVS (valores 0 a 2; os valores 0 e 1 já gravados continuam válidos). A página da câmera mostra só a imagem da
+primeira câmera cadastrada. A sessão RTSP/decodificação abre ao entrar na página e fecha ao sair dela, ao trocar
+de tela ou quando a moldura de fotos aparece, e só abre com o painel online (IP do Wi-Fi obtido).
+
+Defeitos achados na bancada e corrigidos: o valor 2 era recusado em três pontos além do primeiro que alterei
+(`app_event_bus_post_home_widget`, `flash_coordinator_request_home_widget_write`) e o painel mostrava
+"Painel ocupado"; e, ao reiniciar com a câmera como página atual, a conexão era tentada antes do Wi-Fi.
+
+Captura de boot com a página da câmera salva (60 s): uma só sessão, que chegou a PLAY, sem tentativa anterior ao
+Wi-Fi, `errors=0`, `skipped=0`, ~4 quadros publicados por segundo (igual à tela de Dispositivos),
+`lvgl_stack_min=8748` B. O usuário confirmou que a conexão passou a ocorrer normalmente após reiniciar.
+
+Não verificado: o encerramento da sessão ao sair da página não foi capturado em log (a linha de fim de sessão
+não apareceu na janela); testes de host das preferências (`spotify_remote_credentials_host_test.c`) não rodados;
+soak, stream corrompido e demais gates do decoder continuam abertos.

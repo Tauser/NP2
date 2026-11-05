@@ -26,7 +26,7 @@ endif()
 
 idf_component_register(
     # G5 policies and opt-in physical-maintenance OTA adapter.
-    SRCS "home_widget_preferences.c" "spotify_cover.c" "spotify_remote.c" "spotify_remote_credentials.c" "ui/screens/np_spotify.c" "spotify_http_policy.c" "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
+    SRCS "home_widget_preferences.c" "spotify_cover.c" "spotify_remote.c" "spotify_remote_credentials.c" "ui/screens/np_spotify.c" "ui/screens/np_home_camera.c" "spotify_http_policy.c" "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
          "update_development.c" "cache_record.c" "coingecko_quota.c" "offline_data_codec.c" "offline_data_provider.c" "offline_value_format.c" "data_refresh_scheduler.c" "weather_condition.c" "weather_asset_service.c"
          "ui/core/np_styles.c" "ui/core/np_form.c" "ui/core/np_components.c" "ui/core/np_feedback.c" "ui/core/np_modal.c" "ui/core/np_keyboard.c" "ui/core/np_confirm.c"
          "ui/assets/np_weather_background_assets.c" "ui/assets/np_weather_static_icons.c" "ui/assets/np_btc_tilted_icon.c"
