@@ -1,5 +1,7 @@
 #include "device_control_service.h"
 #include "music_audio_service.h"
+#include "voice_capture.h"
+#include "audio_capture_io.h"
 
 #include "flash_coordinator.h"
 #include "night_mode_policy.h"
@@ -28,12 +30,16 @@
 #define DEVICE_CONTROL_SAVE_DELAY_MS      500U
 #define DEVICE_CONTROL_SOUND_CHUNK_SAMPLES 256U
 #define DEVICE_CONTROL_NOTIFICATION_TONE_MIN_INTERVAL_MS 350U
+#define DEVICE_CONTROL_MIC_GAIN_DB 30.0f
+#define DEVICE_CONTROL_MIC_DISCARD_READS 16U /* ~190 ms of stale DMA audio */
 
 static const char *const TAG = "device_controls";
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task;
 static esp_codec_dev_handle_t s_speaker;
+static esp_codec_dev_handle_t s_microphone;
+static bool s_microphone_open;
 static temperature_sensor_handle_t s_temperature_sensor;
 static bool s_started;
 static bool s_brightness_pending;
@@ -79,6 +85,16 @@ static esp_err_t apply_volume(uint8_t percent)
 {
     esp_err_t result = ESP_OK;
     if (s_speaker == NULL) {
+        /* ADR-116: open the ES7210 input once, before the speaker starts
+         * streaming, so the shared duplex I2S is never reconfigured while TX
+         * runs. A missing microphone only disables the assistant. */
+        s_microphone = bsp_audio_codec_microphone_init();
+        esp_codec_dev_sample_info_t input = {.bits_per_sample = 16, .channel = 1, .channel_mask = 0,
+            .sample_rate = VOICE_CAPTURE_SAMPLE_RATE, .mclk_multiple = 0};
+        esp_err_t mic = s_microphone ? codec_result(esp_codec_dev_open(s_microphone, &input)) : ESP_FAIL;
+        if (mic == ESP_OK) mic = codec_result(esp_codec_dev_set_in_gain(s_microphone, DEVICE_CONTROL_MIC_GAIN_DB));
+        s_microphone_open = mic == ESP_OK;
+        ESP_LOGI(TAG, "Microphone open result=%s", esp_err_to_name(mic));
         s_speaker = bsp_audio_codec_speaker_init();
         if (s_speaker == NULL) {
             result = ESP_FAIL;
@@ -287,6 +303,37 @@ static bool play_music_chunk(void)
     return true;
 }
 
+/* Assistant microphone. The ES7210 shares the duplex I2S already opened for
+ * the speaker at 22.05 kHz; it is opened only while a capture is requested. */
+static bool capture_microphone_chunk(void)
+{
+    /* Opened once at boot; RX keeps running and its DMA ring simply overruns
+     * while nobody listens. Stale buffers are discarded at each new capture. */
+    static uint32_t discard;
+    static uint32_t generation, waits;
+    static int64_t last_progress;
+    if(!voice_capture_owner_wanted())return false;
+    if(!s_microphone_open){voice_capture_owner_fail(ESP_ERR_NOT_SUPPORTED);return false;}
+    /* Chimes and alarms keep their existing priority and must never be sent
+     * to STT as user speech. Fail only the assistant's capture. */
+    if(s_active_sound>=0){voice_capture_owner_fail(ESP_ERR_INVALID_STATE);return false;}
+    voice_capture_status_t capture={0};voice_capture_get_status(&capture);
+    if(capture.generation!=generation){
+        generation=capture.generation;discard=DEVICE_CONTROL_MIC_DISCARD_READS;
+        waits=0U;last_progress=esp_timer_get_time();
+    }
+    int16_t samples[VOICE_CAPTURE_CHUNK];
+    size_t received=0U;
+    const esp_err_t result=audio_capture_io_read(s_microphone,samples,sizeof(samples),&received);
+    if(result==ESP_ERR_TIMEOUT && esp_timer_get_time()-last_progress<1000000LL){++waits;return true;}
+    if(result!=ESP_OK){ESP_LOGW(TAG,"Microphone read failed: %s",esp_err_to_name(result));voice_capture_owner_fail(result);return false;}
+    last_progress=esp_timer_get_time();
+    if(discard){--discard;return true;}
+    if(!capture.captured_samples)ESP_LOGI(TAG,"Microphone capture started bytes=%u waits=%lu",(unsigned)received,(unsigned long)waits);
+    voice_capture_owner_push(capture.generation,samples,received/sizeof(samples[0]));
+    return true;
+}
+
 static void wake_audio_owner(void)
 { if(s_task)xTaskNotifyGive(s_task); }
 
@@ -451,7 +498,9 @@ static void device_control_task(void *arg)
             apply_pending_controls();
             apply_night_schedule();
             music_audio_owner_maintain();
+            voice_capture_owner_maintain();
             audio_active=play_audio_chunk();
+            if(capture_microphone_chunk())audio_active=true;
             finish_save_if_complete();
             submit_dirty_profile();
         }
@@ -524,6 +573,7 @@ esp_err_t device_control_service_start(void)
     portEXIT_CRITICAL(&s_lock);
 
     music_audio_bind_wake(wake_audio_owner);
+    voice_capture_bind_wake(wake_audio_owner);
 
     if (xTaskCreate(device_control_task, "device_controls",
                     DEVICE_CONTROL_STACK_BYTES, NULL,

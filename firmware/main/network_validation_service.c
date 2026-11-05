@@ -10,6 +10,7 @@
 #include "google_agenda_sync.h"
 #include "spotify_http_bridge.h"
 #include "spotify_remote.h"
+#include "xiaozhi_service.h"
 #include "esp_hosted.h"
 #include "esp_ota_ops.h"
 #include "esp_chip_info.h"
@@ -468,15 +469,18 @@ static esp_err_t admit_coingecko_request(void)
         s_coingecko_quota_loaded = true;
     }
     const uint32_t month = (uint32_t)(utc.tm_year + 1900) * 100U + (uint32_t)utc.tm_mon + 1U;
+    const int64_t now_us = esp_timer_get_time();
     coingecko_quota_record_t proposal = {0};
     const coingecko_quota_result_t admission = coingecko_quota_prepare(
-        &s_coingecko_quota, month, (uint32_t)now, esp_timer_get_time(), &proposal);
+        &s_coingecko_quota, month, (uint32_t)now, now_us, &proposal);
     if (admission == COINGECKO_QUOTA_WAIT || admission == COINGECKO_QUOTA_EXHAUSTED) {
-        ESP_LOGI(TAG, "CoinGecko deferred reason=%s month=%lu reserved=%lu/%u interval=%lus",
+        ESP_LOGI(TAG, "CoinGecko deferred reason=%s month=%lu reserved=%lu/%u interval=%lus retry_in=%lus",
                  admission == COINGECKO_QUOTA_WAIT ? "cadence" : "monthly-limit",
                  (unsigned long)s_coingecko_quota.record.month,
                  (unsigned long)s_coingecko_quota.record.reserved, COINGECKO_QUOTA_LIMIT,
-                 (unsigned long)coingecko_quota_interval_s(&s_coingecko_quota));
+                 (unsigned long)coingecko_quota_interval_s(&s_coingecko_quota),
+                 (unsigned long)(s_coingecko_quota.next_attempt_us > now_us
+                     ? (s_coingecko_quota.next_attempt_us - now_us) / 1000000LL : 0LL));
         return ESP_ERR_NOT_FINISHED;
     }
     if (admission == COINGECKO_QUOTA_INVALID) return ESP_ERR_INVALID_STATE;
@@ -1173,11 +1177,25 @@ abort_staged:
     return result;
 }
 
+static bool s_xiaozhi_active;
+
+static bool take_requested_work(network_validation_mode_t *mode)
+{
+    taskENTER_CRITICAL(&s_status_lock);
+    const bool pending = s_request_pending;
+    /* A scheduled provider must never replay the last explicit job (notably
+     * a microphone session) after that job has completed. */
+    *mode = pending ? s_request_mode : NETWORK_VALIDATION_MODE_NORMAL;
+    s_request_pending = false;
+    taskEXIT_CRITICAL(&s_status_lock);
+    return pending;
+}
+
 static void publish_results(esp_err_t dns_result, esp_err_t ntp_result,
                             esp_err_t https_result, uint32_t duration_ms)
 {
     taskENTER_CRITICAL(&s_status_lock);
-    s_status.busy = false;
+    s_status.busy = s_request_pending;
     s_status.time_synced = ntp_result == ESP_OK;
     s_status.dns_result = dns_result;
     s_status.ntp_result = ntp_result;
@@ -1199,11 +1217,7 @@ static void network_validation_task(void *arg)
         bool scheduled_product_refresh = false;
         data_refresh_domain_t scheduled_domain = DATA_REFRESH_DOMAIN_COUNT;
         network_validation_mode_t mode = NETWORK_VALIDATION_MODE_NORMAL;
-        taskENTER_CRITICAL(&s_status_lock);
-        request_pending = s_request_pending;
-        mode = s_request_mode;
-        s_request_pending = false;
-        taskEXIT_CRITICAL(&s_status_lock);
+        request_pending = take_requested_work(&mode);
 
         if (!request_pending) {
             connectivity_diagnostic_status_t connectivity = {0};
@@ -1255,7 +1269,14 @@ static void network_validation_task(void *arg)
                                   : (time_status.trusted ? ESP_OK : ESP_ERR_INVALID_STATE);
         }
         const uint32_t https_budget_ms = remaining_request_budget_ms(start_us);
-        if (mode == NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE) {
+        if (mode == NETWORK_VALIDATION_MODE_XIAOZHI_SESSION) {
+            /* ADR-116: the session holds this worker, so its WebSocket is the
+             * only TLS connection in flight until the user/idle ends it. */
+            taskENTER_CRITICAL(&s_status_lock); s_xiaozhi_active = true; taskEXIT_CRITICAL(&s_status_lock);
+            https_result = xiaozhi_service_process(ntp_result != ESP_OK
+                ? (dns_result != ESP_OK ? dns_result : ntp_result) : ESP_OK);
+            taskENTER_CRITICAL(&s_status_lock); s_xiaozhi_active = false; taskEXIT_CRITICAL(&s_status_lock);
+        } else if (mode == NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE) {
             https_result = spotify_remote_process(ntp_result != ESP_OK
                 ? (dns_result != ESP_OK ? dns_result : ntp_result)
                 : (https_budget_ms == 0U ? ESP_ERR_TIMEOUT : ESP_OK));
@@ -1308,6 +1329,7 @@ static void network_validation_task(void *arg)
         if (mode == NETWORK_VALIDATION_MODE_GOOGLE_SYNC && https_result != ESP_OK)
             google_agenda_fail_sync(https_result);
         if (mode != NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY &&
+            mode != NETWORK_VALIDATION_MODE_XIAOZHI_SESSION &&
             mode != NETWORK_VALIDATION_MODE_GOOGLE_SYNC &&
             mode != NETWORK_VALIDATION_MODE_EWELINK_SYNC &&
             duration_ms > NP2_REQUEST_TOTAL_TIMEOUT_MS) {
@@ -1464,10 +1486,11 @@ esp_err_t network_validation_service_request_p4_update_preflight(
         signature_length >= sizeof(s_update_signature_url) ||
         image_length >= sizeof(s_update_image_url)) return ESP_ERR_INVALID_SIZE;
     taskENTER_CRITICAL(&s_status_lock);
-    if (s_status.busy || s_request_pending) {
+    if ((s_status.busy && !s_xiaozhi_active) || s_request_pending) {
         taskEXIT_CRITICAL(&s_status_lock);
         return ESP_ERR_TIMEOUT;
     }
+    const bool handover = s_xiaozhi_active;
     memcpy(s_update_manifest_url, endpoints->manifest_url, manifest_length + 1U);
     memcpy(s_update_signature_url, endpoints->signature_url, signature_length + 1U);
     memcpy(s_update_image_url, endpoints->image_url, image_length + 1U);
@@ -1475,6 +1498,7 @@ esp_err_t network_validation_service_request_p4_update_preflight(
     s_request_mode = NETWORK_VALIDATION_MODE_P4_UPDATE_PREFLIGHT;
     s_status.busy = true;
     taskEXIT_CRITICAL(&s_status_lock);
+    if (handover) xiaozhi_service_yield_network();
     return ESP_OK;
 }
 
@@ -1507,10 +1531,11 @@ esp_err_t network_validation_service_request_p4_update_apply(
         }
     }
     taskENTER_CRITICAL(&s_status_lock);
-    if (!s_started || s_status.busy || s_request_pending) {
+    if (!s_started || (s_status.busy && !s_xiaozhi_active) || s_request_pending) {
         taskEXIT_CRITICAL(&s_status_lock);
         return ESP_ERR_TIMEOUT;
     }
+    const bool handover = s_xiaozhi_active;
     memcpy(s_update_manifest_url, request->endpoints.manifest_url, manifest_length + 1U);
     memcpy(s_update_signature_url, request->endpoints.signature_url, signature_length + 1U);
     memcpy(s_update_image_url, request->endpoints.image_url, image_length + 1U);
@@ -1522,6 +1547,7 @@ esp_err_t network_validation_service_request_p4_update_apply(
     s_request_mode = NETWORK_VALIDATION_MODE_P4_UPDATE_APPLY;
     s_status.busy = true;
     taskEXIT_CRITICAL(&s_status_lock);
+    if (handover) xiaozhi_service_yield_network();
     return ESP_OK;
 }
 
@@ -1535,7 +1561,30 @@ void network_validation_service_get_status(network_validation_status_t *out_stat
     taskEXIT_CRITICAL(&s_status_lock);
 }
 
-esp_err_t network_validation_service_request_spotify_remote(void)
+static esp_err_t request_spotify_remote(bool interactive)
+{
+    connectivity_diagnostic_status_t connectivity = {0};
+    connectivity_diagnostic_get_status(&connectivity);
+    taskENTER_CRITICAL(&s_status_lock);
+    if (!s_started || !connectivity.online) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_INVALID_STATE;
+    }
+    if ((s_status.busy && !(interactive && s_xiaozhi_active)) || s_request_pending) {
+        taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_TIMEOUT;
+    }
+    const bool handover = s_xiaozhi_active;
+    s_request_pending = true;
+    s_request_mode = NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE;
+    s_status.busy = true;
+    taskEXIT_CRITICAL(&s_status_lock);
+    if (handover) xiaozhi_service_yield_network();
+    return ESP_OK;
+}
+
+esp_err_t network_validation_service_request_spotify_remote(void) { return request_spotify_remote(false); }
+esp_err_t network_validation_service_request_spotify_interactive(void) { return request_spotify_remote(true); }
+
+esp_err_t network_validation_service_request_xiaozhi(void)
 {
     connectivity_diagnostic_status_t connectivity = {0};
     connectivity_diagnostic_get_status(&connectivity);
@@ -1547,7 +1596,7 @@ esp_err_t network_validation_service_request_spotify_remote(void)
         taskEXIT_CRITICAL(&s_status_lock); return ESP_ERR_TIMEOUT;
     }
     s_request_pending = true;
-    s_request_mode = NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE;
+    s_request_mode = NETWORK_VALIDATION_MODE_XIAOZHI_SESSION;
     s_status.busy = true;
     taskEXIT_CRITICAL(&s_status_lock);
     return ESP_OK;

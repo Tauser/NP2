@@ -18,3 +18,7 @@ dependencies:
     version: "1.4.1"
   joltwallet/littlefs:
     version: "1.20.4"
+  espressif/esp_websocket_client:
+    version: "1.8.0"
+  espressif/esp_audio_codec:
+    version: "2.5.0"

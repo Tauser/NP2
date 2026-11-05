@@ -60,7 +60,7 @@ static esp_err_t perform_https_request_with_header(const char *url, uint32_t tim
     int method, const char *name, const char *key, size_t max, uint8_t *out, size_t size, size_t *length)
 { (void)url; (void)timeout; (void)method; (void)max; (void)out; (void)size; (void)length;
   assert(strcmp(name, "x-cg-demo-api-key") == 0); assert(strcmp(key, "test") == 0);
-  assert(exists && disk.reserved >= 8018U); ++calls; return http_result; }
+  assert(exists && disk.reserved >= 8011U); ++calls; return http_result; }
 static void reset(void)
 { memset(&s_coingecko_quota,0,sizeof(s_coingecko_quota)); s_coingecko_quota_loaded=false;
   trusted=true; exists=fail_save=fail_key=corrupt_read=uncertain_ack=false;
@@ -71,17 +71,17 @@ static esp_err_t request(void)
 { uint8_t body[8]; size_t size=0U; return perform_coingecko_request("mock",20000U,sizeof(body),body,sizeof(body),&size); }
 int main(void)
 {
-    reset(); assert(request()==ESP_OK); assert(calls==1 && saves==1 && disk.reserved==8018U);
+    reset(); assert(request()==ESP_OK); assert(calls==1 && saves==1 && disk.reserved==8011U);
     assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==1 && saves==1);
     mono += 300LL*1000000LL; epoch += 300;
     assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==1);
     mono += 900LL*1000000LL; epoch += 900; http_result=ESP_FAIL;
-    assert(request()==ESP_FAIL); assert(calls==2 && saves==1 && s_coingecko_quota.remaining==6U);
-    /* Restart/reconnect/manual paths cannot reuse the outstanding durable block. */
+    assert(request()==ESP_FAIL); assert(calls==2 && saves==2 && s_coingecko_quota.remaining==0U);
+    /* Recovered storage cannot reuse a credit or skip a full interval. */
     s_coingecko_quota_loaded=false;
-    assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==2 && saves==1);
+    assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==2 && saves==2);
     epoch=disk.restart_after_s; mono += 10000LL*1000000LL; http_result=ESP_OK;
-    assert(request()==ESP_OK); assert(calls==3 && saves==2 && disk.reserved==8026U);
+    assert(request()==ESP_OK); assert(calls==3 && saves==3 && disk.reserved==8013U);
     reset(); fail_save=true; assert(request()==ESP_FAIL); assert(calls==0 && saves==1);
     reset(); corrupt_read=true; assert(request()==ESP_FAIL); assert(calls==0 && saves==0);
     reset(); trusted=false; assert(request()==ESP_ERR_INVALID_STATE); assert(calls==0 && saves==0);
@@ -89,6 +89,14 @@ int main(void)
     /* ACK timeout after successful commit must not grant its block on retry. */
     reset(); uncertain_ack=true; assert(request()==ESP_FAIL); assert(calls==0 && saves==1);
     uncertain_ack=false; assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==0 && saves==1);
+    /* Reload late in uptime must still wait from the reload, not from boot. */
+    reset(); mono=3600LL*1000000LL; assert(request()==ESP_OK);
+    s_coingecko_quota_loaded=false; ++mono; ++epoch;
+    assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==1 && saves==1);
+    mono+=1199LL*1000000LL; epoch+=50000;
+    assert(request()==ESP_ERR_NOT_FINISHED); assert(calls==1 && saves==1);
+    mono+=1000000LL; assert(request()==ESP_OK);
+    assert(calls==2 && saves==2 && disk.reserved==8012U);
     puts("Real CoinGecko admission: durable-before-HTTP, manual throttling, failures, reboot and uncertain ACK passed");
     return 0;
 }

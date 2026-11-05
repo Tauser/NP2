@@ -182,6 +182,7 @@ static inline lv_color_t np_c_market_blue(void)    { return lv_color_hex(0x4E86F
 #define NP_ICON_DELETE        "\xEE\xA1\xB2"
 #define NP_ICON_GLOBE         "\xEE\xA0\x8B" /* language U+E80B */
 #define NP_ICON_CHECK_CIRCLE  "\xEE\xA1\xAC" /* check_circle U+E86C */
+#define NP_ICON_MIC           "\xEE\x80\xA9" /* mic U+E029 */
 #define NP_ICON_TIMER         "\xEE\x90\xA5" /* timer U+E425 */
 #define NP_ICON_BAR_CHART     "\xEE\x89\xAB" /* bar_chart U+E26B */
 #define NP_ICON_SCHEDULE      "\xEE\x86\x92" /* schedule U+E192 */

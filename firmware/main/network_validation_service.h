@@ -28,6 +28,7 @@ typedef enum {
     NETWORK_VALIDATION_MODE_GOOGLE_SYNC,
     NETWORK_VALIDATION_MODE_SPOTIFY_HTTP,
     NETWORK_VALIDATION_MODE_SPOTIFY_REMOTE,
+    NETWORK_VALIDATION_MODE_XIAOZHI_SESSION,
 } network_validation_mode_t;
 
 typedef struct {
@@ -87,3 +88,8 @@ void network_validation_service_get_status(network_validation_status_t *out_stat
 #endif
 
 esp_err_t network_validation_service_request_spotify_remote(void);
+/* Foreground commands can reserve the next slot and end a voice session.
+ * Background Spotify polling keeps using the non-preempting API above. */
+esp_err_t network_validation_service_request_spotify_interactive(void);
+/* Xiaozhi assistant session; holds the single-flight worker until it ends. */
+esp_err_t network_validation_service_request_xiaozhi(void);

@@ -2970,6 +2970,205 @@ pixels, sem repack. Assert de compilação garante offset/tamanho alinhados.
 concluídos. Preservar o fundo integral pedido e permitir a maior resolução
 sem crescimento grande do heap LVGL nem alterar configuração global.
 
+## ADR-116 — Assistente Xiaozhi integrado ao ambiente, sessão exclusiva no executor HTTPS
+
+**Decisão (2026-10-26):** a pedido do responsável, após o desvinculo da placa
+no xiaozhi.me, integrar o assistente Xiaozhi oficial (api.tenclass.net),
+iniciado por toque, sem wake word. Não há tela própria: um botão de microfone
+no header de todas as páginas abre/encerra uma cápsula flutuante na faixa
+inferior (camada top, 720×96) com estado, código de ativação e a última fala.
+A página atual continua visível e interativa; nenhuma navegação ocorre.
+
+A sessão roda como modo XIAOZHI_SESSION do worker HTTPS único: verificação
+OTA/ativação (POST com Device-Id = MAC STA, Client-Id UUID derivado por
+SHA-256 do MAC, sem persistência) e depois o WebSocket wss, que ocupa o único
+slot TLS até o usuário encerrar, 20s ouvindo sem fala, 45s sem resposta, fim
+pelo servidor ou 10min. Provedores agendados esperam. URL/token do WebSocket
+ficam só em RAM após a primeira verificação; toques seguintes pulam o OTA e,
+se o endpoint em cache falhar antes do hello, ele é descartado e refeito uma
+vez. O campo irmware da resposta é ignorado; comandos system remotos
+(reboot) são recusados. Sem MCP nesta etapa. Protocolo binário v1.
+
+Áudio: device_controls continua único dono de ES8311/ES7210/I2S a
+22,05kHz. O ES7210 é aberto uma vez no boot, antes do alto-falante, para que
+o I2S full-duplex nunca seja reconfigurado com TX ativo; o RX transborda sem
+leitor e 16 leituras (~190ms) são descartadas a cada captura. A escuta começa
+no toque, em anel PSRAM de 4s, e o que foi falado durante TLS/hello é enviado
+após o hello (fila de uplink com 80 quadros). Uplink 22,05→16kHz (sinc
+janelado 16 taps), Opus 60ms; downlink Opus (taxa do hello) → 22,05kHz na
+fila de música existente, com backpressure. Half-duplex: microfone ignorado
+enquanto o assistente fala; toque no orbe envia bort e esvazia a fila.
+
+Dependências: spressif/esp_websocket_client 1.8.0 e
+spressif/esp_audio_codec 2.5.0 (2.6+ exige P4 rev ≥3.0; esta placa é
+v1.3). Transitivas preservadas no lock. Os ganchos fracos
+media_lib_module_* do codec são sobrescritos para alocar estado Opus em
+PSRAM; a task de codec usa pilha PSRAM de 40KiB (exceção à regra de pilhas
+internas: só computa, não faz flash/TLS; mínimo livre medido ~15KiB). Com
+CONFIG_FREERTOS_HZ=100, esperas ociosas usam no mínimo 1 tick. JSON, corpo
+OTA (4KiB, só na fase OTA), caixa de texto (4×640B), pilha do WebSocket
+(8KiB) e TLS ficam em SRAM interna. Admissão exige piso80KiB + estimativa;
+a sessão é encerrada se a SRAM interna livre cair abaixo de64KiB.
+**Motivo:** manter a regra de uma conexão TLS por vez sem um segundo executor,
+reaproveitar os donos existentes de áudio/flash e entregar o assistente como
+parte do ambiente, não como app separado. Manter o WebSocket sempre aberto
+eliminaria ~2s de handshake, mas ocuparia o slot TLS de todos os provedores;
+fica para decisão futura. Não fecha qualificação de áudio, memória sob uso
+prolongado, OTA ou segurança.
+
+## ADR-117 — Isolamento de falhas e concessões limitadas do Xiaozhi
+
+**Decisão (2026-10-26):** após revisão e autorização do responsável,
+fortalecer o assistente sem alterar o baseline P4/C6/display, partições,
+credenciais, sample rate I2S ou dependências. Ativação passa a executar
+consultas curtas separadas por pelo menos 5s, devolvendo o executor único
+entre consultas. Sessão de voz limitada a 90s; após uma resposta, silêncio
+por 5s devolve a rede. Trabalho interativo aceito pode solicitar handover
+cooperativo; continua proibido abrir dois TLS.
+
+STOP usa mailbox reservada no EventBus e tem precedência sobre START
+pendente, inclusive com a fila comum cheia. UI conserva indicação de
+encerramento até confirmação. Codec confirma prontidão; liberação exige
+término e suspensão confirmados. Timeout retém task/workspace em quarentena,
+sem reutilização até término real. Filas de controle e montagem de frames
+falham explicitamente em saturação. Gerações invalidam produtores antigos.
+
+Áudio de voz adquire concessão exclusiva sem tomar fila de música ativa.
+Stop externo pode revogá-la; release antigo nunca para produtor novo.
+Alarmes/melodias mantêm prioridade; captura durante som local falha apenas
+o assistente. Não há retomada automática de streaming local nesta etapa:
+conflito é recusado, preservando o produtor existente. Playback Spotify
+nativo continua experimental/OFF; comandos remotos têm admissão distinta
+do polling periódico.
+
+O esp_codec_dev fixado usa espera I2S RX de 1000ms e não expõe timeout no
+read público. Um adapter local e link wrap de i2s_channel_read limita a
+20ms somente a chamada síncrona de captura na task dona; demais chamadas
+preservam parâmetros. Não se altera fonte de IDF/BSP/componente gerenciado.
+Testes devem cobrir escopo do wrapper e timeout sem afetar TX/controles.
+
+Piso operacional interno permanece 80KiB, com encerramento preventivo em
+88KiB; admissão também verifica maior bloco. Pilha PSRAM/XIP e formato de
+áudio permanecem como perfil anterior; toda qualificação física continua
+separada dos testes host. Evidências e limitações vão para o guia Xiaozhi
+e BRINGUP-EVIDENCE. Não fecha release, render, recovery, OTA ou soak.
+
+**Correção de bancada do RX (2026-10-26):** a primeira revisão ADR-117
+falhou antes de Ouvindo: Microphone read failed ESP_FAIL, apesar de WSS/hello
+e codec prontos. O adapter anterior propagava o timeout limitado ao codec,
+que o convertia em ESP_FAIL e perdia a contagem parcial. O adapter passa a
+preservar resultado/bytes reais: prefixo PCM16 par em timeout é aproveitado;
+timeout vazio é transitório, com leituras limitadas a20ms e prazo máximo de
+1s sem progresso na task dona. Não se usa a cauda não escrita do buffer.
+Prontidão de escuta exige primeira amostra capturada, após descarte de DMA
+antigo; erros de microfone têm mensagem específica e indicação de nova
+tentativa. Host deve cobrir o flattening para ESP_FAIL, parcial/vazio,
+prazo sem progresso e prontidão sem amostras. Conversa real continua sendo
+gate separado, obrigatório para declarar correção física.
+
+## ADR-118 — Círculo Xiaozhi com olhos animados e posicionamento por arraste
+
+**Data:** 2026-10-26. **Status:** aceita para implementação por pedido do responsável.
+
+O acesso ao assistente sai do header e passa a um círculo azul de 68px na
+camada superior LVGL. Dois olhos vetoriais mudam com a projeção Xiaozhi;
+cor e tamanho do círculo permanecem constantes. Um timer de 80ms altera
+somente a geometria dos olhos quando necessário; pausa quando oculto.
+Não se adicionam assets, fontes, task, dependência ou configuração de render.
+
+Arraste com limiar de 8px, PRESS_LOCK e posição limitada à área útil não
+gera intenção de voz. O handler de swipe entre páginas desconsidera toques
+originados no círculo ou na cápsula. A cápsula é irmã do círculo, adapta
+largura/lado à posição e mantém X, ativação, transcrição e estado. Fechá-la
+continua aguardando confirmação do STOP reservado no EventBus. Resposta
+pode ser interrompida por toque; preparação/escuta podem ser encerradas.
+
+Posição é RAM da view, preservada entre páginas e sessões, reiniciada no
+canto inferior direito após reboot. Persistência não foi solicitada e não
+se introduz escrita de flash por gesto. Apenas task LVGL toca objetos e
+timer; callbacks publicam as intenções existentes, sem áudio/rede/I/O.
+Remoção dos objetos cancela o timer e invalida seus ponteiros. Transporte,
+captura, codec, concessões e limites ADR-116/117 permanecem no serviço.
+
+Validação: LVGL real com ponteiro simulado cobre toque sobre olhos, arraste
+até extremos, ausência de ação de voz no arraste, limites de cápsula, todos
+os estados e 100 ciclos de criação/remoção sem perda de memória. Testes de
+voz existentes, build P4 e boot físico são registrados em BRINGUP-EVIDENCE.
+Aceite de toque/arraste e conversa na placa continua distinto de teste host.
+
+## ADR-119 — Recuperação CoinGecko em um intervalo e reserva por tentativa
+
+**Data:** 2026-10-26. **Status:** aceita por pedido do responsável após diagnóstico.
+
+A reserva de oito tentativas impunha até160min de bloqueio após reinício,
+enquanto o BTC ficava stale após30min. A bancada confirmou adiamento por
+cadência com9250/10000 reservados, sem esgotamento mensal. A política passa
+a reservar uma tentativa antes de cada HTTP, mantendo teto10000, limiar8000
+e intervalos300/1200s. Tentativas com falha também consomem sua reserva.
+
+Ao carregar registro persistido, a primeira admissão com hora confiável arma
+um intervalo completo em RAM/tempo monotônico. Antes de vencer, não há nova
+reserva nem HTTP. Depois, o deadline UTC do lote antigo deixa de bloquear:
+uma nova tentativa exige novo crédito e confirmação durável. O saldo antigo
+nunca é reembolsado. Reboots repetidos rearmam a espera, sem consumir créditos
+adicionais durante o bloqueio. Releitura após ACK incerto também espera um
+intervalo; saltos UTC não antecipam a recuperação. Mês regressivo falha fechado.
+
+O blob budget_v1 de24B/CRC e namespace permanecem compatíveis; contador,
+geração e créditos reservados são preservados. Firmware anterior aceita o
+novo incremento de um crédito, mas ao voltar poderá reservar lotes de oito
+e restaurar a espera antiga. Sem alteração de partição, Kconfig ou eFuses.
+
+Tradeoff: confirmações duráveis aumentam de uma por oito consultas para uma
+por consulta (até288/dia no modo5min ou72/dia no modo20min). Permanecem na
+fila existente do FlashCoordinator, com gate de render, ACK/readback e falha
+fechada; não nascem de toque e não criam executor HTTPS paralelo. Maior
+frequência exige observação física; teste host não qualifica desgaste/soak.
+
+Testes devem cobrir migração de lote9250/160min para9251 após20min, reboots
+repetidos, ajuste UTC, rollover durante recuperação, budgets mensais completos,
+ACK incerto, falha de commit/CRC e ausência de HTTP antes do crédito durável.
+
+## ADR-120 — Progresso de áudio e encerramentos explícitos da conversa Xiaozhi
+
+**Data:** 2026-10-26. **Status:** aceita para correção do relato de intermitência.
+
+O responsável relatou erros no início, durante conversa e após silêncio no
+final. Nomes genéricos de erro não distinguiam os códigos customizados;
+a causa física de todos os episódios ainda não está atribuída. A revisão
+do serviço identificou dois defeitos determinísticos: o watchdog de45s do
+servidor avançava apenas por texto, mesmo recebendo áudio, e a janela máxima
+de30s de nova escuta após resposta podia retornar timeout genérico por ruído.
+
+Frames de aplicação completos, não vazios e aceitos nas filas limitadas
+atualizam um timestamp atômico de progresso; texto e áudio contam. Fragmento
+incompleto, saturação ou overflow não rearmam o watchdog. Mantêm-se90s de
+sessão,45s sem progresso real,20s de drenagem e30s por escuta. Depois de uma
+resposta, atingir a janela de escuta encerra como idle normal. Na primeira
+escuta, atingir30s sem transcrição gera NO_SPEECH e orientação de nova tentativa.
+Silêncio simples continua fechando em20s inicialmente ou5s após resposta.
+
+Handshake/hello, ausência de progresso do servidor e drenagem recebem códigos
+distintos e mensagens adequadas. A retentativa de endpoint em cache continua
+única e anterior ao primeiro hello; não há replay de pergunta após conversa
+iniciada. Erro real de resposta, áudio ou microfone não é convertido em sucesso.
+Queda DISCONNECTED/ERROR e close de erro/política não são sucesso apenas
+por já ter havido hello; CLOSED normal continua sendo encerramento normal.
+Essa distinção foi conferida no fonte do esp_websocket_client fixado e
+testada com conexão encerrada corretamente versus transporte interrompido.
+
+Diagnóstico agrega estado, código numérico, duração, intervalo sem recepção,
+contagens STT/TTS e confirmação de stop. Encerramento também registra código
+numérico mesmo antes de iniciar sessão. Eventos de conexão registram somente
+tipo/statusHTTP/códigosTLS/errno. Não há texto de conversa, código de ativação,
+identidade, headers, corpos, token ou URL. Sem nova task, fila ou conexão TLS.
+O timestamp não altera AppState fora de app_loop e não faz I/O em UI.
+
+Testes executam o serviço real com relógio/transporte substituídos: ruído na
+primeira escuta, ruído após resposta,50s de áudio sem texto, servidor parado,
+hello ausente e retentativa única pré-hello. Build/flash/boot não substituem
+reprodução dos episódios na placa, nem qualificam áudio/render/soak.
+
 ## ADR-121 — Ensaio de decoders H.264 Main/CABAC para a Tapo C200
 
 **Estado:** ensaio de laboratório; nenhum decoder foi adotado no produto.

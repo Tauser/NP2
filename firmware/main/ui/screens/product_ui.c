@@ -24,6 +24,7 @@
 #include "np_agenda.h"
 #include "np_spotify.h"
 #include "np_home_camera.h"
+#include "np_assistant.h"
 #include "np_home_widget_gesture.h"
 #include "np_profile.h"
 #include "np_preferences.h"
@@ -92,6 +93,10 @@ typedef struct {
     np_agenda_view_t agenda;
     np_spotify_view_t spotify;
     np_home_camera_view_t home_camera;
+    np_assistant_view_t assistant;
+    bool assistant_open, assistant_was_busy, assistant_closing;
+    uint32_t assistant_close_revision;
+    uint32_t assistant_idle_tick;
     lv_obj_t *home_widget_dots[NP_HOME_WIDGET_COUNT];
     uint8_t home_widget_selected;
     bool spotify_visible;
@@ -193,6 +198,7 @@ static np_wifi_status_t wifi_status_for(const app_network_projection_t *network)
 static void scene_navigation_event_cb(lv_event_t *event);
 static void wifi_back_event_cb(lv_event_t *event);
 static void notification_header_event_cb(lv_event_t *event);
+static void assistant_open_session(void);
 static void notification_center_event_cb(lv_event_t *event);
 static bool notification_center_build(void);
 static void notification_center_close(void);
@@ -1733,6 +1739,77 @@ static void navigation_shell_create(void)
     np_set_visible(s_ui.shell, false);
 }
 
+static void assistant_close(void)
+{
+    if (app_event_bus_post_xiaozhi(XIAOZHI_STOP) == ESP_OK) {
+        s_ui.assistant_closing = true;
+        s_ui.assistant_close_revision = s_ui.assistant.state.revision;
+    }
+}
+
+static void assistant_event_cb(np_assistant_tap_t tap, void *user)
+{
+    (void)user;
+    if (s_ui.assistant_closing) return;
+    if (tap == NP_ASSISTANT_TAP_CLOSE) { assistant_close(); return; }
+    if (!s_ui.assistant_open) { assistant_open_session(); return; }
+    const xiaozhi_state_t state = s_ui.assistant.state.state;
+    if (state == XIAOZHI_STATE_SPEAKING) (void)app_event_bus_post_xiaozhi(XIAOZHI_INTERRUPT);
+    else if (!s_ui.assistant.state.busy && state != XIAOZHI_STATE_WAITING &&
+             state != XIAOZHI_STATE_ACTIVATION)
+        (void)app_event_bus_post_xiaozhi(XIAOZHI_START);
+    else assistant_close();
+}
+
+static void assistant_sync(void)
+{
+    if (s_ui.active_screen == PRODUCT_SCREEN_BOOT) {
+        np_assistant_set_available(&s_ui.assistant, false);
+        return;
+    }
+    if (s_ui.assistant.root == NULL &&
+        !np_assistant_build(&s_ui.assistant, lv_layer_top(), assistant_event_cb, NULL)) return;
+    np_assistant_set_available(&s_ui.assistant, true);
+    app_ui_projection_t projection = {0};
+    xiaozhi_projection_t assistant = {0};
+    app_state_get_ui_projection(&projection);
+    app_state_get_xiaozhi_projection(&assistant);
+    np_assistant_sync(&s_ui.assistant, &assistant, projection.network.online);
+    /* A session that ended normally (idle or Encerrar) closes the overlay;
+     * errors stay visible until the user dismisses or retries. */
+    const bool active = assistant.busy || assistant.state == XIAOZHI_STATE_WAITING;
+    if (s_ui.assistant_closing && !active && assistant.revision != s_ui.assistant_close_revision) {
+        s_ui.assistant_closing = false;
+        np_assistant_set_open(&s_ui.assistant, false); s_ui.assistant_open = false;
+        return;
+    }
+    if (active) { s_ui.assistant_was_busy = true; s_ui.assistant_idle_tick = 0U; return; }
+    if (s_ui.assistant_was_busy && assistant.state == XIAOZHI_STATE_IDLE) {
+        if (s_ui.assistant_idle_tick == 0U) s_ui.assistant_idle_tick = lv_tick_get();
+        else if (lv_tick_elaps(s_ui.assistant_idle_tick) >= 2500U) {
+            s_ui.assistant_was_busy = false;
+            np_assistant_set_open(&s_ui.assistant, false);
+            s_ui.assistant_open = false;
+        }
+    }
+}
+
+static void assistant_open_session(void)
+{
+    if (s_ui.active_screen == PRODUCT_SCREEN_BOOT || s_ui.assistant.root == NULL) return;
+    s_ui.assistant.rendered_revision = UINT32_MAX;
+    s_ui.assistant_open = true;
+    s_ui.assistant_was_busy = false;
+    s_ui.assistant_closing = false;
+    s_ui.assistant_idle_tick = 0U;
+    np_assistant_set_open(&s_ui.assistant, true);
+    if (app_event_bus_post_xiaozhi(XIAOZHI_START) != ESP_OK) {
+        np_feedback_show_toast(&s_ui.feedback, NP_FEEDBACK_ERROR,
+                               "Assistente ocupado", "Tente novamente em instantes", 2400U);
+    }
+    assistant_sync();
+}
+
 static void notification_header_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED ||
@@ -1900,6 +1977,10 @@ static void main_page_swipe_event_cb(lv_event_t *event)
             lv_indev_get_point(indev, &s_ui.main_page_swipe_start);
             s_ui.main_page_swipe_start_valid = s_ui.main_page_swipe_start.y >= NP_HEADER_H;
             lv_obj_t *const touched_object = lv_event_get_param(event);
+            if (np_assistant_owns_touch(&s_ui.assistant, touched_object)) {
+                s_ui.main_page_swipe_start_valid = false;
+                return;
+            }
             int owner = np_home_widget_owner(touched_object, s_ui.home.weather_card, &s_ui.spotify);
             if (owner == 0) {
                 for (lv_obj_t *a = touched_object; a != NULL; a = lv_obj_get_parent(a)) {
@@ -2314,7 +2395,8 @@ static void photo_tick(const app_ui_projection_t *projection)
     const bool blocked = interrupted || s_ui.home_transition_pending ||
         np_modal_is_visible(&s_ui.spotify.device_modal) ||
         np_keyboard_is_visible(&s_ui.keyboard) || photo_object_visible(s_ui.shell_header.drawer_scrim) ||
-        photo_object_visible(s_ui.notification_center.root);
+        photo_object_visible(s_ui.notification_center.root) ||
+        photo_object_visible(s_ui.assistant.root);
     const bool idle = (config & PHOTO_FRAME_ENABLED) && eligible && !blocked &&
         lv_display_get_inactive_time(s_ui.display) >= photo_idle_choice_ms(projection->device_controls.photo_idle_choice);
     if (!s_ui.photo_active && s_ui.photo_source && projection->photos.available &&
@@ -2345,6 +2427,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
     (void)timer;
 
     wifi_entry_scan_retry_tick();
+    assistant_sync();
 
     app_ui_projection_t projection = {0};
     app_state_get_ui_projection(&projection);
@@ -2510,6 +2593,8 @@ static void refresh_timer_cb(lv_timer_t *timer)
         np_devices_refresh_discovery(&s_ui.devices);
     }
     photo_tick(&projection);
+    if (s_ui.photo_active && s_ui.assistant.orb != NULL)
+        lv_obj_move_foreground(s_ui.assistant.orb);
 }
 
 static void release_current_scene(void)
@@ -2753,6 +2838,8 @@ static bool navigation_build(void *context, uintptr_t page)
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.camera_viewer_modal.close_button,
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_add_event_cb(s_ui.devices.camera_auth_modal.close_button,
+                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.add_device_button, iot_action_event_cb,
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.devices.empty_import_button, iot_action_event_cb,
@@ -2787,6 +2874,10 @@ static bool navigation_build(void *context, uintptr_t page)
                                 iot_action_event_cb, LV_EVENT_CLICKED, NULL);
             np_keyboard_bind(&s_ui.keyboard,
                 s_ui.devices.camera_address_input, NP_KEYBOARD_MODE_NUMERIC);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_add_user_input, NP_KEYBOARD_MODE_TEXT);
+            np_keyboard_bind(&s_ui.keyboard,
+                s_ui.devices.camera_add_password_input, NP_KEYBOARD_MODE_PASSWORD);
             np_keyboard_bind(&s_ui.keyboard,
                 s_ui.devices.camera_username_input, NP_KEYBOARD_MODE_TEXT);
             np_keyboard_bind(&s_ui.keyboard,
@@ -2844,8 +2935,6 @@ static bool navigation_build(void *context, uintptr_t page)
                        page == PRODUCT_SCREEN_MARKET ? s_ui.market.root :
                        page == PRODUCT_SCREEN_IOT ? s_ui.devices.root :
                        page == PRODUCT_SCREEN_AGENDA ? s_ui.agenda.root :
-            lv_obj_add_event_cb(s_ui.devices.camera_auth_modal.close_button,
-                                iot_action_event_cb, LV_EVENT_CLICKED, NULL);
                        page == PRODUCT_SCREEN_POMODORO ? s_ui.pomodoro.root : s_ui.preferences.root, true);
         return true;
     }
@@ -2874,10 +2963,6 @@ static bool navigation_build(void *context, uintptr_t page)
                                 LV_EVENT_CLICKED, NULL);
             lv_obj_add_event_cb(s_ui.profile.avatar_row, profile_identity_event_cb,
                                 LV_EVENT_CLICKED, NULL);
-            np_keyboard_bind(&s_ui.keyboard,
-                s_ui.devices.camera_add_user_input, NP_KEYBOARD_MODE_TEXT);
-            np_keyboard_bind(&s_ui.keyboard,
-                s_ui.devices.camera_add_password_input, NP_KEYBOARD_MODE_PASSWORD);
         }
         root = s_ui.profile.root;
         header = &s_ui.profile.header;

@@ -49,5 +49,17 @@ int main(void)
     music_audio_owner_fail(ESP_FAIL);music_audio_get_status(&status);
     assert(!status.active && status.result==ESP_FAIL);
     music_audio_owner_maintain();assert(!allocations && wakes>5);
+    uint32_t voice=0U;
+    generation=music_audio_begin();
+    assert(music_audio_acquire_voice(&voice)==ESP_ERR_INVALID_STATE && !voice);
+    music_audio_stop();assert(music_audio_acquire_voice(&voice)==ESP_OK && voice);
+    music_audio_owner_maintain();assert(music_audio_begin()==0U);
+    assert(music_audio_push(voice,in,256)==256);
+    uint32_t next=music_audio_flush_voice(voice);assert(next && next!=voice);
+    assert(!music_audio_push(voice,in,256));music_audio_release_voice(voice);
+    music_audio_get_status(&status);assert(status.active && status.generation==next);
+    music_audio_stop();generation=music_audio_begin();music_audio_release_voice(next);
+    music_audio_get_status(&status);assert(status.active && status.generation==generation);
+    music_audio_stop();music_audio_owner_maintain();assert(!allocations);
     puts("Music service: lazy PSRAM-only allocation, no fallback, failure/retry, owner free, concurrent stop/push, generations/pause/gain/wake PASS");
 }

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #define COINGECKO_QUOTA_LIMIT 10000U
 #define COINGECKO_QUOTA_WARNING 8000U
-#define COINGECKO_QUOTA_BLOCK 8U
+#define COINGECKO_QUOTA_BLOCK 1U
 #define COINGECKO_QUOTA_NORMAL_S 300U
 #define COINGECKO_QUOTA_REDUCED_S 1200U
 /* Account dashboard supplied by the owner in October 2026. */
@@ -17,6 +17,7 @@ typedef struct {
     coingecko_quota_record_t record;
     uint32_t remaining;
     int64_t next_attempt_us;
+    bool recovery_pending;
 } coingecko_quota_t;
 typedef enum {
     COINGECKO_QUOTA_INVALID, COINGECKO_QUOTA_WAIT, COINGECKO_QUOTA_EXHAUSTED,
@@ -25,8 +26,10 @@ typedef enum {
 bool coingecko_quota_record_valid(const coingecko_quota_record_t *record);
 bool coingecko_quota_init(coingecko_quota_t *quota, const coingecko_quota_record_t *persisted);
 uint32_t coingecko_quota_interval_s(const coingecko_quota_t *quota);
-/* Grants nothing until the flash owner commits and verifies the proposal. */
-coingecko_quota_result_t coingecko_quota_prepare(const coingecko_quota_t *quota,
+/* Grants nothing until durable ACK. First admission after loading a persisted
+ * record arms one monotonic interval, including legacy eight-request records.
+ * Preparation may arm that RAM timer but never writes storage. */
+coingecko_quota_result_t coingecko_quota_prepare(coingecko_quota_t *quota,
     uint32_t trusted_month, uint32_t now_s, int64_t now_us, coingecko_quota_record_t *proposal);
 bool coingecko_quota_commit(coingecko_quota_t *quota, const coingecko_quota_record_t *verified);
 bool coingecko_quota_note_attempt(coingecko_quota_t *quota, int64_t now_us);

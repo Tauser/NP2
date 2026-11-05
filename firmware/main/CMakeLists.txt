@@ -26,7 +26,7 @@ endif()
 
 idf_component_register(
     # G5 policies and opt-in physical-maintenance OTA adapter.
-    SRCS "home_widget_preferences.c" "spotify_cover.c" "spotify_remote.c" "spotify_remote_credentials.c" "ui/screens/np_spotify.c" "ui/screens/np_home_camera.c" "spotify_http_policy.c" "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
+    SRCS "home_widget_preferences.c" "spotify_cover.c" "spotify_remote.c" "spotify_remote_credentials.c" "ui/screens/np_spotify.c" "ui/screens/np_home_camera.c""spotify_http_policy.c" "update_replay_policy.c" "update_journal.c" "update_recovery_policy.c" "update_https_policy.c" "update_policy.c" "update_manifest.c" "update_signature.c" "update_image_hash.c" "update_keyring.c" "update_admission.c" "update_p4_writer.c" "update_boot_supervisor.c"
          "update_development.c" "cache_record.c" "coingecko_quota.c" "offline_data_codec.c" "offline_data_provider.c" "offline_value_format.c" "data_refresh_scheduler.c" "weather_condition.c" "weather_asset_service.c"
          "ui/core/np_styles.c" "ui/core/np_form.c" "ui/core/np_components.c" "ui/core/np_feedback.c" "ui/core/np_modal.c" "ui/core/np_keyboard.c" "ui/core/np_confirm.c"
          "ui/assets/np_weather_background_assets.c" "ui/assets/np_weather_static_icons.c" "ui/assets/np_btc_tilted_icon.c"
@@ -35,6 +35,7 @@ idf_component_register(
          "ui/screens/settings/np_settings_display_sound.c" "ui/screens/settings/np_settings_photo_frame.c" "ui/screens/settings/np_settings_system.c" "ui/screens/settings/np_settings_notifications.c" "ui/screens/settings/np_settings_timezone.c" "ui/screens/settings/np_settings_wifi.c" "ui/screens/settings/np_wifi_password.c"
          "ui/screens/np_navigation_manager.c" "ui/screens/np_pomodoro.c" "ui/screens/np_notification_center.c" "ui/screens/product_ui.c" "app_state.c" "app_event_bus.c" "agenda_service.c" "agenda_storage.c" "google_agenda_codec.c" "google_agenda_credentials.c" "google_agenda_sync.c" "ui/screens/np_agenda.c" "pomodoro_service.c" "camera_stream_service.c" "camera_credentials.c" "camera_inventory.c" "i420_rgb565.c" "user_profile.c" "timezone_catalog.c" "time_service.c" "network_validation_service.c" "connectivity_diagnostic.c" "sonoff_lan_service.c" "np_ewelink.c" "np_ewelink_auth.c" "np_ewelink_cloud.c" "np_ewelink_storage.c" "onvif_discovery_service.c" "notification_service.c" "provisioning_service.c" "onboarding_service.c" "wifi_setup_view.c" "flash_coordinator.c" "device_control_service.c" "app_main.c" "board_bringup.c" "diagnostic_ui.c"
          "sound_melody.c" "photo_frame_model.c" "photo_frame_service.c" "photo_thumbnail_service.c" "spotify_http_bridge.c" "music_pcm.c" "music_audio_service.c"
+         "voice_capture.c" "voice_resampler.c" "xiaozhi_protocol.c" "xiaozhi_service.c" "audio_capture_io.c" "ui/screens/np_assistant.c"
          "ui/screens/np_photo_frame.c" ${NP2_FONT_SRCS}
     INCLUDE_DIRS "." "ui/core" "ui/screens"
     EMBED_TXTFILES "timezone_catalog.csv"
@@ -43,6 +44,7 @@ idf_component_register(
              espressif__esp_wifi_remote joltwallet__littlefs nvs_flash esp_driver_usb_serial_jtag
              espressif__mdns esp_http_client mbedtls json app_update bootloader_support esp_driver_tsens
              esp_driver_sdmmc fatfs sdmmc lwip esp_rom espressif__esp_h264 edge264 sub0h264
+             espressif__esp_websocket_client espressif__esp_audio_codec spi_flash
              ${NP2_SPOTIFY_REQUIRES}
 )
 
@@ -65,6 +67,7 @@ if(NOT CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY)
 endif()
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_PRODUCT_FONTS=1)
+target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=i2s_channel_read")
 if(NP2_MUSIC_AUDIO_BENCH)
     target_sources(${COMPONENT_LIB} PRIVATE "music_audio_probe.c")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NP2_MUSIC_AUDIO_BENCH=1)

@@ -15,6 +15,11 @@ def main():
     parser.add_argument("--reset", action="store_true", help="Reset the P4 through the verified USB serial/JTAG connection before capture")
     args = parser.parse_args()
     patterns = [
+        r"np2_netcheck: CoinGecko deferred reason=(?:cadence|monthly-limit) month=\d+ reserved=\d+/\d+ interval=\d+s(?: retry_in=\d+s)?",
+        r"np2_netcheck: CoinGecko admitted month=\d+ reserved=\d+/\d+ interval=\d+s",
+        r"np2_netcheck: CoinGecko API key unavailable: ESP_[A-Z0-9_]+",
+        r"np2_netcheck: product refresh scheduled domain=\d+",
+        r"np2_netcheck: product-data delivery result=ESP_[A-Z0-9_]+ market_stale=[01] weather_stale=[01] exchange_stale=[01] index_stale=[01]",
         r"np2_spotify_remote: cover width=\d+ height=\d+ bytes=\d+ fallback=[01]",
         r"np2_spotify_remote: admission free=\d+ required=\d+",
         r"np2_spotify_remote: memory min_internal=\d+ largest=\d+ stack_min_bytes=\d+ integrity=\d+",
@@ -54,6 +59,27 @@ def main():
         r"Display ready[^\r\n]*",
         r"P4 local bring-up ready[^\r\n]*",
         r"(?:failed|unavailable): ESP_ERR_[A-Z_]+",
+        # Xiaozhi: counters/results only; never the code, token, URL or text.
+        r"np2_xiaozhi: stage state=\d+",
+        r"np2_xiaozhi: session detail state=\d+ code=-?\d+ elapsed_ms=\d+ rx_gap_ms=\d+ stt=\d+ tts=\d+ stopped=[01]",
+        r"np2_xiaozhi: completion code=-?\d+ greeted=[01] codec_stopped=[01]",
+        r"np2_xiaozhi: admission free=\d+ required=\d+",
+        r"np2_xiaozhi: http status=-?\d+ result=ESP_[A-Z0-9_]+ bytes=\d+ internal=\d+",
+        r"np2_xiaozhi: ota activation=[01] code=[01] challenge=[01] websocket=[01]",
+        r"np2_xiaozhi: activate status=-?\d+ result=ESP_[A-Z0-9_]+",
+        r"np2_xiaozhi: ws start=ESP_[A-Z0-9_]+ connected=[01] internal=\d+ largest=\d+",
+        r"np2_xiaozhi: hello rate=\d+ frame=\d+",
+        r"np2_xiaozhi: ws closed event=\d+ code=-?\d+",
+        r"np2_xiaozhi: ws failure type=\d+ http=-?\d+ tls=-?\d+ stack=-?\d+ verify=-?\d+ errno=-?\d+",
+        r"np2_xiaozhi: codec ready=[01] enc=-?\d+ dec=-?\d+ down_rate=\d+ internal=\d+",
+        r"np2_xiaozhi: mic peak=\d+ frames=\d+",
+        r"np2_xiaozhi: codec exit stack_min=\d+",
+        r"np2_xiaozhi: codec quarantined; workspace retained",
+        r"np2_xiaozhi: session end result=(?:ESP_[A-Z0-9_]+|ERROR|UNKNOWN ERROR) down_drop=\d+ up_drop=\d+ internal_min=\d+ stack_min=\d+",
+        r"np2_xiaozhi: complete result=(?:ESP_[A-Z0-9_]+|ERROR|UNKNOWN ERROR) internal=\d+ stack_min=\d+",
+        r"np2_xiaozhi: (?:system command ignored|internal SRAM low=\d+, ending session|frame dropped op=\d+ bytes=\d+)",
+        r"device_controls: Microphone (?:open result=ESP_[A-Z0-9_]+|closed|read failed: ESP_[A-Z0-9_]+)",
+        r"device_controls: Microphone capture started bytes=\d+ waits=\d+",
     ]
     patterns += [pattern.pattern for pattern in PLAYBACK_RECORDS]
     connection = serial.Serial(port=None, baudrate=115200, timeout=0.5)

@@ -70,6 +70,7 @@ static esp_err_t s_previous_storage_result = ESP_OK;
 static uint32_t s_previous_restart_completion_id;
 static uint32_t s_next_notification_id = 1U;
 static NP2_PSRAM_BSS spotify_remote_projection_t s_spotify, s_spotify_published;
+static NP2_PSRAM_BSS xiaozhi_projection_t s_xiaozhi, s_xiaozhi_published;
 static uint8_t s_home_widget, s_home_submitted;
 static bool s_home_restored, s_home_dirty, s_home_saving;
 static uint32_t s_home_completion;
@@ -690,6 +691,7 @@ static void refresh_projection(void)
     candidate.device_controls.home_widget = s_home_widget;
     refresh_agenda(&storage, &candidate);
     spotify_remote_tick(&s_spotify, candidate.network.online, candidate.time_trusted, (uint64_t)esp_timer_get_time()/1000U);
+    xiaozhi_tick(&s_xiaozhi, candidate.network.online, candidate.time_trusted);
     collect_notifications(&candidate);
 
     /* app_loop only posts a desired visual to the SD worker. It never reads a
@@ -760,6 +762,7 @@ static void refresh_projection(void)
     }
     *s_agenda_published = s_agenda_projection;
     s_spotify_published = s_spotify;
+    s_xiaozhi_published = s_xiaozhi;
     s_health.ready = true;
     s_health.last_progress_ms = (uint64_t)esp_timer_get_time() / 1000U;
     portEXIT_CRITICAL(&s_state_lock);
@@ -794,6 +797,8 @@ static void app_loop_task(void *arg)
             }
         } else if (result == ESP_OK && event->type == APP_EVENT_SPOTIFY_REMOTE) {
             spotify_remote_command(&s_spotify, &event->spotify_command);
+        } else if (result == ESP_OK && event->type == APP_EVENT_XIAOZHI) {
+            xiaozhi_command(&s_xiaozhi, &event->xiaozhi_command);
         } else if (result == ESP_OK && event->type == APP_EVENT_AGENDA_COMMAND) {
             s_agenda_projection.completion_id = event->agenda_command.request_id;
             s_agenda_projection.command_result = !s_agenda_projection.ready ||
@@ -969,4 +974,10 @@ void app_state_get_spotify_projection(spotify_remote_projection_t *out)
 {
     if (out == NULL) return;
     portENTER_CRITICAL(&s_state_lock); *out = s_spotify_published; portEXIT_CRITICAL(&s_state_lock);
+}
+
+void app_state_get_xiaozhi_projection(xiaozhi_projection_t *out)
+{
+    if (out == NULL) return;
+    portENTER_CRITICAL(&s_state_lock); *out = s_xiaozhi_published; portEXIT_CRITICAL(&s_state_lock);
 }

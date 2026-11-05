@@ -5,6 +5,7 @@
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static music_pcm_queue_t s_queue = {.gain=100};
 static esp_err_t s_result = ESP_OK;
+static bool s_voice_reserved;
 static void (*s_wake)(void);
 void music_audio_bind_wake(void (*wake)(void)) { s_wake=wake; }
 static void notify(void) { if(s_wake)s_wake(); }
@@ -12,13 +13,39 @@ static void notify(void) { if(s_wake)s_wake(); }
 uint32_t music_audio_begin(void)
 {
     portENTER_CRITICAL(&s_lock);
-    const uint32_t generation=music_pcm_begin(&s_queue);s_result=ESP_OK;
+    const uint32_t generation=s_voice_reserved ? 0U : music_pcm_begin(&s_queue);
+    if(generation)s_result=ESP_OK;
     portEXIT_CRITICAL(&s_lock);notify();return generation;
 }
 void music_audio_stop(void)
-{ portENTER_CRITICAL(&s_lock);music_pcm_stop(&s_queue);portEXIT_CRITICAL(&s_lock);notify(); }
+{ portENTER_CRITICAL(&s_lock);s_voice_reserved=false;music_pcm_stop(&s_queue);portEXIT_CRITICAL(&s_lock);notify(); }
+esp_err_t music_audio_acquire_voice(uint32_t *generation)
+{
+    if(!generation)return ESP_ERR_INVALID_ARG;
+    *generation=0U;
+    portENTER_CRITICAL(&s_lock);
+    const bool available=!s_queue.active && !s_voice_reserved;
+    if(available){s_voice_reserved=true;*generation=music_pcm_begin(&s_queue);s_result=ESP_OK;}
+    portEXIT_CRITICAL(&s_lock);
+    if(available)notify();
+    return available ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+uint32_t music_audio_flush_voice(uint32_t generation)
+{
+    portENTER_CRITICAL(&s_lock);
+    uint32_t next=0U;
+    if(s_voice_reserved && s_queue.active && generation==s_queue.generation)
+        next=music_pcm_begin(&s_queue);
+    portEXIT_CRITICAL(&s_lock);notify();return next;
+}
+void music_audio_release_voice(uint32_t generation)
+{
+    portENTER_CRITICAL(&s_lock);
+    if(s_voice_reserved && generation==s_queue.generation){s_voice_reserved=false;music_pcm_stop(&s_queue);}
+    portEXIT_CRITICAL(&s_lock);notify();
+}
 void music_audio_pause(bool paused)
-{ portENTER_CRITICAL(&s_lock);s_queue.paused=paused;portEXIT_CRITICAL(&s_lock);notify(); }
+{ portENTER_CRITICAL(&s_lock);if(!s_voice_reserved)s_queue.paused=paused;portEXIT_CRITICAL(&s_lock);notify(); }
 esp_err_t music_audio_set_gain(uint8_t percent)
 {
     if(percent>100)return ESP_ERR_INVALID_ARG;
@@ -56,7 +83,7 @@ void music_audio_owner_maintain(void)
     if(s_queue.active && memory) {
         s_queue.samples=memory;s_queue.capacity=MUSIC_PCM_QUEUE_SAMPLES;memory=NULL;
     } else if(s_queue.active) {
-        s_result=ESP_ERR_NO_MEM;music_pcm_stop(&s_queue);
+        s_result=ESP_ERR_NO_MEM;s_voice_reserved=false;music_pcm_stop(&s_queue);
     }
     portEXIT_CRITICAL(&s_lock);
     if(memory)heap_caps_free(memory);
@@ -70,6 +97,6 @@ size_t music_audio_owner_read(int16_t *pcm,size_t capacity)
 void music_audio_owner_fail(esp_err_t result)
 {
     portENTER_CRITICAL(&s_lock);
-    s_result=result;music_pcm_stop(&s_queue);
+    s_result=result;s_voice_reserved=false;music_pcm_stop(&s_queue);
     portEXIT_CRITICAL(&s_lock);
 }

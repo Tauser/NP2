@@ -408,13 +408,14 @@ esp_err_t spotify_remote_process(esp_err_t prerequisite)
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     return r;
 }
-static esp_err_t submit(spotify_remote_projection_t *p, const spotify_remote_command_t *job)
+static esp_err_t submit(spotify_remote_projection_t *p, const spotify_remote_command_t *job, bool interactive)
 {
     portENTER_CRITICAL(&s_lock);
     if (s_busy || s_ready || s_provisioning) { portEXIT_CRITICAL(&s_lock); return ESP_ERR_INVALID_STATE; }
     s_mailbox = *p; s_job = *job; s_busy = true;
     portEXIT_CRITICAL(&s_lock);
-    esp_err_t r = network_validation_service_request_spotify_remote();
+    esp_err_t r = interactive ? network_validation_service_request_spotify_interactive()
+                              : network_validation_service_request_spotify_remote();
     if (r != ESP_OK) { portENTER_CRITICAL(&s_lock); s_busy = false; portEXIT_CRITICAL(&s_lock); }
     else p->busy = true;
     return r;
@@ -429,7 +430,7 @@ void spotify_remote_command(spotify_remote_projection_t *p, const spotify_remote
     if ((cmd->action == SPOTIFY_REMOTE_TRANSFER && cmd->revision != p->revision) ||
         (cmd->action == SPOTIFY_REMOTE_VOLUME && (cmd->value > 100U || !p->supports_volume)) ||
         (cmd->action == SPOTIFY_REMOTE_SEEK && cmd->value > p->duration_ms)) { p->result = ESP_ERR_INVALID_ARG; ++p->completion; return; }
-    p->result = submit(p, cmd); ++p->completion;
+    p->result = submit(p, cmd, true); ++p->completion;
     if (p->result == ESP_OK) s_next_poll = now + 5000U;
 }
 void spotify_remote_tick(spotify_remote_projection_t *p, bool online, bool trusted, uint64_t now)
@@ -459,7 +460,7 @@ void spotify_remote_tick(spotify_remote_projection_t *p, bool online, bool trust
     if (!online || !trusted || !p->linked || p->auth_required || p->busy || !s_visible ||
         !spotify_remote_credentials_settled() || now < s_next_poll || now < s_not_before) return;
     spotify_remote_command_t job = {.action = SPOTIFY_REMOTE_REFRESH};
-    esp_err_t r = submit(p, &job);
+    esp_err_t r = submit(p, &job, false);
     s_next_poll = now + (r == ESP_OK ? 5000U : 2000U);
 }
 bool spotify_remote_provision_begin(void)

@@ -6484,6 +6484,749 @@ Capturas encerradas e COM8 liberada.
 mais nítida”, em resposta à pergunta sobre a capa no fundo inteiro. A validação
 visual final confirma imagem desenhada, não apenas recebida/decodificada.
 
+### 2026-10-25 — Regravação e restauração autorizada do layout P4
+
+Pedido do responsável: subir novamente o firmware para a tela. HEAD
+`39bc1703440279213f0b1c6fde58310ff8b3153f`, árvore inicialmente limpa.
+Build limpo em `firmware/build/reflash-20261025`, executado por
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/reflash-20261025`.
+ESP-IDF 5.5.4, target esp32p4, pairing/playback/music benches OFF.
+Aplicação 3.570.992 B; SHA-256
+`805066e78747036adcf0d997079a2af8e04c46d0c7f5fa7df1a70e1dc0fc1a19`;
+ELF `4a3522f1ade47d11e9bbb6433fb387df57d9772610780de239bf1da84d8326c8`.
+Memory placement PASS: dados internos 67.056 B, BSS externo 537.024 B.
+Configuração efetiva idêntica à campanha spotify-full-hq-20261024:
+SHA-256 `8cc2cf3b76f9e1b51bf63ad2f40e0baf8fbb7d62703f638ef95b2bc4675663ca`.
+Três FB, RGB565, rotação180/TRIPLE_PARTIAL, reset54 ativo baixo,
+auto-suspend/Secure Boot/Flash Encryption desabilitados. Tabela NP2 compilada
+também idêntica à anterior: SHA-256
+`66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+COM8 confirmada como P4 v1.3, USB303A:1001, serial terminado8F42.
+`run_spotify_remote.ps1 ... -Flash -Port COM8` gravou somente o app em
+0x20000/460800: 16,2 s, hash verificado e reset. A operação foi destinada
+somente ao app segundo o mapa NP2; C6, bootloader e tabela não foram gravados.
+Contudo, **a aplicação não iniciou**:
+captura sanitizada65s não encontrou diagnósticos da aplicação. Reteste40s
+recebeu367541B sem os marcadores previstos. Inspeção limitada aos marcadores
+ROM encontrou162 reinícios em5s, `rst:0x3 (SW_SYS_RESET)`,
+`boot:0xf (SPI_FAST_FLASH_BOOT)`, entrada0x4ff28ed0. Não equivale a boot
+saudável nem a gravação funcional concluída.
+
+Leitura de diagnóstico constatou bootloader diferente do NP2 e tabela ativa
+em0x8000, com `nvsfactory`0x9000/200K, `nvs`0x3b000/840K,
+`otadata`0x10d000/8K, `ota_0`0x200000/4M, `ota_1`0x600000/4M,
+`assets`0xa00000/16M. Portanto, a tabela compilada coincidir com a campanha
+anterior não provava o layout atualmente instalado. A gravação em0x20000,
+apesar de denominada app-flash no projeto, sobrepõe partes de `nvsfactory`,
+`nvs`, `otadata`, `phy_init` e `ota_0` desse outro layout; não é possível
+afirmar preservação desses dados. A leitura ampla inicial
+foi removida; só foram retidos bootloader e tabela anteriores, localmente em
+build ignorado, sem exportar conteúdo de NVS. Nenhum dado bruto de dispositivo
+foi incluído neste registro. C6 não regravado; versão/hash instalado não
+confirmados nesta sessão.
+
+A restauração do conjunto P4 (bootloader0x2000, tabela0x10000,
+otadata inicial0x1b000 e app0x20000) foi preparada, mas a revisão automática
+de aprovação rejeitou a execução: sobrescrever o layout excederia o pedido
+explícito de subir o firmware e poderia tornar os dados existentes
+inacessíveis. **Nenhuma dessas quatro gravações de restauração foi executada.**
+Naquele ponto, aguardava autorização humana específica para restaurar o
+layout NP2. COM8 foi fechada; a leitura esptool deixou o P4 no downloader.
+Logs locais: `flash.log`, `boot-sanitized.log` e
+`boot-retry-sanitized.log` no diretório da campanha.
+
+**Restauração concluída após autorização explícita do responsável:**
+em resposta à solicitação específica para restaurar bootloader, partições,
+seleção de boot e aplicação, o responsável respondeu “autorizado”.
+Executado na mesma COM8/P4 v1.3, sem recompilar ou modificar as imagens:
+
+```text
+python -m esptool --chip esp32p4 --port COM8 --baud 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 32MB 0x2000 bootloader/bootloader.bin 0x10000 partition_table/partition-table.bin 0x1b000 ota_data_initial.bin 0x20000 np2_p4.bin
+```
+
+Diretório de execução: `firmware/build/reflash-20261025`. Log local
+`restore-flash.log`: bootloader23.120B, tabela3.072B, otadata8.192B e
+app3.570.992B gravados com verificação de hash individual; aplicação20,5s,
+reset final confirmado. SHA-256 bootloader
+`629e11af83f40ad302b00ea282b34bec36faf0bd8a2b95f9f43e307417859bea`;
+otadata inicial
+`7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f`.
+Sem operação de erase global, atualização C6 ou escrita em eFuses.
+
+Captura65s com reset via
+`tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds 65 --output firmware/build/reflash-20261025/restored-boot-sanitized.log`:
+P4rev103/dois cores e PSRAM33.554.432B reconhecidos1,5s; pool LVGL pronto1,7s;
+microSD/ícones disponíveis3,2s; catálogo9fotos, serviços locais prontos e
+enlace Hosted SDIO ativo3,3s. Brilho60/volume65 restaurados; melodia result0
+8,8s; foto1 carregada9,1s. Em uptime31s e61s, CPU1%, interno183.655B,
+maior bloco90.112B e PSRAM13.666.732B, sem queda entre essas amostras.
+Nenhum marcador de panic/assert/watchdog/stackfault na whitelist em65s;
+o ciclo de reinicialização anterior não reapareceu nessa janela.
+COM8 liberada ao concluir; P4 executando a aplicação NP2.
+
+IP/Wi-Fi, NTP/HTTPS e versão/hash do C6 instalado não foram confirmados
+nessa captura. Agenda apareceu sem vínculo, itens ou pendências. Inicialização
+serial não substitui aceite visual de orientação/toque nem os gates de
+render/soak/OTA. Não se presume recuperação dos dados do layout anterior.
+
+### 2026-10-26 — Travamento LVGL observado e relato de configurações ausentes
+
+Após a restauração acima, o responsável relatou tela travada. Coleta passiva
+na mesma COM8, sem reset ou nova gravação, registrou watchdog a cada5s.
+`freeze-live-20261026-sanitized.log` e
+`freeze-watchdog-20261026-sanitized.log`, locais/ignorados, identificaram
+IDLE0 sem progresso, CPU0 executando `lvgl` e CPU1 em IDLE1.
+MEPC/RA resolveram no ELF gravado para `tlsf_fls`, `mapping_search`,
+`tlsf_ffs`, `search_suitable_block` e `block_locate_free` do alocador LVGL.
+Isso evidencia repetição no caminho de alocação, mas não determina o
+widget/callsite ou prova corrupção/falta de memória. Nenhum dump de dados
+brutos foi exportado. Sem mudança de firmware/Kconfig nem ajuste de watchdog.
+
+Mais tarde, a serial voltou a reportar recursos: uptime121s, CPU1%,
+interno175.367B, maior bloco90.112B, PSRAM13.661.600B. Não foi comandado
+reset nesta investigação; causa da retomada não estabelecida. O responsável
+confirmou “agora nao travou mais tudo o que eu tinha configurado sumiu”.
+Portanto, o travamento não está encerrado como correção validada, e a
+restauração não pode ser descrita como recuperação das configurações.
+
+Busca dentro do repositório por backups NVS/flash/configuração e por refresh
+tokens salvos em JSON não encontrou cópia recuperável naquele momento.
+Os arquivos locais de clientes
+OAuth Google/Spotify existem, mas não são backup de sessão/configuração.
+As fotos continuam disponíveis no microSD segundo o boot anterior.
+Não foram iniciados novos vínculos OAuth, apagamentos ou reconfiguração
+automática. O app-flash inicial sobrepôs dados do layout diferente conforme
+detalhado acima; até aquele momento não havia sido localizado um backup
+anterior à escrita. A recuperação a partir do backup externo informado
+posteriormente pelo responsável está registrada abaixo.
+
+### 2026-10-26 — Configurações recuperadas do backup externo de24/10
+
+O responsável informou o backup completo em
+`D:/Projetos/np2-flash-backup-20261024/np2-full-32MiB.bin`, com alerta de
+segredos Wi-Fi/tokens. Arquivo32MiB, SHA-256
+`d04a89484b83d891e6e6e6d2627adc79288b7a2e71edf083bef49fbc97587034`,
+igual ao registro `SHA256.txt`. Tabela NP2 em0x10000 idêntica à compilada/
+instalada. App ota_0 do backup corresponde ao binário3570992B/SHA-256
+`19cc26b07f3c6dbabbe29a1dc9b3b0b4f5a64a134fb7846b64ca9914d212d4fa`
+da campanha24/10. A NVS contém7páginas preenchidas, todas com CRC de header
+válido; grupos de Wi-Fi, Google, Spotify, perfil, controles, onboarding,
+configuração, notificações, Home e eWeLink presentes. Nenhum valor secreto
+foi impresso ou copiado para o repositório.
+
+Recuperação seletiva no mesmo P4rev1.3/COM8/serial terminado8F42:
+somente `nvs`0x11000/32768B e `storage`0x1020000/9437184B. Antes da escrita,
+tabela instalada lida/conferida e ambas as regiões atuais preservadas em
+`D:/Projetos/np2-flash-backup-20261024/pre-recovery-20261026-e1ns572d/`,
+com ACL privada aplicada antes de criar dados sensíveis. Esptool4.12.0,
+target explícito esp32p4,460800,DIO80MHz/32MB. Escritas0,4s e34,0s,
+respectivamente; hashes de transporte verificados e `verify_flash` de ambas
+as regiões PASS antes de iniciar a aplicação. Fragmentos temporários de
+restauração removidos; cópia anterior e metadata mantidas fora do repositório.
+Não foram regravados app, bootloader, tabela, seleção OTA, nvs_keys ou C6;
+nenhuma alteração de configuração de build nem eFuses. P4 permanece no
+binário SHA-256 `805066e78747036adcf0d997079a2af8e04c46d0c7f5fa7df1a70e1dc0fc1a19`.
+
+O backup original foi conservado e seu SHA-256 reconferido após a operação.
+Pasta externa protegida contra herança de acesso, com duas regras:
+usuário Windows atual e SYSTEM, ambos FullControl. Os três arquivos originais
+herdam somente essas regras; diretório da cópia anterior também privado.
+Sem cópias de NVS, storage ou tokens no Git/workspace.
+
+Boot sanitizado em
+`firmware/build/reflash-20261025/config-recovered-20261026-sanitized.log`:
+PSRAM32MiB, serviços locais3,4s, agenda ready1/linked1/4itens/pending0;
+preferências de fotos idle1800000ms/troca60000ms/63selecionadas/
+retorno1800000ms, brilho71/volume100. IP recebido7,8s; DNS/NTP/HTTPS
+ESP_OK; CoinGecko/Open-Meteo/BCB/Alternative.me/brapi HTTP200.
+Spotify token HTTP20028,2s, consulta204/result0 (sem reprodução ativa),
+worker stack4136B/integridade1. C6 reportou3.0.6 aos33s, hash instalado
+continua desconhecido/não regravado. Google token/Tasks/Calendar HTTP200,
+conclusão36,5s/result0, mínimo interno114471B, worker4136B/integridade1.
+Em uptime62s: CPU3%, interno171227B, maior bloco56320B,
+PSRAM13598076B; agenda sincronizada/result0. Esta recuperação comprova
+retorno dos dados e autenticação das contas observadas; não encerra o
+travamento LVGL relatado nem os gates de render/soak. Captura110s concluída,
+sem marcador de falha fatal/watchdog na whitelist; recursos iguais nas
+amostras de uptime62s e92s. COM8 liberada ao final.
+
+### 2026-10-26 — Xiaozhi: isolamento de falhas, concessões e regressão P4
+
+Pedido: analisar e implementar a integração sem degradar os serviços existentes.
+Base HEAD `39bc1703440279213f0b1c6fde58310ff8b3153f`, árvore já modificada;
+alterações anteriores preservadas, sem commit/reset/limpeza. Decisão ADR-117,
+procedimento em `docs/XIAOZHI-ASSISTANT.md`. Esta entrada distingue testes
+host, observação de boot e conversa física, que são evidências diferentes.
+
+Implementado: mailbox reservada STOP/START/interrupt com precedência de STOP;
+UI aguarda revisão de confirmação; codec confirma prontidão e só libera
+workspace após término/suspensão, com quarentena em timeout; atomicidade dos
+sinais entre tasks; concessão de voz sem tomar uma fila PCM ativa, release
+por geração; captura descarta conclusão de leitura de geração antiga;
+RX limitado a20ms apenas no adapter da task dona, sem mudar fontes BSP/IDF;
+saturação de controle/frames falha explicitamente; remontagem de frames
+WebSocket fragmentados; parâmetros Opus mono/duração validados; piso80KiB
+com encerramento preventivo88KiB. Ativação devolve o worker entre consultas
+>=5s. Sessões limitadas90s, primeira escuta20s sem atividade, continuação5s,
+limite30s por escuta. Nível500 é heurística de atividade, não VAD qualificado.
+
+Comandos Spotify interativos/OTA podem reservar o próximo trabalho e pedir
+handover da voz; polling Spotify não preempta. Corrigido replay de modo:
+sem pedido explícito pendente, o executor retorna NORMAL, impedindo que um
+refresh periódico execute outra sessão de microfone por herdar o modo anterior.
+Publicação de conclusão preserva busy quando há próximo trabalho reservado.
+Não foi adicionado segundo TLS, MCP, wake word ou conexão permanente.
+
+Testes PASS:
+- `tools/run_xiaozhi_host_test.ps1`: protocolo, limites/Unicode, parâmetros
+  de áudio e resposta do reamostrador.
+- `tools/run_xiaozhi_service_host_test.ps1`: serviço real com fakes de I/O;
+  ativação/cadência/cancelamento, falha de cada alocação inclusive endpoint
+  em cache, codec preso/quarentena/reap, conflito PCM preservando produtor,
+  gerações de captura, saturação/fragmentação, conclusão antes do retorno
+  de enqueue, handover de um único trabalho e seleção NORMAL após trabalho.
+  Adapter RX: limite20ms, chamada externa/outra task e limpeza após timeout.
+- `tools/run_music_audio_host_test.ps1`, `run_spotify_remote_host_test.ps1`,
+  `run_spotify_bridge_host_test.ps1`, `run_app_event_bus_host_test.ps1`:
+  regressões DSP/fila/serviço, Spotify remoto/vault/Home/HTTP e EventBus,
+  incluindo STOP com32entradas comuns ocupadas e8000snapshots concorrentes.
+- `tools/test_flash_p4_app_checked.py`: seleção OTA com CRC/estados inválidos,
+  layout divergente e offsets incorretos recusados, sem acesso à placa.
+- `tools/check_agenda_memory_layout.py`: PASS; estáticos internos68688B,
+  BSS externo539200B, buffers/UI/projeções nas seções previstas. Wrapper RX
+  confirmado no ELF/map. Não prova custo dinâmico de uma conversa.
+
+Build inicial limpo em novo diretório
+`firmware/build/xiaozhi-isolation-20261026`, ESP-IDF5.5.4, esp32p4;
+rebuilds finais após as correções, sem warnings de compilação no log final.
+Comando `tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/xiaozhi-isolation-20261026`.
+Pairing/playback/music benches OFF. Aplicação3824160B/0x3a5a20,54%livres
+no slot8MiB. SHA-256 P4
+`a7a90ab2f95659d5ea583348ee63bfdc7a64651aeb9ef1c6b4be0d91e4302795`;
+ELF `b2bb8395c3d367d8d28e1d5e9a79529aa9ca12067e0beab4507c20fc763e21e8`;
+sdkconfig `f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`;
+lock `e19d73d0e4eebd172f777fa280364ac2978d261ea3053c8f365a940479ee4d78`.
+Comparação dos símbolos CONFIG_ com o build Xiaozhi anterior: zero mudanças
+efetivas. Mantidos3FB/RGB565/180/TRIPLE_PARTIAL/XIP, reset54ativo baixo,
+Hosted3.0.6/remote1.6.4, auto-suspend/Secure Boot/Flash Encryption OFF.
+Fontes de firmware identificadas por `source-manifest.json` local/ignorado,
+317arquivos; fingerprint
+`42035e9bfea60f57587a51987aff773ba38e2a33e5d24568af009b364f440cf5`.
+
+Placa: mesma unidade Waveshare P4v1.3, COM8 USB303A:1001, serial terminado
+8F42, flash/PSRAM32MiB conforme perfil. Helper
+`tools/flash_p4_app_checked.py --build firmware/build/xiaozhi-isolation-20261026 --port COM8 --serial-suffix 8F42 --flash`
+executado com Python do IDF. Antes da escrita, identidade USB/target e tabela
+instalada conferidos; tabela SHA-256
+`66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`,
+igual à compilada, offsets NP2 conferidos; seleção OTA lida com CRC e slot0
+confirmado. Somente aplicação escrita em0x20000, DIO80MHz/32MB/460800,
+22,2s, hash de transporte e `verify_flash` PASS. Bootloader, tabela, otadata,
+NVS, storage e C6 não foram escritos pelo helper; nenhuma operação em eFuses.
+Logs locais `checked-app-flash.log`, `checked-app-verify.log` e metadata
+`checked-flash.json`, todos em build ignorado. Somente metadados de partição/
+seleção foram lidos, sem leitura de NVS/storage/credenciais.
+
+Captura110s com reset, `boot-isolation-sanitized.log`: P4rev103/dois cores,
+PSRAM33554432B; microSD/catálogo9 e serviços locais prontos3,4s; microfone
+ESP_OK. Agenda ready1/linked1/4itens/pending0; preferências de fotos
+idle1800000ms/intervalo60000ms/63selecionadas/retorno1800000ms e controles
+brilho71/volume67 restaurados. Duas desconexões iniciais Wi-Fi, motivos2 e205,
+seguidas de IP23,7s; DNS/NTP/HTTPS ESP_OK. Open-Meteo/BCB/Alternative.me/brapi
+HTTP200. Foto desenhada17,9s, melodias concluíram result0. C6 reportou3.0.6
+40,1s; hash instalado continua desconhecido e não houve regravação C6.
+Google token/Tasks/Calendar HTTP200, conclusão43,7s/result0/integridade1,
+mínimo interno115299B, worker stack4120B. Em uptime62s e92s: CPU3%,
+interno169635B, maior bloco96256B e PSRAM13343424B, sem queda entre amostras;
+app_loop stack mínimo2208B. Nenhum marcador fatal/watchdog na whitelist em110s.
+
+Limites: boot/captura demonstram retorno dos serviços observados e preservação
+das configurações carregadas; não provam ausência de regressão gráfica,
+latência de toque, qualidade de áudio ou estabilidade prolongada. Não houve
+conversa Xiaozhi nessa primeira captura nem consulta Spotify remoto observada;
+para esses caminhos há testes host, não aceite físico novo. Solicitado teste
+manual de pergunta/interrupção/fechamento na placa e iniciada captura passiva
+separada, sem reset. Gates render/soak/OTA/recovery permanecem abertos. As duas
+desconexões iniciais ficam registradas sem atribuir causa à integração.
+
+**Complemento da mesma campanha:** captura passiva120s concluída sem reset
+em `assistant-passive-sanitized.log`, COM8 fechada ao terminar. Em uptime182,
+212,242 e272s: interno171583B, maior bloco96256B e PSRAM13343424B, sem queda;
+CPU3–5%, agenda ready1/linked1/4itens/pending0 e app_stack_min2208B.
+Nenhum marcador fatal/watchdog e nenhuma sessão Xiaozhi nessa janela.
+Não foi recebido aceite físico de conversa até o encerramento desta entrega;
+nenhuma conclusão de qualidade/latência de voz é inferida desse silêncio.
+
+### 2026-10-26 — Regressão de captura Xiaozhi e correção de timeout parcial
+
+O responsável relatou “Não foi possível falar com o assistente”, antes de
+entrar em Ouvindo. A revisão anterior ADR-117 não tinha aceite de conversa
+na placa. Captura passiva120s na mesma COM8, sem reset, em
+`firmware/build/xiaozhi-isolation-20261026/failure-live-sanitized.log`:
+admissão170471B/127672B aos31,7s; Microphone read failed ESP_FAIL31,8s;
+WSS conectado33,9s; hello24000Hz/60ms e codec ready1 enc0 dec0 aos34,7s;
+sessão ESP_FAIL/drop0/0/internal_min131591B, encerramento35,7s.
+Falha de leitura antecedeu prontidão; não era falha de admissão, WSS ou
+abertura Opus. O erro foi introduzido na mudança de RX limitado e não deve
+ser descrito como falha encerrada pelo build/boot da campanha anterior.
+
+No esp_codec_dev fixado, `_i2s_data_read` converte qualquer retorno I2S não
+zero em ESP_FAIL e descarta bytes_read. O wrapper que reduziu a espera para
+20ms propagava esse erro, abortando a captura sem tratar espera transitória
+ou prefixo parcial. Correção: preservar retorno/contagem do I2S no escopo
+síncrono da task dona; timeout com prefixo PCM16 par retorna bytes reais;
+timeout vazio permite nova leitura, cada uma ainda limitada20ms, com prazo
+máximo1s sem progresso. Somente amostras efetivamente recebidas são copiadas.
+Primeira amostra, após descarte DMA por geração, passa a ser condição para
+exibir Ouvindo; erro de microfone tem texto próprio com indicação de retry.
+Nenhuma alteração em rede, dependências, I2S22,05kHz, display ou C6.
+
+Host PASS: `run_xiaozhi_service_host_test.ps1`, incluindo a função real
+capture_microphone_chunk extraída do dono e não uma cópia da política;
+timeouts vazios recuperáveis, prefixo parcial, flattening para ESP_FAIL,
+contagem de amostras, prazo sem progresso e prontidão sem amostras.
+Também PASS protocolo/reamostrador, música DSP/fila/serviço, Spotify remoto/
+vault/Home/bridge e EventBus. Os fakes anteriores preservavam o timeout
+sem reproduzir o flattening do codec e não exercitavam a task dona; a nova
+regressão cobre explicitamente esse caminho.
+
+Build limpo em `firmware/build/xiaozhi-rxfix-20261026` via
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/xiaozhi-rxfix-20261026`:
+ESP-IDF5.5.4/esp32p4, benchesOFF, sem warnings de compilação no log.
+Aplicação3824656B/0x3a5c10,54%livre no slot8MiB. SHA-256 P4
+`831ff4d3abebea6c5e864876cc11191ef9c0e0b9779371513e82a41285518bc1`;
+ELF `fa2e25e524e417e7b5323229581592946f3c84285b40efd4b295ef32fbced5e4`;
+sdkconfig `f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`,
+zero mudanças de símbolos CONFIG_ frente ao build anterior; lock mantido.
+Memory placement PASS: internos68720B/BSS externo539200B. Fingerprint de
+fontes em manifest local/ignorado:
+`d2b174c76d75ddb3e119a9b06e4c5de45b454bbe480ad2ea48da513fb4ae27ac`.
+Base HEAD39bc170 com árvore modificada preservada; sem commit/reset.
+
+Mesmo P4v1.3/COM8 USB303A:1001/serial terminado8F42, perfil flash/PSRAM32MiB.
+`tools/flash_p4_app_checked.py --build firmware/build/xiaozhi-rxfix-20261026 --port COM8 --serial-suffix 8F42 --flash`
+reconferiu identidade/tabela instalada/seleção OTA com CRC: slot0/0x20000,
+tabela SHA-25666388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23.
+Somente app escrito22,2s/DIO80MHz/32MB/460800, hash de transporte e verify_flash
+PASS. Sem escrita em bootloader/tabela/otadata/NVS/storage/C6/eFuses.
+Logs locais ignorados checked-app-flash/verify e checked-flash.json.
+
+Captura de boot e nova tentativa em `boot-and-voice-sanitized.log`:
+PSRAM33554432B, microSD/catálogo9, serviços locais e microfone ESP_OK3,4s;
+preferências/fotos/agenda/controles restaurados, brilho71/volume67.
+Desconexões iniciais motivos2 e205, IP23,5s, DNS/NTP/HTTPS ESP_OK;
+Open-Meteo/BCB/Alternative.me/brapi HTTP200. Google token/Tasks/Calendar200,
+conclusão44,6s/result0/integridade1/min_internal115167B/worker4116B.
+C6 reportou3.0.6, hash instalado desconhecido, não regravado. Em uptime62s:
+interno169551B/maior96256B/PSRAM13342920B, app_loop stack2220B.
+Solicitado novo teste físico com log ativo; correção de conversa ainda depende
+do resultado registrado abaixo. Boot e testes host não equivalem a esse aceite.
+
+Captura180s concluída, COM8 liberada. Até uptime152s, sem marcador fatal/
+watchdog na whitelist; interno170835B/maior96256B/PSRAM13342920B. Nenhuma
+sessão Xiaozhi foi iniciada nessa janela após a nova gravação. Não recebido
+novo resultado físico até o encerramento; conversa continua pendente de
+reteste. Não se declara falha de voz resolvida apenas pelo build/boot.
+
+**Aceite físico recebido após a correção RX:** o responsável respondeu
+“Entrou em Ouvindo e respondeu” à solicitação de teste no firmware P4
+SHA-256831ff4d3abebea6c5e864876cc11191ef9c0e0b9779371513e82a41285518bc1.
+Isto confirma escuta e resposta na placa, fechando a pendência de conversa
+básica da revisão anterior. Captura passiva sem reset em
+`accepted-voice-sanitized.log` recebeu imediatamente codec exit stack_min15352B,
+complete ESP_OK/interno168683B/worker4116B e network work mode13 DNS/NTP/
+HTTPS ESP_OK/duração29981ms. Após encerramento: interno170363B, maior96256B,
+PSRAM13342408B, CPU4%, agenda ready1/linked1/4itens/pending0,
+app_loop stack2140B. A captura começou no encerramento: não contém início,
+picos do microfone, contadores de envio nem o mínimo interno da sessão.
+Aceite de pergunta/resposta e encerramento normal não fecha qualidade sonora,
+interrupção/fechamento sob carga, ausência de regressão gráfica ou soak.
+
+**Tentativa adicional e percepção de abertura:** o responsável relatou
+“até que agora foi mais rápido”. Captura passiva75s, sem reset/novo flash,
+`activation-latency-sanitized.log`: admissão46,7s; primeira captura real46,9s
+(512B, uma espera vazia); WSS conectado49,4s; hello24000Hz/60ms e codec pronto
+50,2s. Do início no worker até hello/codec ~3,5s; microfone ~0,2s. O instante
+do toque e a atualização visual não foram instrumentados, portanto não é
+medida end-to-end nem prova de melhoria frente à versão antiga, que mostrava
+Ouvindo antes da conexão. Pico3626/95quadros aos53,2s; nova escuta60,3s,
+200quadros aos65,2s; fim65,3s ESP_OK/down_drop0/up_drop0/internal_min127275B,
+codec stack15352B; conclusão65,8s ESP_OK/worker4116B/interno169535B, duração
+19051ms. Agenda continuou ready1/linked1/4itens/pending0. COM8 liberada.
+Nenhuma mudança de firmware nesta medição; não há baseline cronometrado do
+toque até Ouvindo para atribuir ganho/regressão quantitativa.
+
+### 2026-10-26 — Xiaozhi: círculo com olhos e arraste (ADR-118)
+
+Pedido do responsável: somente círculo com olhos animados, arrastável;
+substitui o acesso de microfone no header. UI permanece na task LVGL,
+publicando START/STOP/INTERRUPT existentes. Posição em RAM entre páginas e
+conversas; reboot retorna ao canto inferior direito. Cápsula acompanha o
+círculo. Limiar de arraste de 8px suprime clique; o swipe global ignora a
+árvore do assistente. Corpo fixo de 68px, somente olhos mudam, timer 80ms
+pausado quando oculto. Não houve alteração em captura/transporte/codec.
+
+Árvore de trabalho baseada em `39bc1703440279213f0b1c6fde58310ff8b3153f`,
+com alterações locais anteriores preservadas, ainda sem commit isolado.
+Build limpo criado em `firmware/build/xiaozhi-circle-20261026`, seguido de
+build incremental da correção final de hit-test dos olhos e destruição.
+Comando: `tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/xiaozhi-circle-20261026`.
+ESP-IDF5.5.4/esp32p4, flags experimentais de playback/pairing OFF,
+configuração CONFIG_ idêntica ao `xiaozhi-rxfix-20261026`; sem warnings no
+build final. Perfil BSP3.0.1/LVGL9.5.0/adapter0.6.4, RGB565/180°/3FB/
+TRIPLE_PARTIAL preservado. Imagem3825408B/0x3a5f00 cabe no slot8MiB
+(54% livre). Estatísticos internos68720B e BSS externa539200B; placement
+check PASS, `s_ui`17464B em PSRAM.
+
+Hashes SHA-256 desta imagem:
+
+- P4 bin: `4a50a0681be024484a1a555795813c4d0b573c9266348689c7a38e2a86cc7fe7`.
+- ELF: `07060610e96d62b6c364ce3dd3478cc07bbc70634eef4eb80d4c2634c803d388`.
+- sdkconfig: `f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`.
+- Tabela: `66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+`tools/run_assistant_ui_host_test.ps1` PASS com LVGL real e pool192KiB:
+toque diretamente no olho, arraste até fora dos quatro limites, nenhum
+comando no arraste, cápsula dentro da tela/sem sobrepor círculo, todos os
+estados, posição preservada, fechamento sem ocultar círculo, 100 ciclos
+sem perda de memória e cancelamento de timer por remoção do pai. PNG do
+renderer host conferido visualmente (não é foto/evidência de display físico).
+`run_xiaozhi_host_test.ps1` e `run_xiaozhi_service_host_test.ps1` PASS:
+protocolo/resampler, concessões/quarentena, fragmentação/saturação, captura
+real da task dona e adapter RX parcial/timeout. Dois testes do helper de
+flash e `check_agenda_memory_layout.py` PASS. `git diff --check` sem erros.
+
+Gravação física: mesmo P4v1.3/32MiB flash/32MiB PSRAM, USB303A:1001 COM8,
+serial terminado8F42. Comando `tools/flash_p4_app_checked.py --build
+firmware/build/xiaozhi-circle-20261026 --port COM8 --serial-suffix 8F42 --flash`
+conferiu identidade, tabela instalada e CRC de seleção OTA, slot0/0x20000;
+gravou somente app em22,0s a460800/DIO80MHz/32MB. Hash de transporte e
+`verify_flash` PASS; checked-flash.json flashed=true/verified=true.
+Bootloader/tabela/otadata/NVS/storage/C6/eFuses não foram escritos.
+C6 reportou3.0.6; hash instalado desconhecido, imagem C6 não regravada.
+
+Captura: `tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds
+115 --output firmware/build/xiaozhi-circle-20261026/boot-circle-sanitized.log`.
+PSRAM33554432B, microSD/catálogo9, microfone ESP_OK5,2s, preferências
+brilho71/volume67/fotos63 restauradas. Há registro genérico
+`failed: ESP_ERR_TIMEOUT` aos3,4s: a whitelist não preserva o subsistema,
+portanto não permite atribuir a causa; os serviços continuaram iniciando.
+IP9,5s; DNS/NTP/HTTPS ESP_OK, Open-Meteo/BCB/Alternative.me/brapi HTTP200.
+Google token/Tasks/Calendar200, conclusão28,6s/result0/integridade1/
+min_internal120511B/worker4180B. Agenda4itens/ready1/linked1/pending0;
+aos35,3s interno169359B/maior96256B/PSRAM13342524B/CPU3%.
+Solicitado teste físico de arraste e pergunta/resposta com captura ativa.
+O boot e os testes host não fecham aceite físico da nova UI ou soak.
+
+Na janela de boot115s, nenhum marcador fatal/watchdog na whitelist. Houve
+início Xiaozhi aos91,3s, HTTP20094,4s, primeira captura512B/waits2 aos94,5s,
+WSS conectado96,6s e hello/codec ready97,3s/24kHz/60ms. A captura foi
+continuada sem reset em `voice-circle-sanitized.log` por75s; há intervalo
+entre arquivos e não se presume transcrição/resposta apenas por contadores.
+Mic peak1597/218frames e3326/268frames, nova captura e peak3211/344frames;
+sessão encerrou ESP_OK, down_drop0/up_drop0/internal_min127203B,
+codec stack15352B, worker4180B, executor duração87480ms. Após encerrar:
+interno171275B/maior96256B/PSRAM13342524B/CPU3%, agenda ready1/linked1/
+4itens/pending0. Isso confirma início pelo novo acesso, fluxo de captura
+e encerramento normal; percepção de áudio e arraste ainda dependem do
+relato físico do responsável.
+
+As duas capturas concluíram e liberaram COM8. Nenhum marcador fatal/
+watchdog foi encontrado nos registros filtrados; não é qualificação de soak.
+
+**Aceite físico do círculo recebido em 26/10/2026:** à pergunta para
+arrastar, soltar e fazer uma pergunta, o responsável respondeu
+“Arrastou e respondeu”. Confirma arraste e resposta de voz pelo novo acesso
+no P4 SHA-256 `4a50a0681be024484a1a555795813c4d0b573c9266348689c7a38e2a86cc7fe7`.
+Fecha a pendência de aceite básico da UI ADR-118 acima; não estende o aceite
+a qualidade sonora, interrupção sob carga ou estabilidade prolongada.
+Atualização somente documental, sem novo build/flash/reset.
+
+### 2026-10-26 — Diagnóstico de BTC permanentemente amarelo
+
+O responsável relatou que já viu o indicador verde, mas atualmente costuma
+ficar amarelo. `np_status_dot_set` recebe NP_DATA_STALE quando o mercado
+está marcado stale ou a observação tem mais de1800s; a cor não significa
+requisição em andamento. Nenhuma mudança da cor/TTL foi feita.
+
+Firmware continua P4 SHA-256
+`4a50a0681be024484a1a555795813c4d0b573c9266348689c7a38e2a86cc7fe7`,
+mesma placa COM8/serial terminado8F42, C6 não alterado. Diagnóstico passivo,
+sem reset, flash ou comandos de manutenção. Foram acrescentadas à whitelist
+de `tools/capture_agenda_diagnostics.py` somente mensagens agregadas de
+admissão/adiamento CoinGecko e entrega de snapshot, sem chave/URL/corpos.
+
+Captura `firmware/build/xiaozhi-circle-20261026/btc-quota-sanitized.log`,
+iniciada com `--port COM8 --seconds 570 --output ...`, observou próximo
+ciclo automático. Aos451,5s de captura, perto de20min de uptime:
+`product refresh scheduled domain=0`,
+`CoinGecko deferred reason=cadence month=202610 reserved=9250/10000 interval=1200s`,
+conclusão22ms/DNS-NTP-HTTPS ESP_OK. Não houve HTTP da CoinGecko nesse ciclo.
+Logo, o bloqueio observado é de cadência, com saldo local de750 créditos
+ainda não reservados; não é evidência de esgotamento mensal ou erro HTTP.
+Contador local de reservas não equivale ao consumo medido no dashboard.
+
+Causa pela política ADR-092/COINGECKO-QUOTA: em modo reduzido há oito
+tentativas por reserva, intervalo1200s e deadline persistido de8x1200s.
+Após reboot, saldo em RAM é descartado e uma nova reserva aguarda o deadline
+persistido, até160min. Reboots repetidos dentro dessa mesma janela não
+reservam mais oito a cada vez. Cache envelhece normalmente e fica amarelo
+após30min. A proteção preserva o orçamento, mas reduz disponibilidade de
+cotação durante desenvolvimento com reinícios. Não se altera a política
+de cota nem se apresenta cache antigo como dado novo para esconder a espera.
+
+`tools/run_coingecko_quota_host_test.ps1` e
+`tools/coingecko_admission_host_test.py` PASS: limites, reserva durável,
+cadência, reinício, rollover, recusa manual e ACK incerto. Captura concluiu
+570s e liberou a porta. Ao final: uptime1324s/interno170859B/maior96256B,
+sem marcador fatal na captura filtrada; sem nova gravação na placa.
+
+### 2026-10-26 — Recuperação BTC após reboot em um intervalo (ADR-119)
+
+Implementação solicitada após diagnóstico de bloqueio de cadência com
+9250/10000 reservados. Reserva unitária antes de cada HTTP; ao ler NVS,
+a primeira admissão confiável arma um intervalo monotônico completo de
+300/1200s. O deadline UTC do lote antigo não prolonga essa recuperação.
+Contador, geração e CRC são mantidos, sem reembolso dos créditos antigos.
+Reboot/releitura rearma a espera; avanço UTC não a pula. Snapshot/TTL/cor
+não foram mascarados. Log de adiamento agora informa retry_in em segundos.
+
+Tradeoff registrado no ADR: até288 confirmações/dia no modo5min ou72/dia
+no modo20min, em vez de uma por oito tentativas. Fila/gate/ACK/readback do
+FlashCoordinator existentes continuam sendo usados; falha impede HTTP.
+Não é prova de desgaste ou de render sob escrita prolongada.
+
+Base Git `39bc1703440279213f0b1c6fde58310ff8b3153f`, alterações locais
+anteriores preservadas, sem commit isolado. Build limpo P4 em
+`firmware/build/btc-recovery-20261026`, incremental final para cálculo de
+retry_in. Comando `tools/run_spotify_remote.ps1 -BuildDirectory
+D:/Projetos/NP2/firmware/build/btc-recovery-20261026`.
+IDF5.5.4/esp32p4; flags de playback/pairing OFF, CONFIG_ e tabela idênticos
+à imagem do círculo. Nenhuma dependência/Kconfig/partição mudou. Perfil
+BSP3.0.1/LVGL9.5.0/adapter0.6.4/3FB/RGB565/180°/TRIPLE_PARTIAL preservado.
+Build final sem warnings; bin3825552B/0x3a5f90, 54% livres no slot8MiB.
+Placement PASS: internos68728B (+8B), BSS externa539200B, s_ui17464B PSRAM.
+
+Hashes SHA-256:
+
+- Bin P4: `de619895d3bf87ff52c3de7daf5ef59c81d628b302607cf79dae4b66201c4765`.
+- ELF: `416c6e791e8caf5e5d75f30bdf09bfcd4d622f671ed0ba0484680bc24a3e14b2`.
+- sdkconfig: `f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`.
+- Tabela: `66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+Host PASS: `run_coingecko_quota_host_test.ps1` (inclui scheduler),
+`coingecko_admission_host_test.py` e `coingecko_storage_host_test.py`.
+Cobrem registro legado9250/160min, liberação9251 após20min simulados,
+20 reboots sem novo débito, UTC adiantado, rollover durante recuperação,
+budgets completos1990/10000 com um ACK por tentativa, recusa antecipada,
+releitura após uptime alto, ACK incerto, falha de commit/CRC e geração obsoleta.
+`run_xiaozhi_host_test.ps1`/`run_xiaozhi_service_host_test.ps1` PASS, incluindo
+captura RX parcial/timeout. Helper de flash2testes e memory placement PASS.
+Os 20min dos testes são tempo simulado; não equivalem a intervalo físico.
+
+Gravação `tools/flash_p4_app_checked.py --build
+firmware/build/btc-recovery-20261026 --port COM8 --serial-suffix 8F42 --flash`
+PASS: USB303A:1001/serial8F42/P4v1.3/32MiB flash e PSRAM, tabela instalada
+idêntica/seleção OTA CRC válida/slot0/0x20000. App3825552B em22,1s a460800,
+DIO80MHz/32MB; hash de transporte e verify_flash PASS. Nenhuma escrita de
+bootloader/tabela/otadata/NVS/storage/C6/eFuses pelo helper de gravação.
+C6 reportou3.0.6, hash instalado desconhecido, não regravado.
+
+Captura `tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds
+110 --output firmware/build/btc-recovery-20261026/boot-sanitized.log`:
+PSRAM33554432B, microSD/catálogo9, controles71/67 e fotos63 restaurados,
+agenda4itens/ready1/linked1, microfone ESP_OK5,2s. Registro genérico
+`failed: ESP_ERR_TIMEOUT`3,4s reaparece como no boot anterior; whitelist
+não identifica o subsistema, portanto causa continua sem atribuição.
+IP9,5s; aos9,6s `CoinGecko deferred reason=cadence month=202610
+reserved=9250/10000 interval=1200s retry_in=1200s`: contador legado íntegro
+e temporizador de um intervalo armado. Nenhuma reserva nova/HTTP CoinGecko
+nessa janela, como esperado. Snapshots de outros domínios podem carregar
+market_stale=0 bruto do cache; AppState ainda aplica idade/TTL e não torna
+a cotação antiga fresca apenas por essa entrega.
+
+Open-Meteo/BCB/Alternative.me/brapi HTTP200; Google token/Tasks/Calendar200,
+result0/integridade1/min_internal120571B/worker4112B aos29,5s. Aos35,3s:
+interno169287B/maior96256B/PSRAM13342396B/CPU4%. A primeira renovação física
+após20min e o novo ACK durável9251 ainda não foram observados nessa amostra;
+não se declara indicador verde ou recuperação física completa a partir do
+boot. Não é fechamento de gate de render/flash/soak.
+
+Captura110s concluída, COM8 liberada; nenhum marcador fatal/watchdog na
+whitelist. Build/flash/boot e testes de política aprovados; renovação real
+de cotação permanece pendente do intervalo normal, sem alterar sua idade.
+
+### 2026-10-26 — Relato de falhas intermitentes no assistente: investigação
+
+O responsável relatou falhas em algumas tentativas; solicitado informar
+se ocorrem antes de Ouvindo, durante escuta ou na resposta, com reprodução.
+Captura passiva150s sem reset/flash em
+`firmware/build/btc-recovery-20261026/assistant-intermittent-sanitized.log`
+na imagem P4 SHA-256 `de619895d3bf87ff52c3de7daf5ef59c81d628b302607cf79dae4b66201c4765`.
+Não houve admissão/sessão Xiaozhi nesse intervalo; sem marcador fatal,
+agenda ready1/4itens/linked1/pending0, interno171431B/maior96256B ao final.
+COM8 liberada. Isso não reproduz nem resolve a falha relatada.
+
+Revisão encontrou tentativa anterior em
+`firmware/build/xiaozhi-circle-20261026/btc-diagnostic-sanitized.log`:
+hello/codec aos3,8s e timeout aos33,8s, down_drop0/up_drop0,
+internal_min126287B/worker4180B. O limite local de30s de escuta é compatível
+com esse tempo; não há eventos STT/TTS na captura para atribuir a causa ou
+relacionar a tentativa ao sintoma atual. Não se muda timeout/classificação
+sem reproduzir e identificar a etapa.
+
+Na investigação inicial, o coletor foi ajustado para nomes desconhecidos
+com espaço (UNKNOWN ERROR). A leitura integral do IDF depois esclareceu:
+com CONFIG_ESP_ERR_TO_NAME_LOOKUP ativo nesta placa, o nome é ERROR, que
+já era aceito pelo regex antigo. Portanto a atribuição inicial de perda por
+espaço não se confirmou para essa configuração. A whitelist restrita foi
+corrigida para aceitar ERROR e UNKNOWN ERROR, além de ESP_. Nomes genéricos
+continuam ambíguos entre códigos customizados; a ADR-120 acrescenta código
+numérico. Conferidos os dois formatos com exemplos de término/conclusão,
+sem dados privados. A mudança do coletor não exigiu flash.
+
+### 2026-10-26 — Xiaozhi: progresso de áudio, silêncio e diagnóstico de etapas (ADR-120)
+
+O responsável esclareceu falhas no início, na conversa e no final após
+silêncio. A captura passiva adicional180s em
+`firmware/build/btc-recovery-20261026/assistant-multistage-sanitized.log`
+também não recebeu nova sessão; não houve reprodução física dos episódios.
+A revisão encontrou defeitos determinísticos corrigidos e testados:
+
+- Áudio completo aceito agora atualiza progresso do servidor; não só texto.
+- Escuta após resposta atingindo30s por ruído encerra idle normal; primeira
+  escuta sem transcrição recebe NO_SPEECH, com nova tentativa explícita.
+- Conexão/hello, ausência de progresso e drenagem têm códigos distintos.
+- Queda inesperada não vira sucesso por já ter havido hello; CLOSED normal
+  permanece normal. Retentativa de cache continua única e pré-hello.
+
+Diagnóstico agrega estado/código numérico/duração/rx_gap/contagens STT-TTS,
+stop e códigos de transporte. Sem conteúdo, token, URL ou identidade.
+Mantidos limites90s/45s/30s/20s, worker TLS único, codec/quarentena/leases,
+microfone RX e fila de áudio. Sem mudança de dependência/Kconfig/partição.
+
+Base Git `39bc1703440279213f0b1c6fde58310ff8b3153f`, alterações anteriores
+preservadas, sem commit isolado. Build limpo
+`tools/run_spotify_remote.ps1 -BuildDirectory D:/Projetos/NP2/firmware/build/xiaozhi-sessionfix-20261026`,
+incremental final de classificação de desconexão. IDF5.5.4/esp32p4, flags
+experimentais OFF; CONFIG_ idêntica à btc-recovery. BSP3.0.1/LVGL9.5.0/
+adapter0.6.4, RGB565/180°/3FB/TRIPLE_PARTIAL preservados. Sem warnings no
+build final; bin3826800B/0x3a6470 (54% livre no slot8MiB). Placement PASS:
+internos68736B (+8B), externa539200B, s_ui17464B em PSRAM.
+
+SHA-256:
+
+- App P4: `ab7972cfcd34ca588e0700a7721bb43a91f3671f5134c03ca2be645cb681bfb3`.
+- ELF: `ae7fb4702ac40cf07a943f5260826eacd270cb5dc9c3de5e244fcb21c2627054`.
+- sdkconfig: `f34b624869866cf0b9c4d091e2f2bc311cd684aaa292cf3210edb6637612b1c3`.
+- Tabela: `66388633fba5299add799fb294c2167b9c6fb690e0cc2437571176525633bb23`.
+
+Host PASS: serviço real com relógio/transporte substituídos e sete cenários
+novos (ruído inicial, ruído pós-resposta,50s de áudio, servidor parado,
+close normal, queda inesperada, drenagem travada), hello ausente e uma
+retentativa pré-hello. Nenhum replay após sessão iniciada. Passaram RX
+parcial/timeout, protocolo/resampler, UI real LVGL com arraste/toque e100
+ciclos, quota/scheduler/admissão/storage CoinGecko e memory placement.
+Simulação não é teste de qualidade sonora nem reprodução física.
+
+Gravação pelo helper validado em COM8/USB303A:1001/serial8F42, P4v1.3/
+flash e PSRAM32MiB: tabela instalada igual, seleção OTA CRC válida,
+slot0/0x20000; app3826800B em22,1s/460800/DIO80MHz/32MB. Hash de transporte
+e verify_flash PASS; checked-flash.json flashed/verified=true. Sem escrita
+de bootloader/tabela/otadata/NVS/storage/C6/eFuses pelo helper. C6 não
+regravado, hash instalado desconhecido.
+
+Captura `tools/capture_agenda_diagnostics.py --port COM8 --reset --seconds
+180 --output firmware/build/xiaozhi-sessionfix-20261026/boot-and-voice-sanitized.log`.
+Boot: PSRAM33554432B, microSD/catálogo9, agenda4itens/ready1/linked1,
+microfone ESP_OK3,5s; brilho71/volume67/fotos63 restaurados. Desconexões
+Wi-Fi iniciais2/205 e IP23,7s, como falhas transitórias já vistas antes;
+não se atribuem à revisão de voz. Aos28,4s CoinGecko manteve9253/10000
+e armou retry1200s: contador preservado; não é prova de cotação nova.
+Solicitado reteste de pergunta/resposta/silêncio e nova abertura. Aceite
+físico da intermitência permanece pendente, sem declaração de release.
+
+**Reteste físico ADR-120 (26/10/2026):** à solicitação de pergunta, resposta,
+silêncio e nova abertura, o responsável respondeu “agora foi normal”. Na
+captura, admissão47,6s/HTTP20050,8s, microfone51,0s, WSS53,0s e hello/codec
+prontos53,8s; escuta4, processamento5/resposta6 aos58,4s e nova escuta4 aos
+65,7s. Houve picos acima do limiar de atividade durante a espera, como no
+cenário de ruído coberto no teste. Aos95,7s: state4/code486 (IDLE),
+elapsed42714ms/rx_gap30691ms/stt1/tts1; conclusão96,5s ESP_OK/code0,
+greeted1/codec_stopped1, codec stack15352B/worker4116B. Isso demonstra na
+placa o encerramento pós-resposta sem timeout genérico nessa tentativa.
+Não atribui todos os episódios anteriores a essa causa nem prova ausência
+de intermitência futura.
+
+Google retomou depois da voz: HTTP200/integridade1/min_internal114623B,
+agenda ready1/linked1/4itens/pending0; interno169563B/maior73728B/
+PSRAM13341244B/CPU4% aos152s de uptime. A captura em execução antes da
+última correção de whitelist não preservou a linha textual de término com
+nome ERROR: os contadores down_drop/up_drop dessa tentativa não estão
+registrados, embora código numérico e conclusão estejam. Não se infere
+zero perdas pela ausência dessa linha.
+
+Captura180s concluída e COM8 liberada; nenhum marcador fatal/watchdog na
+whitelist. Build/flash verificados, testes host aprovados e reteste básico
+aceito. Falhas iniciais intermitentes ainda não reproduzidas nesta revisão.
+
+### 2026-11-02 — Tela apagada: diagnóstico passivo e reinício autorizado do P4
+
+Responsável relatou reinícios/tela apagada e confirmou que estava apagada.
+Captura passiva na COM8, USB303A:1001/serial terminado8F42, 115200baud,
+DTR/RTS false, durante95s: zero bytes recebidos. Isso não distingue parada
+anterior de boot, travamento, problema de alimentação ou console inativo.
+Não houve reset espontâneo observável nessa janela. O responsável autorizou
+reiniciar somenteP4 (resposta “pode”), sem gravação de firmware.
+
+Executado coletor local/ignorado
+`firmware/build/display-diagnostic-20261102/capture_reset.py` pelo Python
+IDF5.5.4. Valida identidade USB antes de abrirCOM8 e chama
+`esptool.reset.HardReset(connection, uses_usb=True).reset()` uma vez.
+Captura80,2s/17762bytes/67registros selecionados; logs, script e resumo
+ficam no mesmo diretório ignorado. Nenhum dump de memória ou payload
+privado foi exportado. COM8 fechada ao terminar.
+
+Boot: `rst:0x17 (CHIP_USB_UART_RESET)` corresponde ao reset solicitado;
+não prova a causa do episódio anterior. P4v1.3, flash32MiB, tabela NP2 com
+`ota_0`0x20000/8MiB e `ota_1`0x820000/8MiB, slot0 VALID (`state=2`).
+PSRAM32MiB/memory test OK; app `np2_p4`, `39bc170-dirty`, compilada
+26/10/2026 19:22:17, ELF prefixo`ae7fb4702`, IDF5.5.4-dirty. Identificação
+compatível com a campanha xiaozhi-sessionfix-20261026. Hashes dos artefatos
+locais novamente calculados: app
+`ab7972cfcd34ca588e0700a7721bb43a91f3671f5134c03ca2be645cb681bfb3`, ELF
+`ae7fb4702ac40cf07a943f5260826eacd270cb5dc9c3de5e244fcb21c2627054`.
+Não houve releitura/hash completo da flash instalada nesta sessão.
+HEAD`39bc1703440279213f0b1c6fde58310ff8b3153f`; árvore com mudanças anteriores
+preservadas. BOM/lote não reidentificados; C6 não alterado, versão/hash
+instalados não verificados nesta captura.
+
+GT911 e pool LVGL prontos1,9s; log RGB565/180°/triple-partial/3FB aos1,9s;
+serviços locais prontos5,2s e controles restaurados brilho71/volume67.
+Hosted link ativo5,1s/IP9,5s. Uptime33s/63s: CPU3%, interno169799/170039B,
+maior bloco96256B e PSRAM13340732B. Sem novo marcador de boot, panic,
+assert ou watchdog nos80,2s. Responsável confirmou “Voltou a mostrar a
+interface”. Recuperação visual por reinício confirmada; não é correção
+de causa raiz nem gate de estabilidade/soak.
+
+Revisão do histórico separou dois incidentes: incompatibilidade de layout
+restaurada em25/10 e watchdog LVGL em26/10. Os endereços daquele watchdog
+foram novamente resolvidos offline no ELF reflash-20261025: tlsf_fls,
+mapping_search, tlsf_ffs, search_suitable_block e block_locate_free.
+Isso confirma o caminho histórico de alocação, não corrupção, falta de RAM
+ou repetição no incidente atual. No sdkconfig da imagem identificada,
+auto-suspend está OFF, trêsFB mantidos, TWDT panic OFF e coredump NONE.
+O supervisor OTA só acompanha PENDING_VERIFY; o slot atual está VALID.
+Não há dump persistido para reconstruir a falha anterior ao reset.
+
+Conclusão: display e boot voltaram a funcionar sem reflash; a falha antiga
+de layout não se apresentou neste boot. Causa dos reinícios/apagamento
+relatados permanece não determinada. Próxima evidência necessária é captura
+contínua do episódio com motivo de reset/task/PC, ou instrumentação limitada
+aprovada pelo fluxo de build/flash. Nenhum firmware, Kconfig, partição, C6,
+credencial ou eFuse foi gravado nesta investigação.
+
 ### 2026-11-04 — ensaio de decoders H.264 para a Tapo C200 (ADR-121)
 
 Placa: mesma unidade Waveshare P4 v1.3, COM8, serial terminado 8F42, PSRAM 32 MiB,

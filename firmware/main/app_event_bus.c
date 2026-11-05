@@ -25,6 +25,7 @@ typedef struct {
         uint32_t notification_id;
         agenda_command_t agenda;
         spotify_remote_command_t spotify;
+        xiaozhi_command_t xiaozhi;
         uint8_t home_widget;
         char onvif_address[16];
         struct { char device_id[32]; uint8_t channel; bool enabled; } sonoff;
@@ -42,6 +43,9 @@ _Static_assert(sizeof(app_queued_event_t) <= 128U, "event queue payload grew une
 static QueueHandle_t s_queue;
 static portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
 static app_event_bus_status_t s_status;
+/* Reserved coalesced intents: STOP survives saturation of the normal queue
+ * and supersedes an unconsumed START. app_loop remains the only reducer. */
+static bool s_xiaozhi_start, s_xiaozhi_stop, s_xiaozhi_interrupt;
 static NP2_PSRAM_BSS app_snapshot_slot_t s_snapshot_slots[APP_EVENT_BUS_SNAPSHOT_SLOTS];
 
 esp_err_t app_event_bus_start(void)
@@ -112,6 +116,8 @@ esp_err_t app_event_bus_post(const app_event_t *event)
     case APP_EVENT_SPOTIFY_REMOTE:
         queued.payload.spotify = event->spotify_command;
         break;
+    case APP_EVENT_XIAOZHI:
+        return app_event_bus_post_xiaozhi(event->xiaozhi_command.action);
     case APP_EVENT_AGENDA_COMMAND:
         queued.payload.agenda = event->agenda_command;
         break;
@@ -251,6 +257,17 @@ esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms)
     if (out_event == NULL || s_queue == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    portENTER_CRITICAL(&s_status_lock);
+    const bool voice_pending = s_xiaozhi_stop || s_xiaozhi_start || s_xiaozhi_interrupt;
+    if (voice_pending) {
+        memset(out_event, 0, sizeof(*out_event));
+        out_event->type = APP_EVENT_XIAOZHI;
+        if (s_xiaozhi_stop) { out_event->xiaozhi_command.action = XIAOZHI_STOP; s_xiaozhi_stop = false; }
+        else if (s_xiaozhi_start) { out_event->xiaozhi_command.action = XIAOZHI_START; s_xiaozhi_start = false; }
+        else { out_event->xiaozhi_command.action = XIAOZHI_INTERRUPT; s_xiaozhi_interrupt = false; }
+    }
+    portEXIT_CRITICAL(&s_status_lock);
+    if (voice_pending) return ESP_OK;
     app_queued_event_t queued = {0};
     if (xQueueReceive(s_queue, &queued, pdMS_TO_TICKS(timeout_ms)) != pdPASS)
         return ESP_ERR_TIMEOUT;
@@ -293,6 +310,9 @@ esp_err_t app_event_bus_receive(app_event_t *out_event, uint32_t timeout_ms)
         out_event->home_widget = queued.payload.home_widget; break;
     case APP_EVENT_SPOTIFY_REMOTE:
         out_event->spotify_command = queued.payload.spotify;
+        break;
+    case APP_EVENT_XIAOZHI:
+        out_event->xiaozhi_command = queued.payload.xiaozhi;
         break;
     case APP_EVENT_AGENDA_COMMAND:
         out_event->agenda_command = queued.payload.agenda;
@@ -345,4 +365,19 @@ esp_err_t app_event_bus_post_home_widget(uint8_t widget)
     if (widget > 2U || s_queue == NULL) return ESP_ERR_INVALID_ARG;
     app_queued_event_t e = {.type=APP_EVENT_HOME_WIDGET}; e.payload.home_widget=widget;
     return enqueue_event(&e);
+}
+
+esp_err_t app_event_bus_post_xiaozhi(xiaozhi_action_t action)
+{
+    if ((unsigned)action > XIAOZHI_INTERRUPT) return ESP_ERR_INVALID_ARG;
+    if (s_queue == NULL) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&s_status_lock);
+    const bool accepted = action == XIAOZHI_STOP || !s_xiaozhi_stop;
+    if (action == XIAOZHI_STOP) {
+        s_xiaozhi_stop = true; s_xiaozhi_start = s_xiaozhi_interrupt = false;
+    } else if (accepted && action == XIAOZHI_START) s_xiaozhi_start = true;
+    else if (accepted) s_xiaozhi_interrupt = true;
+    if (accepted) ++s_status.posted_count; else ++s_status.dropped_count;
+    portEXIT_CRITICAL(&s_status_lock);
+    return accepted ? ESP_OK : ESP_ERR_TIMEOUT;
 }

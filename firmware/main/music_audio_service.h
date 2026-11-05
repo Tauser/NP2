@@ -12,6 +12,11 @@ typedef struct {
 } music_audio_status_t;
 /* Requests only. No codec/storage I/O. Begin/stop invalidate old producers. */
 uint32_t music_audio_begin(void);
+/* Exclusive voice lease. Never steals an active music producer. Legacy stop
+ * revokes the lease; a stale voice release cannot stop a newer producer. */
+esp_err_t music_audio_acquire_voice(uint32_t *generation);
+uint32_t music_audio_flush_voice(uint32_t generation);
+void music_audio_release_voice(uint32_t generation);
 void music_audio_stop(void);
 void music_audio_pause(bool paused);
 esp_err_t music_audio_set_gain(uint8_t percent);

@@ -69,7 +69,8 @@ int main(void)
     assert(memcmp(&proposal,&read,sizeof(read))==0);
     assert(write_coingecko_quota((const uint8_t *)&proposal,sizeof(proposal))==ESP_ERR_INVALID_STATE);
     assert(coingecko_quota_init(&quota,&read));
-    assert(coingecko_quota_prepare(&quota,202610U,read.restart_after_s,1LL,&proposal)==COINGECKO_QUOTA_RESERVE);
+    assert(coingecko_quota_prepare(&quota,202610U,read.restart_after_s,1LL,&proposal)==COINGECKO_QUOTA_WAIT);
+    assert(coingecko_quota_prepare(&quota,202610U,read.restart_after_s,1200000001LL,&proposal)==COINGECKO_QUOTA_RESERVE);
     corrupt_verify=true;
     assert(write_coingecko_quota((const uint8_t *)&proposal,sizeof(proposal))==ESP_ERR_INVALID_CRC);
     assert(flash_coordinator_get_coingecko_quota(&read)==ESP_ERR_INVALID_CRC);

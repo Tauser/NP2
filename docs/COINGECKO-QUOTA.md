@@ -8,12 +8,12 @@ Política solicitada pelo responsável em 07/10/2026, registrada no ADR-092.
 | A partir de 8.000/10.000 | 20 min |
 | Orçamento esgotado, sem reservas em RAM | Bloqueado até o próximo mês UTC confiável |
 
-Outubro/2026 parte de 8.010 créditos, conforme o dashboard fornecido. Na
-primeira consulta, o firmware reserva oito tentativas e confirma 8.018 no
-journal local; o dashboard da conta cobra apenas o request efetivamente
-respondido com HTTP 200. O contador local inclui falhas e reservas ainda
-não utilizadas, para evitar subcontagem em timeout/corte de energia. Pode
-entrar na política de 80% até sete consultas antes do limiar real.
+Atualizada em 26/10/2026 pelo ADR-119: a reserva durável passa a ser de
+uma tentativa por consulta. Outubro/2026 mantém o piso histórico de 8.010
+créditos fornecido pelo responsável. O contador instalado é preservado;
+créditos antigos reservados não são devolvidos. O contador local inclui
+falhas e tentativas reservadas que não chegaram ao HTTP, portanto não é
+uma leitura do consumo real no dashboard da conta.
 
 O limite passa pelo único helper autenticado, portanto refresh automático,
 manutenção e reconexão não têm uma rota de HTTP que ignore a admissão.
@@ -28,13 +28,23 @@ HTTPS da CoinGecko. Não há escrita por toque, chave/URL em logs ou contador
 de consumo no AppState. A reserva reutiliza o buffer de submissão existente,
 sem adicionar outra cópia de 4 KiB à pilha do worker de rede.
 
-Oito tentativas separam gravações em pelo menos 40 min de funcionamento
-contínuo no modo normal e 160 min no reduzido. No reboot, reservas pendentes
-são perdidas sem devolver créditos; o mercado aguarda o final da janela
-registrada, que pode estar até 40/160 min no futuro. O contador não volta a
-zero no reboot, na reconexão ou ao atrasar o relógio. Corrupção, NVS
-indisponível, falha de commit/verify ou hora não confiável impedem HTTP da
-CoinGecko. Outros providers permanecem ativos.
+Antes de cada tentativa, o FlashCoordinator confirma e verifica um crédito
+no mesmo blob de 24 bytes. A frequência máxima de confirmações passa a
+288/dia no modo de 5min ou 72/dia no modo de 20min, sujeita ao gate de render
+e ao orçamento mensal. Falha de escrita/ACK/readback impede o HTTP.
+
+Ao carregar um registro persistido, a primeira admissão com hora confiável
+arma um intervalo completo no relógio monotônico (5 ou 20min). A espera
+vale também depois de ficar desligado ou de uma releitura após ACK incerto.
+Depois do intervalo, uma nova reserva usa um crédito, preservando todo o
+consumo anterior. A janela UTC antiga de oito consultas não prolonga mais
+a espera para 40/160min. Reiniciar durante a recuperação rearma o intervalo,
+sem reservar mais créditos antes de ele vencer. Mês regressivo, CRC inválido,
+NVS indisponível ou hora não confiável continuam impedindo HTTP.
+
+O formato/key/magic/CRC não mudam. Um firmware anterior pode ler os registros
+novos de incremento unitário, mas volta à política de lotes ao reservar.
+A implementação atual não aceita novos incrementos maiores que um crédito.
 
 Não há sincronização com consumo de outros clientes usando a mesma chave,
 nem com consultas feitas entre o screenshot e a instalação desta política.
@@ -59,12 +69,12 @@ transição de 80%, intervalos normais/reduzidos, saldo parcial final,
 reinício, mês regressivo, virada de ano, CRC e limites numéricos.
 Os testes de integração compilam as funções reais de admissão/HTTP e
 armazenamento extraídas dos serviços: não enviar HTTP antes do ACK durável,
-recusar consulta manual antecipada, contar falha, não reutilizar bloco após
+recusar consulta manual antecipada, contar falha, não reutilizar crédito após
 reboot/ACK incerto, falhas de set/commit/verify e geração obsoleta.
 Também passaram o teste do CRC/cache e a regressão do EventBus com 8.000
 snapshots concorrentes.
 
-## Build e bancada
+## Build e bancada histórica — política de lotes (07/10/2026)
 
 Build limpo concluído com ESP-IDF 5.5.4/esp32p4, base Git
 `baf64c4` mais as alterações locais desta entrega. App `0x34ca40`
@@ -117,3 +127,13 @@ ativo ao final do corpo; esses pontos não medem o pior pico do handshake.
 Não se considera encerrado G2/G3/G4/G6 por testes host ou boot isolado;
 cortes de energia reais, intervalo completo de 20 min, rollover real,
 filmagem de render e soak ainda exigem observação específica.
+
+## Atualização de recuperação — 26/10/2026 (ADR-119)
+
+O diagnóstico em bancada confirmou `deferred reason=cadence`,
+`reserved=9250/10000 interval=1200s`; havia saldo, mas a janela antiga
+bloqueava a renovação e o cache ficava amarelo após 30min. Evidência e
+artefatos da nova imagem em BRINGUP-EVIDENCE.md. Testes host agora cobrem
+registro legado de 160min preservado em9250, liberação de uma reserva9251
+após20min monotônicos, reboots repetidos, UTC adiantado/regressivo, rollover
+na espera, releitura com uptime alto e budgets mensais por tentativa.

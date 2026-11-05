@@ -328,6 +328,16 @@ int main(void)
     test_stale_handle_and_generation_wrap();
     test_latest_delivery_retry();
     test_concurrent_ownership();
+    /* STOP survives a saturated queue and supersedes an older START. */
+    for(unsigned i=0;i<APP_EVENT_BUS_QUEUE_LENGTH;++i) {
+        app_event_t event={.type=APP_EVENT_REFRESH_PLATFORM};assert(app_event_bus_post(&event)==ESP_OK);
+    }
+    assert(app_event_bus_post_xiaozhi(XIAOZHI_START)==ESP_OK);
+    assert(app_event_bus_post_xiaozhi(XIAOZHI_STOP)==ESP_OK);
+    assert(app_event_bus_post_xiaozhi(XIAOZHI_START)==ESP_ERR_TIMEOUT);
+    app_event_t stop=receive();assert(stop.type==APP_EVENT_XIAOZHI && stop.xiaozhi_command.action==XIAOZHI_STOP);
+    for(unsigned i=0;i<APP_EVENT_BUS_QUEUE_LENGTH;++i)assert(receive().type==APP_EVENT_REFRESH_PLATFORM);
+    expect_empty();
     const size_t current = APP_EVENT_BUS_QUEUE_LENGTH * sizeof(app_queued_event_t) + sizeof(s_snapshot_slots);
     const size_t previous = APP_EVENT_BUS_QUEUE_LENGTH * sizeof(app_event_t);
     assert(current < previous && s_queue->item_size == sizeof(app_queued_event_t));

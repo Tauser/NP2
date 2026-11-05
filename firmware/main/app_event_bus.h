@@ -9,6 +9,7 @@
 #include "pomodoro_service.h"
 #include "agenda_service.h"
 #include "spotify_remote.h"
+#include "xiaozhi_service.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,7 @@ typedef enum {
     APP_EVENT_AGENDA_SYNC,
     APP_EVENT_SPOTIFY_REMOTE,
     APP_EVENT_HOME_WIDGET,
+    APP_EVENT_XIAOZHI,
 } app_event_type_t;
 
 typedef struct {
@@ -42,6 +44,7 @@ typedef struct {
     uint32_t notification_id;
     agenda_command_t agenda_command;
     spotify_remote_command_t spotify_command;
+    xiaozhi_command_t xiaozhi_command;
     uint8_t home_widget;
     char onvif_address[16];
     char sonoff_device_id[32];
@@ -81,3 +84,4 @@ void app_event_bus_get_status(app_event_bus_status_t *out_status);
 esp_err_t app_event_bus_post_spotify(const spotify_remote_command_t *command);
 
 esp_err_t app_event_bus_post_home_widget(uint8_t widget);
+esp_err_t app_event_bus_post_xiaozhi(xiaozhi_action_t action);

@@ -24,6 +24,7 @@ uint32_t spotify_remote_credentials_version(void) { return vault_version; }
 esp_err_t spotify_remote_credentials_copy_private(spotify_remote_credentials_t *out) { *out=vault; return ESP_OK; }
 esp_err_t spotify_remote_credentials_rotate_private(const spotify_remote_credentials_t *in) { vault=*in; ++vault_version; return ESP_OK; }
 esp_err_t network_validation_service_request_spotify_remote(void) { ++queued_count; return ESP_OK; }
+esp_err_t network_validation_service_request_spotify_interactive(void) { ++queued_count; return ESP_OK; }
 int64_t esp_timer_get_time(void) { return clock_us; }
 void *heap_caps_calloc(size_t n,size_t size,unsigned caps) { assert(caps & MALLOC_CAP_INTERNAL); ++allocations; return calloc(n,size); }
 void heap_caps_free(void *p) { if(p) { assert(allocations>0); --allocations; } free(p); }

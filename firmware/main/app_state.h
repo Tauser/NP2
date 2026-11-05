@@ -11,6 +11,7 @@
 #include "system_resource_model.h"
 #include "agenda_service.h"
 #include "spotify_remote.h"
+#include "xiaozhi_service.h"
 #include "sound_melody.h"
 #include "photo_frame_model.h"
 
@@ -266,3 +267,4 @@ void app_state_get_health(app_state_health_t *out_health);
 #endif
 
 void app_state_get_spotify_projection(spotify_remote_projection_t *out);
+void app_state_get_xiaozhi_projection(xiaozhi_projection_t *out);
